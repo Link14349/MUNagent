@@ -4,18 +4,18 @@
 >
 > 全局完成定义(DoD): 代码有类型标注与测试 / 相关设计文档已同步 / 不违反AGENTS.md不变量.
 
-## P0 - 项目脚手架
+## P0 - 项目脚手架 ✅(2026-07-12)
 
 **目标**: 空仓库 → 可安装、可配置、可调通一次LLM的骨架.
 
-- [ ] pyproject.toml: 包名munagent, Python 3.11+, 依赖(fastapi, uvicorn, pydantic v2, pydantic-settings, httpx, pyyaml, pytest, pytest-asyncio)
-- [ ] 按模块图建包骨架, 全部空模块+docstring (01#代码模块划分)
-- [ ] 配置系统: pydantic-settings三层加载(env > ~/.munagent/config.yaml > 默认), chmod 600写入 (08§1-2)
-- [ ] LLM调用层: OpenAI兼容异步客户端, provider档案+角色路由, thinking按角色/task开关(05§5), 重试/超时, usage记录接口(含cache_hit/miss_tokens/thinking_enabled字段) (05§5, 08§2, 11§5)
-- [ ] key脱敏工具函数: 日志/异常文本过滤器, 单元测试 (08§3)
-- [ ] CLI入口: `munagent config-test`(provider连通性), `munagent version`
-- [ ] pytest骨架 + LLM mock fixture (AGENTS.md测试要求)
-- [ ] .gitignore补全: config.local.yaml, .env, *.db, debug_prompts/
+- [x] pyproject.toml: 包名munagent, Python 3.11+, 依赖(fastapi, uvicorn, pydantic v2, pydantic-settings, httpx, pyyaml, pytest, pytest-asyncio)
+- [x] 按模块图建包骨架, 全部空模块+docstring (01#代码模块划分)
+- [x] 配置系统: pydantic-settings三层加载(env > ~/.munagent/config.yaml > 默认), chmod 600写入 (08§1-2)
+- [x] LLM调用层: OpenAI兼容异步客户端, provider档案+角色路由, thinking按角色/task开关(05§5), 重试/超时, usage记录接口(含cache_hit/miss_tokens/thinking_enabled字段) (05§5, 08§2, 11§5)
+- [x] key脱敏工具函数: 日志/异常文本过滤器, 单元测试 (08§3)
+- [x] CLI入口: `munagent config-test`(provider连通性), `munagent version`
+- [x] pytest骨架 + LLM mock fixture (AGENTS.md测试要求)
+- [x] .gitignore补全: config.local.yaml, .env, *.db, debug_prompts/
 
 **验收**: `pip install -e .`后`munagent config-test`对真实DeepSeek key返回成功; 全部测试绿.
 

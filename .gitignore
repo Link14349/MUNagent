@@ -219,3 +219,8 @@ __marimo__/
 
 # macOS
 .DS_Store
+
+# MUNagent 项目本地(见 plan.md P0 / AGENTS.md)
+config.local.yaml
+*.db
+debug_prompts/
