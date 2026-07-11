@@ -1,8 +1,10 @@
-"""单会场前场状态机(P1 最小版). 见 04§3.
+"""单会场前场状态机(完整版). 见 04§3.
 
-P1 仅: Opening → ModeratedCaucus → Adjourned
-- 点名 + 保底轮询(K=会场人数轮无人发言则强制点名)
-- 每回合按 clock_rate.per_mod_speech 推进故事时钟
+状态: Opening / ModeratedCaucus / UnmoderatedCaucus / Voting / Suspended / Adjourned
+- Mod: 点名 + 保底轮询 + 预算
+- Unmod: 小轮 + 屏障
+- Voting: 子流程(冻结前场, 完毕返回原阶段)
+- 转移经校验, 非法转移拒绝
 """
 
 from __future__ import annotations
@@ -10,7 +12,24 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from typing import Literal
 
-Phase = Literal["Opening", "ModeratedCaucus", "UnmoderatedCaucus", "Suspended", "Adjourned"]
+Phase = Literal[
+    "Opening",
+    "ModeratedCaucus",
+    "UnmoderatedCaucus",
+    "Voting",
+    "Suspended",
+    "Adjourned",
+]
+
+# 合法转移表(04§3)
+_TRANSITIONS: dict[Phase, set[Phase]] = {
+    "Opening": {"ModeratedCaucus"},
+    "ModeratedCaucus": {"UnmoderatedCaucus", "Voting", "Suspended", "Adjourned"},
+    "UnmoderatedCaucus": {"ModeratedCaucus", "Voting", "Suspended", "Adjourned"},
+    "Voting": {"ModeratedCaucus", "UnmoderatedCaucus"},  # 返回被打断的阶段
+    "Suspended": {"ModeratedCaucus", "UnmoderatedCaucus"},  # 归还后恢复
+    "Adjourned": set(),
+}
 
 
 def parse_clock_delta(s: str) -> timedelta:
@@ -25,8 +44,18 @@ def parse_clock_delta(s: str) -> timedelta:
     return timedelta(minutes=int(s))
 
 
+class GroupState:
+    """Unmod 分组状态."""
+
+    def __init__(self, id: str, members: list[str], closed: bool = False, founder: str = "") -> None:
+        self.id = id
+        self.members = list(members)
+        self.closed = closed
+        self.founder = founder
+
+
 class VenueStateMachine:
-    """单会场状态机(P1 最小版)."""
+    """单会场前场状态机(完整版). 见 04§3."""
 
     def __init__(
         self,
@@ -34,33 +63,74 @@ class VenueStateMachine:
         seat_ids: list[str],
         initial_phase: Phase,
         start_story_time: str,
+        *,
         per_mod_speech: str = "5m",
+        per_unmod_round: str = "15m",
         max_speeches: int = 12,
+        unmod_rounds: int = 4,
+        presiding_seat: str | None = None,
     ) -> None:
         self.venue_id = venue_id
         self.seat_ids = seat_ids
         self.phase: Phase = initial_phase
-        self.story_time = start_story_time  # ISO UTC 字符串
+        self.presiding_seat = presiding_seat
+        self.story_time = start_story_time
         self._story_dt = datetime.fromisoformat(start_story_time)
         self.per_mod_speech_delta = parse_clock_delta(per_mod_speech)
+        self.per_unmod_round_delta = parse_clock_delta(per_unmod_round)
         self.max_speeches = max_speeches
+        self.unmod_rounds = unmod_rounds
+
+        # Mod 阶段计数
         self.mod_speech_count = 0
-        # 保底轮询: 记录连续未发言席位
         self.spoken_this_phase: list[str] = []
         self.unspoken_count = 0
 
-    def advance_clock(self) -> str:
-        """按 per_mod_speech 推进故事时钟, 返回新时间(UTC ISO)."""
-        self._story_dt = self._story_dt + self.per_mod_speech_delta
-        self.story_time = self._story_dt.isoformat()
-        return self.story_time
+        # Unmod 阶段状态
+        self.groups: list[GroupState] = []
+        self.unmod_round_count = 0
 
-    def transition(self, to: Phase) -> None:
+        # Voting 子流程状态
+        self.interrupted_phase: Phase | None = None  # Voting 结束后返回
+        self.active_vote_directive_id: str | None = None
+        self.vote_casts: dict[str, str] = {}  # seat -> aye|nay|abstain
+        self.vote_order: list[str] = []  # 投票顺序
+        self.vote_index = 0  # 当前等谁投
+
+    def can_transition(self, to: Phase) -> bool:
+        return to in _TRANSITIONS.get(self.phase, set())
+
+    def transition(self, to: Phase, *, interrupted_from: Phase | None = None) -> None:
+        if not self.can_transition(to):
+            raise ValueError(f"非法状态转移: {self.phase} → {to}")
+        if to == "Voting":
+            self.interrupted_phase = interrupted_from or self.phase
         self.phase = to
         if to == "ModeratedCaucus":
             self.mod_speech_count = 0
             self.spoken_this_phase = []
+            self.unspoken_count = 0
+        elif to == "UnmoderatedCaucus":
+            self.unmod_round_count = 0
+            self.groups = []
+        elif to == "Voting":
+            self.vote_casts = {}
+            self.vote_index = 0
+        # Voting 结束后返回时, 恢复计数器不变(继续被打断的阶段)
 
+    def advance_clock(self, *, unmod: bool = False) -> str:
+        delta = self.per_unmod_round_delta if unmod else self.per_mod_speech_delta
+        self._story_dt = self._story_dt + delta
+        self.story_time = self._story_dt.isoformat()
+        return self.story_time
+
+    def advance_clock_to(self, target: str) -> str:
+        """显式跳时(clock_advance 事件用)."""
+        self._story_dt = datetime.fromisoformat(target)
+        self.story_time = self._story_dt.isoformat()
+        return self.story_time
+
+    # --- Mod 阶段 ---
     def record_speech(self, seat_id: str) -> None:
         self.mod_speech_count += 1
         if seat_id not in self.spoken_this_phase:
@@ -68,12 +138,10 @@ class VenueStateMachine:
         self.unspoken_count = 0
 
     def record_no_speech(self) -> None:
-        """连续无人发言计数+1."""
         self.unspoken_count += 1
 
     @property
     def floor_rotation_due(self) -> bool:
-        """保底轮询: 连续 K=会场人数 轮未发言则强制. 见 04§3."""
         return self.unspoken_count >= len(self.seat_ids)
 
     @property
@@ -81,10 +149,86 @@ class VenueStateMachine:
         return self.mod_speech_count >= self.max_speeches
 
     def next_for_floor_rotation(self) -> str | None:
-        """保底轮询: 选最久未发言的席位."""
         for sid in self.seat_ids:
             if sid not in self.spoken_this_phase:
                 return sid
-        # 全部发言过, 重置
         self.spoken_this_phase = []
         return self.seat_ids[0] if self.seat_ids else None
+
+    # --- Unmod 阶段 ---
+    def init_groups(self, groups: list[GroupState]) -> None:
+        self.groups = groups
+        self.unmod_round_count = 0
+
+    def next_unmod_round(self) -> int:
+        self.unmod_round_count += 1
+        return self.unmod_round_count
+
+    @property
+    def unmod_finished(self) -> bool:
+        return self.unmod_round_count >= self.unmod_rounds
+
+    # --- Voting 子流程 ---
+    def start_vote(self, directive_id: str, vote_order: list[str]) -> None:
+        self.active_vote_directive_id = directive_id
+        self.vote_order = list(vote_order)
+        self.vote_casts = {}
+        self.vote_index = 0
+
+    def next_voter(self) -> str | None:
+        if self.vote_index >= len(self.vote_order):
+            return None
+        seat = self.vote_order[self.vote_index]
+        self.vote_index += 1
+        return seat
+
+    def record_vote(self, seat: str, choice: str) -> None:
+        self.vote_casts[seat] = choice
+
+    @property
+    def voting_finished(self) -> bool:
+        return self.vote_index >= len(self.vote_order)
+
+    def tally_votes(
+        self, pass_threshold: str, veto_seats: list[str]
+    ) -> tuple[str, dict[str, int]]:
+        """计票(纯程序). 见 04§3 计票规则明细.
+
+        返回 (result, tally_dict).
+        result: passed | rejected
+        tally_dict: {aye: N, nay: N, abstain: N}
+        """
+        tally = {"aye": 0, "nay": 0, "abstain": 0}
+        for choice in self.vote_casts.values():
+            if choice in tally:
+                tally[choice] += 1
+
+        # veto 检查: veto 席位投 nay → 直接否决
+        for vseat in veto_seats:
+            if self.vote_casts.get(vseat) == "nay":
+                return "rejected", tally
+
+        voted = tally["aye"] + tally["nay"]  # 弃权不计入分母
+        if voted == 0:
+            return "rejected", tally
+
+        if pass_threshold == "majority":
+            passed = tally["aye"] * 2 > voted
+        elif pass_threshold == "two_thirds":
+            passed = tally["aye"] * 3 >= voted * 2
+        elif pass_threshold == "unanimous":
+            passed = tally["nay"] == 0
+        else:
+            passed = tally["aye"] * 2 > voted
+
+        return ("passed" if passed else "rejected"), tally
+
+    def end_vote(self) -> Phase:
+        """结束投票, 返回要恢复的阶段."""
+        result_phase = self.interrupted_phase or "ModeratedCaucus"
+        self.active_vote_directive_id = None
+        self.vote_casts = {}
+        self.vote_order = []
+        self.vote_index = 0
+        self.interrupted_phase = None
+        return result_phase
