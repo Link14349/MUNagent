@@ -1,0 +1,10 @@
+# Conda 环境定义. 创建: conda env create -f environment.yml
+# 激活: conda activate munagent
+name: munagent
+channels:
+  - conda-forge
+dependencies:
+  - python=3.12
+  - pip
+  - pip:
+      - -e ".[dev]"
