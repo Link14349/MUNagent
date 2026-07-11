@@ -31,7 +31,7 @@
 |---|---|---|
 | [01-overview.md](01-overview.md) | 项目定位、术语表、已定决策(D1~D9)、技术选型、模块划分 | 术语与约束的唯一出处 |
 | [02-scenario-design.md](02-scenario-design.md) | 设计流程S1~S8、资料检索(MinerU工具链)、场景包字段级schema、一致性检查 | 场景包格式 |
-| [03-event-model.md](03-event-model.md) | 事件schema、类型表、scope可见性规则、事件总线API、SQLite表、回放/续推 | 全系统的数据脊柱 |
+| [03-event-model.md](03-event-model.md) | 事件schema、类型表、scope可见性规则、事件总线API、SQLite表、Reducer/RuntimeState、回放/续推 | 全系统的数据脊柱 |
 | [04-state-machine.md](04-state-machine.md) | 会场形态、前场/后场双轨、状态转移表、Unmod小轮+屏障算法、闭门小组、Voting、时钟、阶段预算 | 会议如何运转 |
 | [05-agent-harness.md](05-agent-harness.md) | Agent基类循环、上下文四层组装、各Agent任务与输出schema、诚信参数注入、prompt骨架、书记摘要 | Agent如何实现 |
 | [06-directives-adjudication.md](06-directives-adjudication.md) | 指令四类型与生命周期、DM五步判定流水线、掷骰规则、时序冲突、危机笔记截获 | 行动如何裁决 |
@@ -46,11 +46,13 @@
 | 想了解… | 看 |
 |---|---|
 | 名词是什么意思 / 有哪些既定约束 | 01 |
+| stats谁能看见 | 02§3 stats.visibility |
 | 场景包某个yaml怎么写 | 02§3 |
 | 某个事件长什么样 / 谁能看见 | 03§2-4 |
 | 会议阶段怎么切 / 换组怎么结算 | 04§3 |
 | 某Agent的输入输出格式 | 05§3 |
 | 指令成败怎么判 / 骰子规则 | 06§3 |
+| 续推时状态怎么重建(RuntimeState) | 03§7 |
 | 暂停·续推·人类接管怎么实现 | 07§2-4 |
 | api key放哪 / MinerU地址配哪 | 08 |
 | 前端消息格式 | 09§2-3 |
@@ -65,3 +67,4 @@
 4. **key不进事件日志、不回传前端**(08§3);
 5. **人类与AI走同一个ActionProvider抽象**(07§4) —— 新交互点不得为人类单开分支逻辑;
 6. **prompt只从尾部生长**(11) —— 易变内容只许出现在L4任务段; 事件渲染字节级确定; 任何"从中间改prompt"的新设计都要先过缓存命中率这一关.
+7. **最小步事件缓冲提交**(D12) —— `stage`在步内缓冲, `commit_step`批量落库; 步失败`rollback_step`, 禁止孤儿事件.

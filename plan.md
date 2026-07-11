@@ -11,7 +11,7 @@
 - [ ] pyproject.toml: 包名munagent, Python 3.11+, 依赖(fastapi, uvicorn, pydantic v2, pydantic-settings, httpx, pyyaml, pytest, pytest-asyncio)
 - [ ] 按模块图建包骨架, 全部空模块+docstring (01#代码模块划分)
 - [ ] 配置系统: pydantic-settings三层加载(env > ~/.munagent/config.yaml > 默认), chmod 600写入 (08§1-2)
-- [ ] LLM调用层: OpenAI兼容异步客户端, provider档案+角色路由, 重试/超时, usage记录接口(含cache_hit/miss_tokens字段) (05§5, 08§2, 11§5)
+- [ ] LLM调用层: OpenAI兼容异步客户端, provider档案+角色路由, thinking按角色/task开关(05§5), 重试/超时, usage记录接口(含cache_hit/miss_tokens/thinking_enabled字段) (05§5, 08§2, 11§5)
 - [ ] key脱敏工具函数: 日志/异常文本过滤器, 单元测试 (08§3)
 - [ ] CLI入口: `munagent config-test`(provider连通性), `munagent version`
 - [ ] pytest骨架 + LLM mock fixture (AGENTS.md测试要求)
@@ -24,7 +24,7 @@
 **目标**: 单会场·三席位·硬编码场景, CLI跑通"点名发言→个人指令→判定→Crisis Update"闭环.
 
 - [ ] Event模型 + 六级scope + visible_to物化规则 (03§2-4)
-- [ ] EventBus: emit单写者串行化/seq全序/query(viewer)/subscribe (03§5)
+- [ ] EventBus: stage/commit_step/rollback_step单写者串行化/seq全序/query(viewer)/subscribe (03§5, 决策D12)
 - [ ] SQLite持久化: sessions/events/llm_usage三表, 事务按最小步提交 (03§6, 07§2)
 - [ ] 事件渲染器render(event): 纯函数, golden字节级测试 (11§4)
 - [ ] 可见性过滤矩阵测试: 6 scope × {代表本人/其他代表/主席团/god} (03§4)
@@ -33,9 +33,9 @@
 - [ ] ChairAgent最小版: next_speaker + broadcast_decision简化版 (05§3.2)
 - [ ] DMAgent最小版: 判定五步中的②④(LLM)+③程序掷骰(seed=hash(master_seed, directive_id), margin分档) (06§3)
 - [ ] 单会场状态机: 仅Opening→ModCaucus→Adjourned, 点名+保底轮询 (04§3)
-- [ ] 手写迷你场景包(1会场3席位, yaml), scenario.py加载+pydantic校验 (02§3)
-- [ ] CLI运行器: `munagent run <scenario> --max-steps N`, 彩色输出事件流
-- [ ] 回放脚本: `munagent replay <session> --viewpoint seat:x|god` (03§7)
+- [ ] 手写迷你场景包(1会场3席位, 虚构三人内阁危机, yaml), scenario.py加载+pydantic校验 (02§3)
+- [ ] CLI运行器: `munagent run <scenario> --max-steps N [--seed <int>]`, 彩色输出事件流
+- [ ] 回放脚本: `munagent replay <session> --viewpoint seat:x|god` (03§8)
 
 **验收**: 全AI跑≥3轮闭环; 回放按视角过滤正确; 同一master_seed两次运行掷骰结果一致.
 
@@ -55,8 +55,9 @@
 - [ ] G段拆分与预热请求; llm_usage面板数据(命中率per role) (11§2, §5-6)
 - [ ] 推演时钟: clock_rate累加/clock_advance/takes_effect_at (04§5)
 - [ ] 阶段预算+会话token熔断+单Agent连续失败暂停 (04§6, 07§5)
-- [ ] 断点续推: reducer从事件流重建全部运行时状态, 从安全点继续 (03§7, 07§2)
-- [ ] reducer确定性测试: 同一事件流重建两次状态相等
+- [ ] core/reducer.py: RuntimeState模型 + apply/reduce双接口, 引擎在线维护与续推重建共用apply (03§7)
+- [ ] 断点续推: reducer从事件流重建全部运行时状态, 从安全点继续 (03§7-8, 07§2)
+- [ ] reducer确定性测试: 同一事件流reduce两次结构级相等 + 属性测试(任意前缀reduce = 逐事件apply) (03§7)
 
 **验收**: 手写场景全AI推演30分钟不失控(预算内/无解析死循环); kill进程后续推无缝衔接; 缓存命中率在第二纪元起>60%(实测记录基线).
 
@@ -81,11 +82,11 @@
 
 - [ ] FastAPI应用骨架 + REST路由表 (09§2)
 - [ ] WS协议: subscribe(视角服务端过滤)/event推送/session_state/断线since_seq补拉 (09§3)
-- [ ] 前端脚手架(Vue3或React+Vite, 定一个不再摇摆), FastAPI静态托管
+- [ ] 前端脚手架(Vue3+Vite+TypeScript, 定稿不再摇摆), FastAPI静态托管
 - [ ] 推演大厅-观察模式: 时间线/会场标签页/席位列表/指令追踪面板/时钟与用量条 (09§1)
 - [ ] Unmod分组视图(组卡片+串门可视化) (09§1)
 - [ ] run/pause/step控制 (07§4)
-- [ ] 复盘页: seq拖动/视角切换/指令链路追溯/导出markdown (09§1, 03§7)
+- [ ] 复盘页: seq拖动/视角切换/指令链路追溯/导出markdown (09§1, 03§8)
 - [ ] 导演模式: 主席团控制台(强切阶段/注入事件/dm-only面板) + draft_review草稿审改流 (09§1, §3)
 - [ ] 玩家模式: HumanProvider经WS的action_request/submit + 超时fallback; 视角锁定 (07§4, 09§3-4)
 - [ ] 用量面板: token/费用/缓存命中率曲线per role (11§5)

@@ -25,17 +25,26 @@
 
 | 工具 | 签名 | 说明 |
 |---|---|---|
-| `web_search` | `(query, top_k=8) -> [{title,url,snippet}]` | 搜索引擎API, provider可配置 |
+| `web_search` | `(query, top_k=8) -> [{title,url,snippet}]` | 搜索API, provider可插拔, 默认Tavily(见下"搜索API选型") |
 | `fetch_page` | `(url) -> markdown` | 抓取网页正文并转markdown |
 | `download_file` | `(url) -> local_path` | 下载文件到`references/raw/`, 限制单文件大小(默认100MB)与总量 |
 | `pdf_to_markdown` | `(local_path) -> markdown` | 调用**在线MinerU服务**, 见下 |
 
 工作流: 围绕主题与切入点生成检索计划(若干query) → 搜索并筛选(相关性+来源可信度) → 网页直接抓取、PDF下载后转换 → 每份资料生成一句话摘要 → 写入`references/index.yaml` → 呈现清单给用户增删.
 
+### 搜索API选型
+`web_search`统一接口`(query, top_k) -> [{title, url, snippet}]`, provider适配器可插拔, 配置在`tools.search`(见[08-config.md](08-config.md)). 选型结论(2026-07查证):
+
+- **默认Tavily**: AI原生搜索, 返回清洗过的正文片段(部分结果可免去fetch_page), 免费1000次/月且无需信用卡. 用量估算: 一个场景的S2约20~50次搜索, 免费档完全覆盖;
+- **备选Serper.dev**: Google结果代理, 量大最便宜($0.3~1/千次), 中文搜索质量好;
+- **备选博查(Bocha)**: 国内直连、人民币计费、中文资料覆盖好——Tavily/Serper端点在国内网络不稳时的后路;
+- **不用SerpAPI**: 价格贵一个数量级, 且有Google诉讼的长期风险(2025-12);
+- key由用户自行注册填入配置, 项目不内置任何key.
+
 ### MinerU调用约定
 接口细节见[docs/tools/agent-api-pdf-to-markdown-guide.md](../tools/agent-api-pdf-to-markdown-guide.md). 本项目约定:
 
-- 服务地址从配置`tools.mineru.base_url`读取(环境变量`MUNAGENT_MINERU_URL`可覆盖), 见[08-config.md](08-config.md);
+- 服务地址从配置`tools.mineru.base_url`读取(环境变量`MUNAGENT_MINERU_URL`可覆盖), 默认`http://36.139.151.129:8282`, 见[08-config.md](08-config.md);
 - 调用前先打`/health`, 不可用则该PDF标记`convert_failed`, 不阻塞其他资料;
 - **统一走异步接口**(`POST /tasks` + 轮询), 3~5秒轮询一次, 简化逻辑且对大文件安全; 参数用文档推荐值(`backend=pipeline, parse_method=auto, lang_list=ch, return_md=true`, 其余false);
 - 并发转换限制为4个任务(服务端4卡);
@@ -68,10 +77,10 @@ author: link
 version: 1.0.0
 created: 2026-07-11
 language: zh
-start_story_time: "1962-10-16T09:00:00"
+start_story_time: "1962-10-16T09:00:00-04:00"   # 一切时间必须带时区偏移或Z, 加载归一化为UTC(见04§5)
 end_conditions:                  # 满足任一即结束, 由主席在每次Crisis Update后评估
   - type: story_time_reached
-    at: "1962-11-01T00:00:00"
+    at: "1962-11-01T00:00:00Z"
   - type: dm_judgement           # 自然语言条件, DM/主席判断
     desc: "核战争爆发, 或双方达成公开协议解除危机"
 ```
@@ -82,9 +91,12 @@ venues:
   - id: soviet_politburo
     name: 苏共中央主席团
     kind: sub                    # main | sub (临时会场运行时创建, 不写在场景包)
+    timezone: Europe/Moscow      # IANA时区名, 该会场的本地显示时区(见04§5; 内部一律UTC)
     decision_rule:
       pass_threshold: majority   # majority | two_thirds | unanimous
       veto_seats: [khrushchev]   # 可为空
+      # 计票口径(见04§3计票规则明细): 分母按"到会且投票"计, 弃权不入分母;
+      # 平票/全体弃权不通过; veto席位投nay直接否决, 弃权不构成否决; 公开唱票.
     initial_agenda: 对美国海上封锁的回应
     initial_phase: ModeratedCaucus
     seats: [khrushchev, gromyko, malinovsky]
@@ -125,7 +137,7 @@ main_arc:
   - id: u2_shot_down
     trigger:
       type: story_time           # story_time | condition | manual
-      at: "1962-10-27T10:00:00"  # type=story_time时
+      at: "1962-10-27T10:00:00-04:00"  # type=story_time时; 必须带时区偏移, 可按当地时间书写
       condition: null            # type=condition时为自然语言条件, DM在每次弧线检查时评估
     content: |
       一架U-2侦察机在古巴上空被萨姆导弹击落, 飞行员安德森少校丧生...
@@ -139,6 +151,7 @@ random_pool:                     # DM可在节奏需要时抽取
 ### stats.yaml
 ```yaml
 mode: tags                       # none | tags | numeric (决策D2: 默认tags)
+visibility: faction            # owner_only | faction | all_public; 默认faction(决策D15)
 entities:
   - id: ussr_military
     label: 苏联军事力量
@@ -146,6 +159,16 @@ entities:
     tags: { 常规力量: 强, 核力量: 强, 古巴当地防空: 中 }
     # numeric模式则为 values: { 常规力量: 85, ... }
 ```
+
+**`visibility`口径**(决定代表Agent上下文注入哪些条目, DM/主席团始终完整可见):
+
+| 值 | 席位可见范围 | 例子 |
+|---|---|---|
+| `owner_only` | 仅`owner`匹配本席位的条目 | `owner: seat:gromyko`只有葛罗米柯可见 |
+| `faction`(默认) | 本席位`public.faction`与`owner: faction:<名>`匹配的条目 + `owner: seat:<本席位>` | 苏联阵营三人共享`ussr_military`, 看不见美军条目 |
+| `all_public` | 全部entities | 各方军力对所有人公开, 像Background Guide情报 |
+
+省略`visibility`字段时按`faction`处理. 过滤在服务端`scenario.stats_for_seat(seat_id)`实现, 与`bus.query`同属视角隔离逻辑.
 
 ### references/index.yaml
 ```yaml
@@ -167,7 +190,7 @@ docs:
 | `seats/*.yaml` public | 全体 |
 | `seats/*.yaml` private/persona | 仅对应代表Agent + 主席团 |
 | `crisis_arcs.yaml` | 仅DM与主席 |
-| `stats.yaml` | DM完整可见; 各席位仅见自己owner的条目(设计可配) |
+| `stats.yaml` | DM/主席团完整可见; 代表按`visibility`过滤后注入L1(见上表) |
 | `references/` | 设计阶段供设计Agent; 推演阶段默认不注入(避免上下文爆炸), DM判定时可按需检索 |
 
 ## 5. S8一致性检查清单
@@ -177,4 +200,4 @@ docs:
 2. 结构合理性: 每个会场≥2个席位; 至少一个会场; 决策规则与席位数不矛盾(如3席位配two_thirds);
 3. 权力一致性: portfolio_powers与会场结构、其他席位权力无直接矛盾(如两人都"独家"指挥同一支部队);
 4. 可推演性: 秘密目标不存在全体死锁(所有人的目标互斥到没有任何行动空间); 主线弧触发时间落在推演时间窗内;
-5. 格式校验: 全部yaml通过schema校验(pydantic model).
+5. 格式校验: 全部yaml通过schema校验(pydantic model); 一切时间字段必须带时区偏移或`Z`(裸时间串报错), venue的`timezone`必须是合法IANA名(见04§5); `stats.visibility`若存在必须是`owner_only|faction|all_public`之一.

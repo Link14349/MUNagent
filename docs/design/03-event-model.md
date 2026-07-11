@@ -16,7 +16,7 @@ class Event(BaseModel):
     id: int                # 全局自增(SQLite rowid)
     session_id: str
     seq: int               # 会话内严格递增序号, 全序
-    story_time: str | None # 故事内时间(ISO), 部分控制类事件为空
+    story_time: str | None # 故事内时间(ISO, 统一UTC存储, 显示时按会场时区转换, 见04§5)
     real_time: str         # 真实时间(ISO)
     type: str              # 见事件类型表
     actor: str             # seat:<id> | chair | dm | recorder | system | human
@@ -70,15 +70,17 @@ scope=dm-only                        → 仅主席团/上帝视角
 
 ```python
 class EventBus:
-    def emit(self, e: Event) -> Event         # 补全seq, 物化visible_to, 落库, 推给订阅者
-    def query(self, viewer: str, *,           # viewer="god"为上帝视角
+    def stage(self, e: Event) -> Event        # 最小步内: 补全seq, 物化visible_to, 写入步缓冲(不落库)
+    def commit_step(self) -> list[Event]      # 最小步结束: SQLite事务批量落库, 推给订阅者, 清空缓冲
+    def rollback_step(self) -> None            # 最小步失败/中止: 丢弃步缓冲(不产生孤儿事件)
+    def query(self, viewer: str, *,           # viewer="god"为上帝视角; 含已commit+当前步缓冲
               venue: str = None, group: str = None,
               types: list[str] = None,
               since_seq: int = None, limit: int = None) -> list[Event]
-    def subscribe(self, viewer: str, callback) # WS推送用; 引擎内部组件也可订阅
+    def subscribe(self, viewer: str, callback) # WS推送用; 仅推送commit后的事件
 ```
 
-同一会话内`emit`串行化(asyncio单写者), 保证seq全序——这是回放确定性的基础.
+同一会话内`stage`/`commit_step`经单写者串行化(asyncio单写者), 保证seq全序——这是回放确定性的基础. **决策D12**: 最小步执行中事件只进内存缓冲; 步成功结束时`commit_step`一次性落库; 步失败则`rollback_step`, 保证断点续推无孤儿事件(见07§2). 为简洁, 引擎内部可继续用`emit`作为`stage`的别名, 但对外语义是"暂存而非即时持久化".
 
 ## 6. 持久化(SQLite)
 
@@ -103,11 +105,94 @@ CREATE INDEX idx_events_query ON events(session_id, venue_id, type, seq);
 CREATE TABLE scenarios (id TEXT PRIMARY KEY, path TEXT, manifest TEXT);
 ```
 
-token用量记录在独立表`llm_usage(session_id, role, model, prompt_tokens, completion_tokens, cache_hit_tokens, cache_miss_tokens, real_time)`, 不进事件日志. 缓存命中列供命中率监控(见[11-cost-and-caching.md](11-cost-and-caching.md)§5).
+token用量记录在独立表`llm_usage(session_id, role, model, prompt_tokens, completion_tokens, cache_hit_tokens, cache_miss_tokens, thinking_enabled, real_time)`, 不进事件日志. 缓存命中列供命中率监控(见[11-cost-and-caching.md](11-cost-and-caching.md)§5).
 
-## 7. 回放、断点续推与导出
+## 7. Reducer与RuntimeState
+
+事件日志有两类"读历史"消费者, 不要混:
+
+- **回放(replay)**: 按seq顺序+视角过滤展示给人看, 只读, 不需要知道"现在处于哪个阶段"——P1即可用;
+- **续推(resume)**: 进程重启后引擎要还原内存状态接着跑——需要**reducer**, P2交付.
+
+### Reducer定义
+纯函数, 把已提交事件流折叠为运行时状态, 放在`core/reducer.py`:
+
+```python
+def reduce(events: Iterable[Event]) -> RuntimeState   # 全量折叠
+def apply(state: RuntimeState, e: Event) -> RuntimeState  # 单事件递推, reduce=fold(apply)
+```
+
+引擎运行时**在线维护**同一个RuntimeState(每次commit_step后对新事件调apply), 续推时用reduce重建——两条路径共用apply, 保证"跑出来的状态"和"重建的状态"必然一致.
+
+### RuntimeState结构(草案)
+
+```python
+class GroupState(BaseModel):
+    id: str; members: list[str]; closed: bool; founder: str
+
+class VoteState(BaseModel):
+    directive_id: str
+    cast: dict[str, str]            # seat -> aye|nay|abstain
+
+class VenueState(BaseModel):
+    id: str
+    kind: str                       # main|sub|temp
+    parent_return: dict | None      # temp会场: 解散后各席位归还去向
+    phase: str                      # Opening|ModCaucus|UnmodCaucus|Suspended|Adjourned
+    interrupted_phase: str | None   # Voting/CrisisUpdate结束后要返回的阶段
+    present_seats: list[str]        # 在场席位(被借出的不在)
+    agenda: str
+    groups: list[GroupState]        # 仅UnmodCaucus期间非空
+    unmod_round: int
+    mod_speech_count: int           # 阶段预算计数
+    story_time: str                 # 该会场时钟读数(UTC)
+    active_vote: VoteState | None
+
+class EpochState(BaseModel):        # 每视角一份, 供上下文组装(05§2/11§3)
+    summary_seq: int                # 当前L2摘要对应的summary_written事件seq
+    l3_start_seq: int               # L3追加段起点
+
+class RuntimeState(BaseModel):
+    session_id: str
+    last_seq: int                   # 已折叠到的事件seq
+    venues: dict[str, VenueState]
+    directives: dict[str, str]      # directive_id -> 生命周期状态(06§2)
+    backroom_queue: list[str]       # 待判定directive_id, 保序
+    pending_interrupts: list[dict]  # 已触发未播报的中断(弧线/判定结果)
+    fired_arcs: list[str]           # 已触发弧线id
+    stats: dict[str, dict]          # entity_id -> 当前tags/values
+    epochs: dict[str, EpochState]   # viewer -> 纪元状态
+```
+
+### 事件→状态折叠映射
+
+| 事件type | apply的状态变更 |
+|---|---|
+| `phase_change` | venue.phase更新, 阶段计数器清零; 进/出Unmod时初始化/清空groups |
+| `speech` | mod_speech_count+1(Mod期间) |
+| `speech_thought`/`motion` | 无状态变更(动议后果由主席的后续事件承载) |
+| `vote_call` | 创建active_vote, 记录interrupted_phase |
+| `vote_cast` | active_vote.cast[seat]=choice |
+| `vote_result` | 清active_vote; directives[id]→passed/rejected; passed追加backroom_queue |
+| `directive_submitted` | directives新增; personal/crisis_note直接入backroom_queue |
+| `directive_status` | 状态推进(queued/adjudicating/resolved/announced/withheld); resolved时出队 |
+| `adjudication` | 按payload.stat_changes更新stats |
+| `crisis_update` | pending_interrupts移除对应项; fired_arcs追加(弧线来源时) |
+| `group_formed/move/dissolved`, `group_join_*` | groups增删改 |
+| `clock_advance` | venue.story_time |
+| `summary_written` | epochs[viewer]更新(summary_seq, l3_start_seq) |
+| `session_control`/`human_control` | 运行标志/待消费干预 |
+
+新增事件类型时**必须**同步此表与apply实现——事件模型和reducer是一对一契约, 漏写=续推后状态错乱.
+
+### 确定性要求
+- apply是纯函数: 不读时钟/不掷随机/不做IO;
+- 同一事件流reduce两次, 结果结构级相等(pydantic模型相等), 为plan.md P2验收项;
+- 属性测试: 任意事件前缀的reduce结果 = 逐事件apply的结果.
+
+## 8. 回放、断点续推与导出
 
 - **回放**: 只读, 按seq顺序重放事件流+视角过滤, 支持跳转到任意seq. 不涉及LLM;
-- **断点续推**: 加载会话 → 用reducer从事件流重建运行时状态(各会场阶段、组结构、指令队列、时钟、数值) → 引擎从安全点(见07"最小步")继续. 要求: 一切运行时状态必须可由事件推导, **禁止**引擎持有不落事件的隐藏状态;
+- **断点续推**: 加载会话 → 用reducer从事件流重建运行时状态(各会场阶段、组结构、指令队列、时钟、数值) → 引擎从安全点(见07"最小步")继续. 要求: 一切运行时状态必须可由事件推导, **禁止**引擎持有不落事件的隐藏状态. **分阶段**: P1仅实现回放+视角过滤; 完整reducer留P2(见plan.md P2);
 - **导出**: 复盘页可导出markdown会议记录 = 按视角过滤后的事件流 + 书记摘要渲染;
 - **脱敏纪律**: api key及任何配置严禁进入事件日志(见[08-config.md](08-config.md)安全红线); LLM报错文本落日志前脱敏.

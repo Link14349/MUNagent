@@ -21,7 +21,7 @@ docs/tools/*.md          外部工具服务的调用文档
 - 修改设计时**必须同步**: 相关设计文档 + index.md(若结构变化) + introduction.md(若顶层概览受影响) + plan.md(若任务受影响).
 
 ## 不可擅自违反的已定决策(D1~D10)
-完整表见[docs/design/01-overview.md](docs/design/01-overview.md). 速记: 单机单人 / 数值默认粗粒度标签 / 允许说谎但有honesty参数 / Unmod小轮+屏障 / 前后场双轨 / LLM不掷骰 / 事件溯源 / 在线MinerU / 不用LangChain / 缓存优先的上下文组装. **变更任何一条需用户明确确认.**
+完整表见[docs/design/01-overview.md](docs/design/01-overview.md). 速记: 单机单人 / 数值默认粗粒度标签 / stats可见性默认faction可配 / 允许说谎但有honesty参数 / Unmod小轮+屏障 / 前后场双轨 / LLM不掷骰 / 事件溯源 / 在线MinerU / 不用LangChain / 缓存优先的上下文组装 / UTC单轴+会场timezone / 最小步事件缓冲提交 / Thinking按task开关 / 公报一律投票+master_seed可--seed. **变更任何一条需用户明确确认.**
 
 ## 跨文档不变量(写代码时的硬约束)
 1. **一切皆事件, 事件即存档**: 任何运行时状态必须可由事件流重建; 引擎禁止持有不落事件的隐藏状态;
@@ -30,6 +30,7 @@ docs/tools/*.md          外部工具服务的调用文档
 4. **key不进事件日志、不回传前端**: 错误信息落地前脱敏; 场景包/存档导出与配置系统零代码交集;
 5. **人类与AI走同一个ActionProvider抽象**: 不为人类单开分支逻辑;
 6. **prompt只从尾部生长**: 易变内容只许在L4任务段; 事件渲染`render(event)`是纯函数且字节级确定, 改渲染模板=破坏性变更, 需golden测试护住.
+7. **最小步事件缓冲提交**: `stage`在步内缓冲, `commit_step`批量落库; 步失败`rollback_step`, 禁止孤儿事件.
 
 ## 代码规范
 - Python 3.11+, 类型标注全覆盖, pydantic v2做一切schema(事件/配置/Agent输出/场景包);

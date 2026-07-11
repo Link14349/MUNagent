@@ -45,15 +45,20 @@ MUNagent是基于LLM Agent的自动化模拟联合国场景设计&推演工具, 
 | D8 | PDF转Markdown用在线MinerU服务, 本地部署留作后续 | 见02/08 |
 | D9 | 不引入LangChain等重框架, 自研轻量Agent循环 | 见05 |
 | D10 | 上下文组装以前缀缓存命中为一等约束: 五段结构+纪元机制+渲染确定性 | 见11 |
+| D11 | 故事时间内部一律UTC单轴, 会场`timezone`仅作本地渲染 | 见04§5 |
+| D12 | 事件`emit`在最小步内缓冲, 步结束`commit`落库 | 见03§5, 07§2 |
+| D13 | V4 Thinking按角色/task开关(代表Unmod组内关, `write_directive`一律开) | 见05§5 |
+| D14 | 公报一律需投票; `master_seed`默认随机, CLI可`--seed`复现 | 见06§1, 07§7 |
+| D15 | stats席位可见性可配置, 默认`faction`(同阵营共享) | 见02§3 stats.yaml |
 
 ## 技术选型
 
 | 层 | 选型 | 说明 |
 |---|---|---|
 | 后端 | Python 3.11+, FastAPI + WebSocket | 事件实时推送, asyncio驱动Agent并发 |
-| 前端 | Vue3/React SPA | 构建产物由FastAPI静态托管 |
+| 前端 | Vue3 + Vite + TypeScript SPA | 构建产物由FastAPI静态托管 |
 | 持久化 | SQLite | 单文件零部署; 核心是事件日志表 |
-| LLM | OpenAI兼容客户端 | Provider档案+角色路由, 见[08-config.md](08-config.md) |
+| LLM | OpenAI兼容客户端 | 默认`deepseek-v4-flash`/`deepseek-v4-pro`, Provider档案+角色路由, 见[08-config.md](08-config.md) |
 | Agent | 自研轻量循环 | 复杂度在编排(状态机+事件总线)而非单Agent推理 |
 | 工具 | 联网搜索/下载/在线MinerU | 仅设计Agent使用, 见02 |
 
@@ -63,6 +68,7 @@ MUNagent是基于LLM Agent的自动化模拟联合国场景设计&推演工具, 
 munagent/
 ├── core/
 │   ├── events.py        # 事件模型与事件总线(scope过滤、持久化)     → 03
+│   ├── reducer.py       # RuntimeState + 事件折叠(在线维护/续推重建) → 03§7
 │   ├── state_machine.py # 会场状态机(前场轨)                        → 04
 │   ├── clock.py         # 推演时钟(故事内时间)                      → 04
 │   └── scenario.py      # 场景包的加载/校验/保存                    → 02

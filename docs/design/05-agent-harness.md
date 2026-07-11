@@ -33,7 +33,7 @@ class BaseAgent:
 | 段 | 内容 | 来源 | token预算(flash 8k方案) |
 |---|---|---|---|
 | G 全局共享段 | 会议规则+四类指令格式+全部任务输出schema+背景文书摘要(**所有代表一字不差**, 跨Agent共享缓存) | 场景包+固定文案 | ~1.5k |
-| L1 席位固定段 | 人格卡+席位公开/私密信息+权力清单 | 场景包 | ~1k |
+| L1 席位固定段 | 人格卡+席位公开/私密信息+权力清单+可见stats子集(`stats_for_seat`) | 场景包 | ~1k |
 | L2 纪元摘要段 | 会场公开记录摘要+本席位私人记忆摘要(本纪元冻结版) | 书记摘要(§4) | ~2k |
 | L3 追加事件段 | 本纪元内该席位可见事件原文, 只追加不删除(含自己的speech_thought——记得自己的盘算) | `bus.query(viewer=seat)` | ~3k(纪元切换阈值) |
 | L4 任务段 | 当前阶段+故事时间+本次任务+指定schema | 引擎TaskSpec | <0.5k |
@@ -106,8 +106,23 @@ class BaseAgent:
 {output_schema}
 ```
 
-## 5. 并发与用量
+## 5. Thinking模式与并发用量
+
+### Thinking开关(决策D13)
+
+DeepSeek V4通过请求体`thinking: {type: "enabled"}`开启, 与model名无关. 按**角色+task**决定, 在`llm.chat()`路由层实现:
+
+| 角色 | task | thinking | 说明 |
+|---|---|---|---|
+| delegate | `turn`(ModCaucus) | 开 | 正式发言/动议需深度推演 |
+| delegate | `turn`(UnmodCaucus, scope=group) | **关** | 小组私聊, 追求响应速度与成本 |
+| delegate | `express_grouping` | **关** | Unmod初始分组, 结构化意愿收集 |
+| delegate | `quick_decide` | **关** | 闭门小组放行/拒绝, 轻量二选一 |
+| delegate | `write_directive`(任何阶段) | **开** | 写指令一律开, 含Unmod期间的个人/危机笔记 |
+| delegate | `vote` | 开 | |
+| recorder | 全部 | **关** | 摘要任务, flash+非thinking足够 |
+| chair / dm / designer | 全部 | **开** | 控场/判定/设计需推理深度 |
 
 - 同一会话内, 不同小组/不同会场的Agent调用可并行(asyncio), 单个Agent的调用串行;
-- 每次调用记录到`llm_usage`表(role/model/tokens/缓存命中tokens), 推演界面实时汇总并展示缓存命中率(见11§5);
-- 模型路由: role→provider/model, 见[08-config.md](08-config.md). 建议delegate/recorder走flash, chair/dm/designer走pro.
+- 每次调用记录到`llm_usage`表(role/model/tokens/thinking_enabled/缓存命中tokens), 推演界面实时汇总并展示缓存命中率(见11§5);
+- 模型路由: role→provider/model, 见[08-config.md](08-config.md). 建议delegate/recorder走`deepseek-v4-flash`, chair/dm/designer走`deepseek-v4-pro`.

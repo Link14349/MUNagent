@@ -8,7 +8,7 @@
 |---|---|---|---|---|
 | 联合指令 | `directive` | 是(会场decision_rule) | venue | 会场集体行动指令, 格式自由, 重可执行性 |
 | 个人指令 | `personal` | 否 | private | 凭portfolio_powers的个人行动, 私下递交 |
-| 公报/声明 | `communique` | 视会场规则(默认是) | 判定后global | 对外官方表态, 一般无需判定成败, 但DM评估各方反应 |
+| 公报/声明 | `communique` | **是**(一律需投票, 决策D14) | 判定后global | 对外官方表态, 一般无需判定成败, 但DM评估各方反应 |
 | 危机笔记 | `crisis_note` | 否 | private | 给幕后/其他角色的私信; 送达本身可被DM判定(截获风险) |
 
 ### 指令数据结构

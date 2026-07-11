@@ -51,7 +51,7 @@ async def interrupt_loop():
 | Voting | 完整一次表决(冻结前场, 不可中断) |
 | CrisisUpdate | 一次播报 + 主席去向决策 |
 
-断点续推(见03§7)从"上一个完成的最小步之后"恢复: reducer重建状态时, 未完成最小步产生的孤儿事件不存在——因为**事件在最小步完成时才批量提交**(SQLite事务包裹一个最小步).
+断点续推(见03§7-8)从"上一个完成的最小步之后"恢复: reducer(`core/reducer.py`, RuntimeState与折叠映射见03§7)重建状态时, 未完成最小步产生的孤儿事件不存在——因为**事件在最小步完成时才批量提交**(决策D12: `stage`缓冲 → 步结束`commit_step`, SQLite事务包裹一个最小步; 步失败则`rollback_step`).
 
 ## 3. 并发与一致性规则
 
@@ -98,6 +98,19 @@ HybridProvider                        # 导演模式: AI起草 → 人类审改 
 ```
 create(scenario, config) → running ⇄ paused → ended
 ```
-- `create`: 校验场景包 → 生成master_seed → 写sessions表 → 初始化各venue状态机(initial_phase) → Opening;
+- `create`: 校验场景包 → 生成`master_seed` → 写sessions表 → 初始化各venue状态机(initial_phase) → Opening;
+
+### master_seed(判定RNG根种子)
+
+每场推演在`sessions.master_seed`存一个整数, 作为程序掷骰的根种子(决策D6, 见06§3):
+
+```
+directive_seed = sha256(master_seed, directive_id)
+roll = rng(directive_seed).randint(1, 100)
+```
+
+- **默认**: 系统随机生成(`secrets.randbelow`等), 保证不同会话独立;
+- **可选**: CLI `munagent run ... --seed <int>` / 创建会话API传`seed`, 用于debug与复现——同一seed+同一事件流→掷骰结果一致(plan.md P1验收);
+- `master_seed`记入sessions表, 随存档分享, **不含api key**.
 - `ended`: 满足end_conditions(主席在每次Crisis Update后评估) / 用户手动结束 / 熔断后放弃;
 - 结束后会话只读, 进入复盘(见[09-gui.md](09-gui.md)).

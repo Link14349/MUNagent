@@ -22,18 +22,18 @@ providers:                       # api key只出现在这里
     api_key: none
 
 roles:                           # 角色路由: 只引用provider名, 不碰key
-  delegate: { provider: deepseek, model: deepseek-flash }
-  chair:    { provider: deepseek, model: deepseek-pro }
-  dm:       { provider: deepseek, model: deepseek-pro }
-  recorder: { provider: deepseek, model: deepseek-flash }
-  designer: { provider: deepseek, model: deepseek-pro }
+  delegate: { provider: deepseek, model: deepseek-v4-flash }
+  chair:    { provider: deepseek, model: deepseek-v4-pro }
+  dm:       { provider: deepseek, model: deepseek-v4-pro }
+  recorder: { provider: deepseek, model: deepseek-v4-flash }
+  designer: { provider: deepseek, model: deepseek-v4-pro }
 
 tools:
   mineru:                        # 在线MinerU(PDF转Markdown), 决策D8
-    base_url: http://<SERVER>:8282
+    base_url: http://36.139.151.129:8282   # 环境变量 MUNAGENT_MINERU_URL 可覆盖
   search:
-    provider: <搜索API名>
-    api_key: xxx
+    provider: tavily             # tavily(默认) | serper | bocha, 选型理由见02§2
+    api_key: tvly-xxx            # 用户自行注册, 项目不内置; Tavily免费1000次/月
 
 engine:                          # 推演默认参数(可被会话config覆盖)
   unmod_rounds: 4
@@ -72,7 +72,8 @@ server:
 
 - provider: 发一次1 token补全, 反馈 有效/无效key/网络不通/模型名不存在;
 - mineru: `GET /health`, 反馈在线状态与worker数;
-- 对应后端接口: `POST /api/config/test {target: provider:<name> | tool:mineru}`.
+- search: 发一次最小query(top_k=1), 反馈key有效性与网络可达性(国内网络下Tavily/Serper可能不通, 提示换bocha);
+- 对应后端接口: `POST /api/config/test {target: provider:<name> | tool:mineru | tool:search}`.
 
 ## 5. 会话级配置快照
 
