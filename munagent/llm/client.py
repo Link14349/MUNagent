@@ -53,6 +53,20 @@ class LLMClient:
         self._max_retries = max_retries
         self._usage_sink = usage_sink
         self._transport = transport
+        self._client: httpx.AsyncClient | None = None
+
+    async def _get_client(self) -> httpx.AsyncClient:
+        if self._client is None:
+            self._client = httpx.AsyncClient(
+                timeout=self._timeout, transport=self._transport
+            )
+        return self._client
+
+    async def aclose(self) -> None:
+        """关闭底层 HTTP 客户端. 测试结束时应调用."""
+        if self._client is not None:
+            await self._client.aclose()
+            self._client = None
 
     async def chat(self, request: ChatRequest) -> str:
         provider, model = self._config.resolve_role(request.role)
@@ -81,43 +95,43 @@ class LLMClient:
             "Content-Type": "application/json",
         }
 
+        client = await self._get_client()
         last_error: Exception | None = None
-        async with httpx.AsyncClient(timeout=self._timeout, transport=self._transport) as client:
-            for attempt in range(self._max_retries):
-                try:
-                    response = await client.post(url, json=body, headers=headers)
-                    if response.status_code >= 500:
-                        raise httpx.HTTPStatusError(
-                            "server error",
-                            request=response.request,
-                            response=response,
-                        )
-                    if response.status_code >= 400:
-                        detail = sanitize_text(response.text)
-                        raise LLMError(
-                            f"LLM 请求失败 HTTP {response.status_code}: {detail[:500]}"
-                        )
-                    payload = response.json()
-                    content = payload["choices"][0]["message"]["content"]
-                    usage = payload.get("usage", {})
-                    record = UsageRecord.from_response(
-                        role=request.role,
-                        task=request.task,
-                        model=model,
-                        provider=self._config.roles[request.role].provider,
-                        usage=usage,
-                        thinking_enabled=thinking_enabled,
+        for attempt in range(self._max_retries):
+            try:
+                response = await client.post(url, json=body, headers=headers)
+                if response.status_code >= 500:
+                    raise httpx.HTTPStatusError(
+                        "server error",
+                        request=response.request,
+                        response=response,
                     )
-                    if self._usage_sink:
-                        self._usage_sink(record)
-                    return content
-                except (httpx.TimeoutException, httpx.HTTPStatusError) as exc:
-                    last_error = exc
-                    if attempt + 1 < self._max_retries:
-                        await asyncio.sleep(2**attempt)
-                    continue
-                except httpx.HTTPError as exc:
-                    raise LLMError(sanitize_text(str(exc))) from exc
+                if response.status_code >= 400:
+                    detail = sanitize_text(response.text)
+                    raise LLMError(
+                        f"LLM 请求失败 HTTP {response.status_code}: {detail[:500]}"
+                    )
+                payload = response.json()
+                content = payload["choices"][0]["message"]["content"]
+                usage = payload.get("usage", {})
+                record = UsageRecord.from_response(
+                    role=request.role,
+                    task=request.task,
+                    model=model,
+                    provider=self._config.roles[request.role].provider,
+                    usage=usage,
+                    thinking_enabled=thinking_enabled,
+                )
+                if self._usage_sink:
+                    self._usage_sink(record)
+                return content
+            except (httpx.TimeoutException, httpx.HTTPStatusError) as exc:
+                last_error = exc
+                if attempt + 1 < self._max_retries:
+                    await asyncio.sleep(2**attempt)
+                continue
+            except httpx.HTTPError as exc:
+                raise LLMError(sanitize_text(str(exc))) from exc
 
         raise LLMError(sanitize_text(str(last_error or "LLM 调用失败")))
 
@@ -146,26 +160,26 @@ class LLMClient:
             "Authorization": f"Bearer {provider.api_key}",
             "Content-Type": "application/json",
         }
-        async with httpx.AsyncClient(timeout=self._timeout, transport=self._transport) as client:
-            try:
-                response = await client.post(url, json=body, headers=headers)
-            except httpx.HTTPError as exc:
-                raise LLMError(sanitize_text(str(exc))) from exc
-            if response.status_code >= 400:
-                raise LLMError(
-                    f"连接测试失败 HTTP {response.status_code}: "
-                    f"{sanitize_text(response.text)[:500]}"
-                )
-            payload = response.json()
-            usage = payload.get("usage", {})
-            record = UsageRecord.from_response(
-                role=role_for_test,
-                task="config_test",
-                model=model,
-                provider=name,
-                usage=usage,
-                thinking_enabled=False,
+        client = await self._get_client()
+        try:
+            response = await client.post(url, json=body, headers=headers)
+        except httpx.HTTPError as exc:
+            raise LLMError(sanitize_text(str(exc))) from exc
+        if response.status_code >= 400:
+            raise LLMError(
+                f"连接测试失败 HTTP {response.status_code}: "
+                f"{sanitize_text(response.text)[:500]}"
             )
-            if self._usage_sink:
-                self._usage_sink(record)
-            return record
+        payload = response.json()
+        usage = payload.get("usage", {})
+        record = UsageRecord.from_response(
+            role=role_for_test,
+            task="config_test",
+            model=model,
+            provider=name,
+            usage=usage,
+            thinking_enabled=False,
+        )
+        if self._usage_sink:
+            self._usage_sink(record)
+        return record

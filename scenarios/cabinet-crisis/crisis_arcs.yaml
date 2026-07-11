@@ -1,0 +1,16 @@
+main_arc:
+  - id: border_skirmish
+    trigger:
+      type: story_time
+      at: "2026-03-15T13:00:00+08:00"
+    content: |
+      边境传来消息: 邻国军队在争议地区进行实弹演习, 双方边防部队发生对峙.
+      外交界担忧局势可能升级为局部冲突.
+    default_scope: global
+random_pool:
+  - id: media_leak
+    weight: 3
+    content: 外国媒体披露内阁内部在战和问题上存在严重分歧.
+  - id: neighbor_offer
+    weight: 2
+    content: 邻国通过第三方释放信号, 愿意重启外交对话.

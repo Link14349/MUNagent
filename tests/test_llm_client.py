@@ -15,19 +15,22 @@ async def test_chat_records_usage(
 ) -> None:
     records = []
     client = llm_client_factory(transport=mock_llm_transport, usage_sink=records.append)
-    content = await client.chat(
-        ChatRequest(
-            role="delegate",
-            task="turn",
-            messages=[ChatMessage(role="user", content="hello")],
-            phase="ModeratedCaucus",
+    try:
+        content = await client.chat(
+            ChatRequest(
+                role="delegate",
+                task="turn",
+                messages=[ChatMessage(role="user", content="hello")],
+                phase="ModeratedCaucus",
+            )
         )
-    )
-    assert '{"ok": true}' in content
-    assert len(records) == 1
-    assert records[0].cache_hit_tokens == 8
-    assert records[0].cache_miss_tokens == 2
-    assert records[0].thinking_enabled is True
+        assert '{"ok": true}' in content
+        assert len(records) == 1
+        assert records[0].cache_hit_tokens == 8
+        assert records[0].cache_miss_tokens == 2
+        assert records[0].thinking_enabled is True
+    finally:
+        await client.aclose()
 
 
 @pytest.mark.asyncio
@@ -50,16 +53,19 @@ async def test_chat_unmod_disables_thinking(
         )
 
     client = llm_client_factory(transport=httpx.MockTransport(handler))
-    await client.chat(
-        ChatRequest(
-            role="delegate",
-            task="turn",
-            messages=[ChatMessage(role="user", content="hi")],
-            phase="UnmoderatedCaucus",
-            scope="group",
+    try:
+        await client.chat(
+            ChatRequest(
+                role="delegate",
+                task="turn",
+                messages=[ChatMessage(role="user", content="hi")],
+                phase="UnmoderatedCaucus",
+                scope="group",
+            )
         )
-    )
-    assert "thinking" not in captured["body"]
+        assert "thinking" not in captured["body"]
+    finally:
+        await client.aclose()
 
 
 @pytest.mark.asyncio
@@ -75,6 +81,9 @@ async def test_missing_api_key_raises(sample_config) -> None:
 @pytest.mark.asyncio
 async def test_test_provider_success(llm_client_factory, mock_llm_transport) -> None:
     client = llm_client_factory(transport=mock_llm_transport)
-    record = await client.test_provider("deepseek")
-    assert record.task == "config_test"
-    assert record.thinking_enabled is False
+    try:
+        record = await client.test_provider("deepseek")
+        assert record.task == "config_test"
+        assert record.thinking_enabled is False
+    finally:
+        await client.aclose()

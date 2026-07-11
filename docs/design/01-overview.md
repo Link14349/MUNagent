@@ -19,6 +19,7 @@ MUNagent是基于LLM Agent的自动化模拟联合国场景设计&推演工具, 
 | 席位 | Seat | 一个可扮演的角色(历史人物), 由代表Agent或人类扮演 |
 | 代表Agent | DelegateAgent | 扮演席位的LLM Agent |
 | 主席团 | Presidium | 主席(Chair)+DM+书记(Recorder)三个控场Agent, 即introduction中的"推演Agent" |
+| 主持席 | presiding seat | 可选的**戏内**会议主持, 由某代表席位担任(如总理/议长), 带立场主持程序, 允许偏心; 与戏外中立主席分离, 见04§3 |
 | DM | DMAgent | 危机导演, 处理指令判定与结果撰写 |
 | 前场轨 | frontstage | 会场内的辩论状态机(主持磋商⇄非正式磋商, 投票为子流程) |
 | 后场轨 | backroom | 持续运行的指令判定流水线(队列) |
@@ -49,7 +50,8 @@ MUNagent是基于LLM Agent的自动化模拟联合国场景设计&推演工具, 
 | D12 | 事件`emit`在最小步内缓冲, 步结束`commit`落库 | 见03§5, 07§2 |
 | D13 | V4 Thinking按角色/task开关(代表Unmod组内关, `write_directive`一律开) | 见05§5 |
 | D14 | 公报一律需投票; `master_seed`默认随机, CLI可`--seed`复现 | 见06§1, 07§7 |
-| D15 | stats席位可见性可配置, 默认`faction`(同阵营共享) | 见02§3 stats.yaml |
+| D15 | 戏内主持席与戏外主席分离: `presiding_seat`可选、允许偏心、appeal由戏外主席终裁、主持权可易手 | 见04§3 |
+| D16 | stats席位可见性可配置, 默认`faction`(同阵营共享) | 见02§3 stats.yaml |
 
 ## 技术选型
 

@@ -92,6 +92,7 @@ venues:
     name: 苏共中央主席团
     kind: sub                    # main | sub (临时会场运行时创建, 不写在场景包)
     timezone: Europe/Moscow      # IANA时区名, 该会场的本地显示时区(见04§5; 内部一律UTC)
+    presiding_seat: khrushchev   # 可选: 戏内主持席(见04§3). 不设则由中立主席Agent主持
     decision_rule:
       pass_threshold: majority   # majority | two_thirds | unanimous
       veto_seats: [khrushchev]   # 可为空

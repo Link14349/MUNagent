@@ -59,18 +59,26 @@ class BaseAgent:
 | `vote` | Voting子流程 | `{choice: aye\|nay\|abstain, inner_thought}` |
 | `express_grouping` | Unmod开始 | `{want_to_talk_to: [seat_id], topic}` |
 | `quick_decide` | 闭门小组收到加入申请 | `{decision: admit\|reject, reason}` |
+| `next_speaker`* | 该席位任本会场主持席时(04§3) | 同ChairAgent的`next_speaker`, 但带戏内立场与inner_thought |
+| `motion_ruling`* | 同上 | 同ChairAgent的`motion_ruling`; appeal动议除外(交戏外主席) |
+| `caucus_switch`* | 同上 | `{action: keep\|switch, to_phase, announcement}` 仅限Mod⇄Unmod |
 
+- 带*的主持类任务仅当席位为`presiding_seat`时启用, 输出schema与ChairAgent同名任务一致, 但由代表Agent以自己的人格卡/秘密目标/honesty执行(允许程序性偏心); 引擎的保底轮询与阶段预算不受其控制;
+- `motion`的动作细分含`appeal`(申诉主持裁决, 由戏外主席终裁);
 - `next_move`仅Unmod小轮末尾要求输出: `{type: stay|join|new_group|solo, target?, members?, closed?}`;
 - `directive`子对象格式见[06](06-directives-adjudication.md);
 - `inner_thought`一律拆为伴生`speech_thought`事件(`scope=self`, 仅本席位可见, 见03§3): 其他代表与主席团Agent都读不到心; 本席位构建L3上下文时自动带回自己的历史内心盘算(按ref_seq与发言配对渲染), 保证欺骗行为的前后连贯.
 
-### 3.2 主席Agent(ChairAgent)
+### 3.2 主席Agent(ChairAgent, 戏外中立)
+
+会场设有`presiding_seat`时, `next_speaker`/`motion_ruling`及Mod⇄Unmod切换路由给主持席(见3.1带*任务与04§3); ChairAgent保留游戏层职能与appeal终裁.
 
 | task | 输出schema(要点) |
 |---|---|
 | `phase_decision` | `{action: keep\|switch\|adjourn\|create_temp_venue, to_phase?, temp_venue_spec?, announcement}` |
-| `next_speaker` | `{seat, reason}` (引擎叠加保底轮询) |
-| `motion_ruling` | `{ruling: accept\|reject, reason}` |
+| `next_speaker` | `{seat, reason}` (引擎叠加保底轮询; 无主持席的会场) |
+| `motion_ruling` | `{ruling: accept\|reject, reason}` (无主持席的会场) |
+| `appeal_ruling` | `{ruling: sustain\|overrule, reason}` — 申诉终裁, 中立行使 |
 | `broadcast_decision` | 收到DM结果后: `{plan: [{venue, text, delay_story_minutes}], withhold: [venue]}` — 每会场文本可不同、可延迟、可扣发 |
 | `clock_decision` | `{advance_to, reason}` |
 

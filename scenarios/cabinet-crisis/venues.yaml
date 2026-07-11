@@ -1,0 +1,14 @@
+venues:
+  - id: cabinet
+    name: 内阁会议室
+    kind: main
+    timezone: Asia/Shanghai
+    decision_rule:
+      pass_threshold: majority
+      veto_seats: []
+    initial_agenda: 讨论对边境危机的应对方案
+    initial_phase: ModeratedCaucus
+    seats: [premier, defense_minister, foreign_minister]
+    clock_rate:
+      per_mod_speech: 5m
+      per_unmod_round: 15m

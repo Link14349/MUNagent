@@ -1,0 +1,136 @@
+"""EventBus stage/commit/rollback 单元测试."""
+
+from __future__ import annotations
+
+import pytest
+
+from munagent.core.bus import EventBus
+from munagent.core.events import Event
+
+
+@pytest.fixture
+async def bus(tmp_path):
+    db = tmp_path / "test.db"
+    b = EventBus(str(db), "s1")
+    await b.init_db()
+    await b.create_session("scenario-x", master_seed=42)
+    yield b
+    await b.close()
+
+
+@pytest.mark.asyncio
+async def test_stage_and_commit(bus: EventBus) -> None:
+    e1 = bus.stage(
+        Event(
+            session_id="s1",
+            type="phase_change",
+            actor="chair",
+            venue_id="v1",
+            scope="venue",
+            payload={"from": "Opening", "to": "ModeratedCaucus", "reason": "开始"},
+        ),
+        venue_seats=["seat:a", "seat:b"],
+    )
+    assert e1.seq == 1
+    assert e1.visible_to == ["seat:a", "seat:b"]
+
+    committed = await bus.commit_step()
+    assert len(committed) == 1
+    assert bus.next_seq == 2
+
+
+@pytest.mark.asyncio
+async def test_rollback_discards_buffer(bus: EventBus) -> None:
+    bus.stage(
+        Event(
+            session_id="s1",
+            type="speech",
+            actor="seat:a",
+            venue_id="v1",
+            scope="venue",
+            payload={"text": "test"},
+        ),
+        venue_seats=["seat:a"],
+    )
+    bus.rollback_step()
+    assert bus.next_seq == 1  # seq 回到 1
+
+
+@pytest.mark.asyncio
+async def test_query_filters_by_viewer(bus: EventBus) -> None:
+    # venue 事件
+    bus.stage(
+        Event(
+            session_id="s1",
+            type="speech",
+            actor="seat:a",
+            venue_id="v1",
+            scope="venue",
+            payload={"text": "hello"},
+        ),
+        venue_seats=["seat:a", "seat:b"],
+    )
+    # self 事件(内心动机)
+    bus.stage(
+        Event(
+            session_id="s1",
+            type="speech_thought",
+            actor="seat:a",
+            venue_id="v1",
+            scope="self",
+            payload={"thought": "我在盘算..."},
+        ),
+    )
+    await bus.commit_step()
+
+    # seat:a 看得到两条
+    a_events = await bus.query("seat:a")
+    assert len(a_events) == 2
+
+    # seat:b 看不到 self
+    b_events = await bus.query("seat:b")
+    assert len(b_events) == 1
+    assert b_events[0].type == "speech"
+
+    # 主席团看不到 self
+    chair_events = await bus.query("chair")
+    assert len(chair_events) == 1
+
+    # god 看全部
+    god_events = await bus.query("god")
+    assert len(god_events) == 2
+
+
+@pytest.mark.asyncio
+async def test_query_includes_buffer(bus: EventBus) -> None:
+    """query 应同时查询已 commit 和当前缓冲."""
+    bus.stage(
+        Event(
+            session_id="s1",
+            type="speech",
+            actor="seat:a",
+            venue_id="v1",
+            scope="venue",
+            payload={"text": "first"},
+        ),
+        venue_seats=["seat:a"],
+    )
+    await bus.commit_step()
+
+    # 第二个还在缓冲里
+    bus.stage(
+        Event(
+            session_id="s1",
+            type="speech",
+            actor="seat:a",
+            venue_id="v1",
+            scope="venue",
+            payload={"text": "second"},
+        ),
+        venue_seats=["seat:a"],
+    )
+
+    events = await bus.query("seat:a")
+    assert len(events) == 2
+    assert events[0].payload["text"] == "first"
+    assert events[1].payload["text"] == "second"

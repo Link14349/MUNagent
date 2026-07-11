@@ -1,0 +1,12 @@
+id: cabinet-crisis
+title: 三人内阁危机
+author: munagent
+version: 1.0.0
+created: "2026-07-12"
+language: zh
+start_story_time: "2026-03-15T09:00:00+08:00"
+end_conditions:
+  - type: story_time_reached
+    at: "2026-03-15T18:00:00+08:00"
+  - type: dm_judgement
+    desc: "总理被罢免, 或内阁通过紧急状态令, 或三方达成妥协方案"

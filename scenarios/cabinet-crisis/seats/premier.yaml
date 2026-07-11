@@ -1,0 +1,27 @@
+id: premier
+name: 总理
+venue: cabinet
+public:
+  title: 内阁总理
+  faction: 温和派
+  stance: 主张外交途径化解边境危机
+private:
+  secret_goals:
+    - 保住总理职位, 避免提前大选
+    - 阻止军方坐大, 维持文官政府权威
+  relationships:
+    - { seat: defense_minister, attitude: 既依赖又警惕, 担心其借危机扩权 }
+    - { seat: foreign_minister, attitude: 信任但怀疑其斡旋能力 }
+  resources:
+    - 议会脆弱多数
+    - 媒体关系
+portfolio_powers:
+  - power: 召集内阁会议并设定议程
+    limits: 不能单方面罢免部长
+  - power: 发布政府公开声明
+    limits: 需经内阁简单多数同意
+persona:
+  personality: 稳重、谨慎、善于权衡
+  speech_style: 官方、委婉、注重程序
+  decision_tendency: 风险厌恶, 倾向拖延与妥协
+  honesty: 0.6

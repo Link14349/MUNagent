@@ -19,23 +19,23 @@
 
 **验收**: `pip install -e .`后`munagent config-test`对真实DeepSeek key返回成功; 全部测试绿.
 
-## P1 - 最小推演内核(CLI) [=M1]
+## P1 - 最小推演内核(CLI) [=M1] ✅(2026-07-12)
 
 **目标**: 单会场·三席位·硬编码场景, CLI跑通"点名发言→个人指令→判定→Crisis Update"闭环.
 
-- [ ] Event模型 + 六级scope + visible_to物化规则 (03§2-4)
-- [ ] EventBus: stage/commit_step/rollback_step单写者串行化/seq全序/query(viewer)/subscribe (03§5, 决策D12)
-- [ ] SQLite持久化: sessions/events/llm_usage三表, 事务按最小步提交 (03§6, 07§2)
-- [ ] 事件渲染器render(event): 纯函数, golden字节级测试 (11§4)
-- [ ] 可见性过滤矩阵测试: 6 scope × {代表本人/其他代表/主席团/god} (03§4)
-- [ ] BaseAgent循环: 五段上下文组装(G/L1/L2stub/L3/L4)+json解析+修复重试+fallback表 (05§1-2)
-- [ ] DelegateAgent最小版: turn任务(speech/write_directive/pass), inner_thought拆self事件 (05§3.1, 03§3)
-- [ ] ChairAgent最小版: next_speaker + broadcast_decision简化版 (05§3.2)
-- [ ] DMAgent最小版: 判定五步中的②④(LLM)+③程序掷骰(seed=hash(master_seed, directive_id), margin分档) (06§3)
-- [ ] 单会场状态机: 仅Opening→ModCaucus→Adjourned, 点名+保底轮询 (04§3)
-- [ ] 手写迷你场景包(1会场3席位, 虚构三人内阁危机, yaml), scenario.py加载+pydantic校验 (02§3)
-- [ ] CLI运行器: `munagent run <scenario> --max-steps N [--seed <int>]`, 彩色输出事件流
-- [ ] 回放脚本: `munagent replay <session> --viewpoint seat:x|god` (03§8)
+- [x] Event模型 + 六级scope + visible_to物化规则 (03§2-4)
+- [x] EventBus: stage/commit_step/rollback_step单写者串行化/seq全序/query(viewer)/subscribe (03§5, 决策D12)
+- [x] SQLite持久化: sessions/events/llm_usage三表, 事务按最小步提交 (03§6, 07§2)
+- [x] 事件渲染器render(event): 纯函数, golden字节级测试 (11§4)
+- [x] 可见性过滤矩阵测试: 6 scope × {代表本人/其他代表/主席团/god} (03§4)
+- [x] BaseAgent循环: 五段上下文组装(G/L1/L2stub/L3/L4)+json解析+修复重试+fallback表 (05§1-2)
+- [x] DelegateAgent最小版: turn任务(speech/write_directive/pass), inner_thought拆self事件 (05§3.1, 03§3)
+- [x] ChairAgent最小版: next_speaker + broadcast_decision简化版 (05§3.2)
+- [x] DMAgent最小版: 判定五步中的②④(LLM)+③程序掷骰(seed=hash(master_seed, directive_id), margin分档) (06§3)
+- [x] 单会场状态机: 仅Opening→ModCaucus→Adjourned, 点名+保底轮询 (04§3)
+- [x] 手写迷你场景包(1会场3席位, 虚构三人内阁危机, yaml), scenario.py加载+pydantic校验 (02§3)
+- [x] CLI运行器: `munagent run <scenario> --max-steps N [--seed <int>]`, 彩色输出事件流
+- [x] 回放脚本: `munagent replay <session> --viewpoint seat:x|god` (03§8)
 
 **验收**: 全AI跑≥3轮闭环; 回放按视角过滤正确; 同一master_seed两次运行掷骰结果一致.
 
@@ -43,7 +43,14 @@
 
 **目标**: 单会场下所有会议机制完整可用, 断点续推可靠.
 
+**P1 兼容性改动(已在 P1 收尾时完成)**:
+- [x] VenueSpec 加 presiding_seat 可选字段(仅 schema, 引擎不路由) (02§3, D15)
+- [x] render() 加 presiding_change/motion_ruling 渲染分支 (03§3)
+- [x] D15/D16 编号冲突修正 (01)
+
+**P2 正式任务**:
 - [ ] 前场状态机完整: 全状态+转移表, 主席phase_decision (04§3)
+- [ ] 戏内主持席完整: DelegateAgent 加 next_speaker/motion_ruling/caucus_switch 主持任务(带人格卡/inner_thought); ChairAgent 加 appeal_ruling; 引擎按 presiding_seat 路由(有则调对应 DelegateAgent, 无则调 ChairAgent); appeal 动议交戏外主席终裁; presiding_change 事件与主持权易手 (04§3, 05§3.1-3.2, D15)
 - [ ] Voting子流程: 动议→受理→冻结→逐席位投票→decision_rule计票(veto)→返回原阶段 (04§3)
 - [ ] Unmod: initial_grouping→小轮并行(asyncio)→next_move收集→屏障固定顺序结算 (04§3)
 - [ ] 闭门小组: closed标记, quick_decide轻量调用, join_request/decision事件 (04§3, 05§3.1)

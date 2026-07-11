@@ -1,0 +1,11 @@
+mode: tags
+visibility: faction
+entities:
+  - id: cabinet_stability
+    label: 内阁稳定性
+    owner: faction:温和派
+    tags: { 议会支持: 弱, 民意: 中 }
+  - id: military_readiness
+    label: 军方备战状态
+    owner: faction:强硬派
+    tags: { 陆军动员: 中, 边境部署: 强 }

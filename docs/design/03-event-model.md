@@ -34,8 +34,9 @@ class Event(BaseModel):
 |---|---|---|---|
 | `speech` | 代表 | venue/group | text(仅公开发言, 不含内心动机) |
 | `speech_thought` | 代表 | self | thought, ref_seq(指向所属speech事件) |
-| `motion` | 代表 | venue | motion_type(切阶段/表决指令/组临时会场), target |
-| `phase_change` | 主席 | venue | from, to, reason |
+| `motion` | 代表 | venue | motion_type(切磋商形式/表决指令/组临时会场/appeal申诉), target |
+| `motion_ruling` | 主持者/主席 | venue | motion_seq, ruling(accept/reject), reason — 驳回的动议也必须留痕(偏心的证据, appeal的依据) |
+| `phase_change` | 主席/主持者 | venue | from, to, reason — 落库前经状态机按04§3转移表校验, 非法转移拒绝emit |
 | `vote_call` / `vote_cast` / `vote_result` | 主席/代表/系统 | venue | directive_id, choice, tally |
 | `directive_submitted` | 代表 | private(个人)/venue(联合) | directive全文, kind |
 | `directive_status` | 系统 | 同指令 | 生命周期状态变化 |
@@ -44,6 +45,7 @@ class Event(BaseModel):
 | `group_formed` / `group_dissolved` | 系统 | venue | members |
 | `group_move` | 系统 | venue* | seat, from_group, to_group (*会场内可见谁在串门, 但组内谈话内容不可见) |
 | `group_join_request` / `group_join_decision` | 系统/发起人 | group+申请者 | seat, decision |
+| `presiding_change` | 主席/系统 | venue | from_seat, to_seat, cause(指令判定/投票/主席决定) |
 | `clock_advance` | 主席/系统 | venue | from, to |
 | `summary_written` | 书记 | 同源层级 | level, text, covers_seq_range |
 | `note_delivered` | 系统 | private | 危机笔记送达(内容在directive_submitted中) |
@@ -141,6 +143,7 @@ class VenueState(BaseModel):
     phase: str                      # Opening|ModCaucus|UnmodCaucus|Suspended|Adjourned
     interrupted_phase: str | None   # Voting/CrisisUpdate结束后要返回的阶段
     present_seats: list[str]        # 在场席位(被借出的不在)
+    presiding_seat: str | None      # 戏内主持席(04§3), 可在推演中易手; None=中立主席主持
     agenda: str
     groups: list[GroupState]        # 仅UnmodCaucus期间非空
     unmod_round: int
@@ -170,7 +173,7 @@ class RuntimeState(BaseModel):
 |---|---|
 | `phase_change` | venue.phase更新, 阶段计数器清零; 进/出Unmod时初始化/清空groups |
 | `speech` | mod_speech_count+1(Mod期间) |
-| `speech_thought`/`motion` | 无状态变更(动议后果由主席的后续事件承载) |
+| `speech_thought`/`motion`/`motion_ruling` | 无状态变更(动议后果由后续phase_change/vote_call事件承载) |
 | `vote_call` | 创建active_vote, 记录interrupted_phase |
 | `vote_cast` | active_vote.cast[seat]=choice |
 | `vote_result` | 清active_vote; directives[id]→passed/rejected; passed追加backroom_queue |
@@ -179,6 +182,7 @@ class RuntimeState(BaseModel):
 | `adjudication` | 按payload.stat_changes更新stats |
 | `crisis_update` | pending_interrupts移除对应项; fired_arcs追加(弧线来源时) |
 | `group_formed/move/dissolved`, `group_join_*` | groups增删改 |
+| `presiding_change` | venue.presiding_seat更新 |
 | `clock_advance` | venue.story_time |
 | `summary_written` | epochs[viewer]更新(summary_seq, l3_start_seq) |
 | `session_control`/`human_control` | 运行标志/待消费干预 |

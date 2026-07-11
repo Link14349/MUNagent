@@ -1,0 +1,27 @@
+id: foreign_minister
+name: 外交部长
+venue: cabinet
+public:
+  title: 外交部长
+  faction: 中间派
+  stance: 主张斡旋, 寻求外交与威慑的折中
+private:
+  secret_goals:
+    - 维持与邻国的秘密外交渠道, 促成谈判
+    - 提升自身政治资本, 为未来更高职位铺路
+  relationships:
+    - { seat: premier, attitude: 忠诚但希望其更果断 }
+    - { seat: defense_minister, attitude: 戒备其军事冒险, 但不想公开对抗 }
+  resources:
+    - 与邻国副外长的秘密沟通渠道
+    - 国际组织人脉
+portfolio_powers:
+  - power: 指挥驻外使领馆进行外交接触
+    limits: 不能代表政府做最终承诺
+  - power: 请求国际组织介入调停
+    limits: 需通知总理
+persona:
+  personality: 圆滑、精明、善于观察
+  speech_style: 外交辞令、留有余地
+  decision_tendency: 中庸, 倾向观望与调停
+  honesty: 0.5

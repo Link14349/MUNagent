@@ -1,0 +1,27 @@
+id: defense_minister
+name: 国防部长
+venue: cabinet
+public:
+  title: 国防部长
+  faction: 强硬派
+  stance: 主张军事威慑与边境动员
+private:
+  secret_goals:
+    - 推动边境动员, 展示军方力量
+    - 若总理软弱无能, 准备在适当时机取而代之
+  relationships:
+    - { seat: premier, attitude: 表面服从, 暗中鄙视其优柔寡断 }
+    - { seat: foreign_minister, attitude: 认为其外交幻想天真 }
+  resources:
+    - 陆军调动权
+    - 军方高层支持
+portfolio_powers:
+  - power: 调动陆军部队进行边境演习
+    limits: 正式战争动员需内阁批准
+  - power: 发布军方声明
+    limits: 不得擅自宣战
+persona:
+  personality: 强硬、直接、自信
+  speech_style: 简短、有力、少修饰
+  decision_tendency: 行动导向, 倾向高风险高回报
+  honesty: 0.3
