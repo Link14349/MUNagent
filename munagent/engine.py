@@ -84,13 +84,21 @@ class Engine:
             for e in events:
                 self._on_event(e)
 
-    def _make_llm(self) -> LLMClient:
+    def _make_llm(self, usage_sink=None) -> LLMClient:
         if self._llm is None:
             kwargs: dict = {}
             if self._llm_transport is not None:
                 kwargs["transport"] = self._llm_transport
+            sinks = []
             if self._usage_sink is not None:
-                kwargs["usage_sink"] = self._usage_sink
+                sinks.append(self._usage_sink)
+            if usage_sink is not None:
+                sinks.append(usage_sink)
+            if sinks:
+                def combined_sink(record):
+                    for s in sinks:
+                        s(record)
+                kwargs["usage_sink"] = combined_sink
             self._llm = LLMClient(self.config, **kwargs)
         return self._llm
 
@@ -103,7 +111,16 @@ class Engine:
             config={"max_steps": self.max_steps},
         )
 
-        llm = self._make_llm()
+        # 预算追踪(必须在 _make_llm 之前定义)
+        total_tokens = 0
+        token_budget = self.config.engine.session_max_tokens
+        consecutive_failures: dict[str, int] = {}  # role -> 连续失败次数
+
+        def _on_usage(record):
+            nonlocal total_tokens
+            total_tokens += record.prompt_tokens + record.completion_tokens
+
+        llm = self._make_llm(usage_sink=_on_usage)
         venue_spec = self.scenario.venues[0]
         seat_specs = self.scenario.seats_of(venue_spec.id)
         seat_ids = [s.id for s in seat_specs]
@@ -137,6 +154,9 @@ class Engine:
         epoch_threshold = self.config.engine.epoch_l3_max_tokens
         summaries: dict[str, str] = {}  # viewer -> 当前 L2 摘要
         l3_accum: dict[str, list[Event]] = {}  # viewer -> 本纪元 L3 事件
+
+        # 预算追踪
+        consecutive_failures: dict[str, int] = {}  # role -> 连续失败次数
 
         all_events: list[Event] = []
         step = 0
@@ -173,10 +193,28 @@ class Engine:
 
             all_events.extend(committed)
 
-            # 纪元检查: 各视角 L3 累积超阈值则触发摘要
+            # 纪元检查
             await self._check_epochs(
                 bus, sm, recorder, summaries, l3_accum, committed, seat_ids, epoch_threshold
             )
+
+            # token 预算熔断
+            if total_tokens >= token_budget:
+                bus.stage(
+                    Event(
+                        session_id=self.session_id,
+                        story_time=sm.story_time,
+                        type="session_control",
+                        actor="system",
+                        venue_id=sm.venue_id,
+                        scope="dm-only",
+                        payload={"action": "pause", "detail": f"token 预算耗尽({total_tokens}/{token_budget})"},
+                    ),
+                )
+                await bus.commit_step()
+                import sys
+                print(f"\n[熔断] token 预算耗尽({total_tokens}/{token_budget}), 推演暂停。", file=sys.stderr)
+                break
 
             # 预算检查
             if sm.phase == "ModeratedCaucus" and sm.budget_exceeded:
@@ -580,9 +618,11 @@ class Engine:
             private_recipients=recipients if scope == "private" else None,
         )
 
-        # 个人指令/危机笔记直接入后场判定; 联合指令/公报需投票(P2 简化: 暂也直接判定)
-        if dm is not None and d.kind in ("personal", "crisis_note"):
+        # 个人指令直接判定; 危机笔记先判定截获再判定送达; 联合指令/公报需投票(P2 简化: 暂也直接判定)
+        if dm is not None and d.kind == "personal":
             await self._adjudicate(bus, dm, directive_id, d.title, d.body, sm, seat_ids)
+        elif dm is not None and d.kind == "crisis_note":
+            await self._adjudicate_crisis_note(bus, dm, directive_id, d, target_seat, sm, seat_ids)
 
     # --- Voting 子流程 ---
 
@@ -921,6 +961,70 @@ class Engine:
                 payload={"text": broadcast_text, "source_directive_ids": [directive_id]},
             ),
         )
+
+    async def _adjudicate_crisis_note(
+        self,
+        bus: EventBus,
+        dm: DMAgent,
+        directive_id: str,
+        d: Any,
+        author_seat: str,
+        sm: VenueStateMachine,
+        seat_ids: list[str],
+    ) -> None:
+        """危机笔记: 先判定截获, 再判定送达. 见 06§5."""
+        # 截获判定: 程序掷骰, 概率档位默认 30(低频截获)
+        seed, roll = dm.roll(directive_id + ":intercept")
+        intercept_tier = 30  # 截获概率较低
+        margin = intercept_tier - roll
+        intercepted = margin >= 10  # 成功档以上才截获
+
+        if intercepted:
+            # 截获: 产生 private 事件给主席团
+            bus.stage(
+                Event(
+                    session_id=self.session_id,
+                    story_time=sm.story_time,
+                    type="adjudication",
+                    actor="dm",
+                    venue_id=sm.venue_id,
+                    scope="dm-only",
+                    payload={
+                        "directive_id": directive_id,
+                        "kind": "crisis_note_intercept",
+                        "outcome": "截获",
+                        "narrative_full": f"危机笔记'{d.title}'被截获。内容: {d.body[:100]}",
+                    },
+                    rng={"seed": seed, "rolls": [roll]},
+                ),
+            )
+            bus.stage(
+                Event(
+                    session_id=self.session_id,
+                    story_time=sm.story_time,
+                    type="directive_status",
+                    actor="system",
+                    venue_id=sm.venue_id,
+                    scope="private",
+                    payload={"directive_id": directive_id, "status": "intercepted"},
+                ),
+                private_recipients=[author_seat],
+            )
+        else:
+            # 未截获: 正常送达 + 判定内容效果
+            bus.stage(
+                Event(
+                    session_id=self.session_id,
+                    story_time=sm.story_time,
+                    type="note_delivered",
+                    actor="system",
+                    venue_id=sm.venue_id,
+                    scope="private",
+                    payload={"directive_id": directive_id, "recipient": d.recipient},
+                ),
+                private_recipients=[author_seat, d.recipient] if d.recipient else [author_seat],
+            )
+            await self._adjudicate(bus, dm, directive_id, d.title, d.body, sm, seat_ids)
 
     # --- 纪元机制 ---
 

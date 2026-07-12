@@ -7,13 +7,19 @@
 from __future__ import annotations
 
 from munagent.core.events import Event
+from munagent.core.timezone import to_local_time
 
 
-def render(event: Event) -> str:
-    """把事件渲染为 prompt 用的文本. 纯函数, 字节级确定."""
+def render(event: Event, *, timezone: str | None = None) -> str:
+    """把事件渲染为文本. 纯函数, 字节级确定.
+
+    timezone=None 时用 UTC(Agent 上下文用, 保缓存);
+    timezone="Asia/Shanghai" 时转本地(CLI 显示用).
+    """
     parts: list[str] = []
-    # 时间头(故事时间或真实时间, 固定取 story_time 优先)
-    ts = event.story_time or event.real_time
+    # 时间头(故事时间或真实时间, 按需转本地)
+    raw_ts = event.story_time or event.real_time
+    ts = to_local_time(raw_ts, timezone) if timezone else raw_ts
     parts.append(f"[{ts}]")
 
     # 主体按 type 分模板
@@ -75,6 +81,11 @@ def render(event: Event) -> str:
         parts.append(
             f"主持权变更: {event.payload.get('from_seat', '')} → {event.payload.get('to_seat', '')}"
             f" ({event.payload.get('cause', '')})"
+        )
+    elif t == "note_delivered":
+        parts.append(
+            f"危机笔记送达: {event.payload.get('directive_id', '')}"
+            f" → {event.payload.get('recipient', '')}"
         )
     elif t == "session_control":
         parts.append(f"会话控制: {event.payload.get('action', '')}")

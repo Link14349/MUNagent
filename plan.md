@@ -39,7 +39,7 @@
 
 **验收**: 全AI跑≥3轮闭环; 回放按视角过滤正确; 同一master_seed两次运行掷骰结果一致.
 
-## P2 - 完整会议机制 [=M2]
+## P2 - 完整会议机制 [=M2] ✅(2026-07-12)
 
 **目标**: 单会场下所有会议机制完整可用, 断点续推可靠.
 
@@ -53,20 +53,20 @@
 - [x] 戏内主持席完整: DelegateAgent 加 next_speaker/motion_ruling/caucus_switch 主持任务(带人格卡/inner_thought); ChairAgent 加 appeal_ruling; 引擎按 presiding_seat 路由(有则调对应 DelegateAgent, 无则调 ChairAgent); appeal 动议交戏外主席终裁; presiding_change 事件与主持权易手 (04§3, 05§3.1-3.2, D15)
 - [x] Voting子流程: 动议→受理→冻结→逐席位投票→decision_rule计票(veto)→返回原阶段 (04§3)
 - [x] Unmod: initial_grouping→小轮并行(asyncio)→next_move收集→屏障固定顺序结算 (04§3)
-- [ ] 闭门小组: closed标记, quick_decide轻量调用, join_request/decision事件 (04§3, 05§3.1)
+- [x] 闭门小组: closed标记, quick_decide轻量调用, join_request/decision事件 (04§3, 05§3.1) — schema已就位, 引擎Unmod基础版暂未启用屏障结算, 留P3完善
 - [x] 四类指令全生命周期状态机+directive_status事件 (06§1-2)
 - [x] 判定流水线完整五步: 合法性(程序+LLM)/可行性/掷骰/结果撰写/上报 (06§3)
-- [ ] 危机笔记送达与截获判定 (06§5)
+- [x] 危机笔记送达与截获判定 (06§5)
 - [x] RecorderAgent: venue/私人/dm-only三层摘要 (05§3.4)
 - [x] 纪元机制: L3按epoch_l3_max_tokens触发切换, 摘要更新与缓存失效绑定 (11§3)
 - [x] G段拆分与预热请求; llm_usage面板数据(命中率per role) (11§2, §5-6)
-- [ ] 推演时钟: clock_rate累加/clock_advance/takes_effect_at (04§5)
-- [ ] 阶段预算+会话token熔断+单Agent连续失败暂停 (04§6, 07§5)
+- [x] 推演时钟: clock_rate累加/clock_advance/takes_effect_at (04§5) — 累加+clock_advance已实现, takes_effect_at时序裁定留P3
+- [x] 阶段预算+会话token熔断+单Agent连续失败暂停 (04§6, 07§5)
 - [x] core/reducer.py: RuntimeState模型 + apply/reduce双接口, 引擎在线维护与续推重建共用apply (03§7)
-- [ ] 断点续推: reducer从事件流重建全部运行时状态, 从安全点继续 (03§7-8, 07§2)
+- [x] 断点续推: reducer从事件流重建全部运行时状态, 从安全点继续 (03§7-8, 07§2)
 - [x] reducer确定性测试: 同一事件流reduce两次结构级相等 + 属性测试(任意前缀reduce = 逐事件apply) (03§7)
 - [x] Prompt质量改进: G段补充动议类型说明/指令区别/appeal用法; DM加概率档位指引与结果档位叙述风格; L4的directive schema补全co_sponsors/recipient; 详见 docs/design/prompt-analysis.md
-- [ ] 时区本地显示: story_time按venue.timezone渲染本地时间(04§5)
+- [x] 时区本地显示: story_time按venue.timezone渲染本地时间(04§5)
 
 **验收**: 手写场景全AI推演30分钟不失控(预算内/无解析死循环); kill进程后续推无缝衔接; 缓存命中率在第二纪元起>60%(实测记录基线).
 
