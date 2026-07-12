@@ -62,6 +62,7 @@ scenario/
 ├── venues.yaml
 ├── seats/<seat_id>.yaml
 ├── crisis_arcs.yaml
+├── story-design.md          # 可选: 剧情走向与时间线设计(仅主席团可见)
 ├── stats.yaml
 └── references/
     ├── index.yaml
@@ -132,6 +133,10 @@ persona:                         # 供代表Agent扮演
   honesty: 0.7                   # 0~1, 见05中的prompt映射
 ```
 
+### story-design.md (可选, 仅主席团可见)
+剧情走向与时间线设计的人类可读版: 主要剧情走向(若干条参考线, 各含触发倾向/关键节拍/DM导航建议)、
+时间线关键节点表、主席跳时指引. **是导航图不是剧本**——注入DM与中立主席的G段, 代表不可见.
+
 ### crisis_arcs.yaml (仅主席团可见)
 ```yaml
 main_arc:
@@ -147,6 +152,10 @@ random_pool:                     # DM可在节奏需要时抽取
   - id: press_leak
     weight: 3
     content: 美国记者披露了海军拦截行动的细节...
+timeline:                        # 故事时间关键节点(机器可读): 主席跳时依据, DM推算生效时刻的参照
+  - at: "1962-10-24T10:00:00-04:00"
+    label: 封锁线正式生效
+    note: 在此之前抵近的船只将直接对峙
 ```
 
 ### stats.yaml

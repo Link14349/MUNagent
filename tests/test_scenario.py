@@ -15,8 +15,7 @@ def test_load_cabinet_crisis() -> None:
     sc = load_scenario(SCENARIO_DIR)
     assert sc.manifest.id == "cabinet-crisis"
     assert sc.manifest.title == "三人内阁危机"
-    assert "Z" not in sc.manifest.start_story_time  # 带 +08:00
-    assert "+" in sc.manifest.start_story_time
+    assert sc.manifest.start_story_time.endswith("Z")
 
     assert len(sc.venues) == 1
     venue = sc.venues[0]

@@ -1,13 +1,38 @@
-"""时区工具: UTC→会场本地时间转换. 见 04§5.
+"""时区工具: UTC 归一化与 UTC→会场本地时间转换. 见 04§5.
 
-内部一律 UTC, 渲染给代表/用户时按会场 timezone 转本地.
+内部一律 UTC(ISO 带 Z), 渲染给代表/用户时按会场 timezone 转本地.
 转换是确定性纯函数, 不破坏缓存纪律(11§4).
 """
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 from zoneinfo import ZoneInfo
+
+
+def parse_story_datetime(iso_str: str) -> datetime | None:
+    """解析故事时间 ISO 串为 aware datetime(统一转到 UTC). 非法返回 None."""
+    if not iso_str:
+        return None
+    try:
+        s = iso_str.replace("Z", "+00:00")
+        dt = datetime.fromisoformat(s)
+    except (ValueError, TypeError):
+        return None
+    if dt.tzinfo is None:
+        return None
+    return dt.astimezone(UTC)
+
+
+def to_utc_iso(iso_str: str) -> str:
+    """任意带时区的 ISO 时间 → UTC ISO(末尾 Z). 加载场景包与事件落库用."""
+    dt = parse_story_datetime(iso_str)
+    if dt is None:
+        raise ValueError(f"时间必须带时区偏移或 Z: {iso_str}")
+    text = dt.strftime("%Y-%m-%dT%H:%M:%S")
+    if dt.microsecond:
+        text += f".{dt.microsecond:06d}".rstrip("0").rstrip(".")
+    return f"{text}Z"
 
 
 def to_local_time(utc_str: str, timezone: str = "UTC") -> str:

@@ -45,8 +45,10 @@ class MockLLM(LLMClient):
         if task == "adjudicate":
             last = request.messages[-1].content
             if "评估" in last:
-                return '```json\n{"probability_tier": 70, "reasoning": "ok", "takes_effect_at": "2026-03-15T10:00:00+08:00", "visible_consequences": "ok"}\n```'
+                return '```json\n{"probability_tier": 70, "reasoning": "ok", "takes_effect_at": "2026-03-15T05:00:00Z", "visible_consequences": "ok"}\n```'
             return '```json\n{"narrative_full": "结果ok", "per_venue_visible": [{"venue": "cabinet", "text": "内阁收到结果"}], "author_private_result": "已执行", "suggest_broadcast": "immediate"}\n```'
+        if task == "clock_decision":
+            return '```json\n{"advance_to": "2026-03-15T02:30:00Z", "reason": "小步推进"}\n```'
         if task == "vote":
             return '```json\n{"choice": "aye", "inner_thought": "支持"}\n```'
         if task == "motion_ruling":
@@ -357,3 +359,115 @@ class TestCrisisNoteVisibility:
                   story_time="2026-03-15T01:00:00Z")
         out = render(e)
         assert "来自 a" in out and "《密信》" in out and "今夜行动" in out
+
+
+class TestClockAdvanceValidation:
+    """主席跳时校验: 只许向前、限最大步长、拒绝非法输入、不得越过在途生效点."""
+
+    def test_valid_forward_jump(self) -> None:
+        out = Engine._validate_clock_advance(
+            "2026-03-15T01:00:00Z", "2026-03-15T05:00:00Z")
+        assert out == "2026-03-15T05:00:00Z"
+
+    def test_rejects_backward_and_same(self) -> None:
+        assert Engine._validate_clock_advance(
+            "2026-03-15T01:00:00Z", "2026-03-15T00:00:00Z") is None
+        assert Engine._validate_clock_advance(
+            "2026-03-15T01:00:00Z", "2026-03-15T01:00:00Z") is None
+
+    def test_rejects_oversized_jump_and_garbage(self) -> None:
+        assert Engine._validate_clock_advance(
+            "2026-03-15T01:00:00Z", "2026-03-18T01:00:00Z") is None
+        assert Engine._validate_clock_advance(
+            "2026-03-15T01:00:00Z", "尽快") is None
+        assert Engine._validate_clock_advance(
+            "2026-03-15T01:00:00Z", "2026-03-15T05:00:00") is None  # 无时区
+
+    def test_rejects_jump_past_pending_effect(self) -> None:
+        assert Engine._validate_clock_advance(
+            "2026-03-15T01:00:00Z",
+            "2026-03-15T06:00:00Z",
+            pending_effect_times=["2026-03-15T05:00:00Z"],
+        ) is None
+
+    def test_allows_jump_to_pending_effect(self) -> None:
+        out = Engine._validate_clock_advance(
+            "2026-03-15T01:00:00Z",
+            "2026-03-15T05:00:00Z",
+            pending_effect_times=["2026-03-15T05:00:00Z"],
+        )
+        assert out == "2026-03-15T05:00:00Z"
+
+
+def test_presidium_g_includes_timeline_and_story_design() -> None:
+    """时间线与剧情设计进 DM/主席 G 段(主席团专用, 代表G段不含)."""
+    from munagent.agents.chair import build_chair_g
+    from munagent.agents.dm import build_dm_g
+    from munagent.agents.delegate import build_delegate_g_global
+
+    sc = load_scenario(SCENARIO_DIR)
+    for g in (build_dm_g(sc), build_chair_g(sc)):
+        assert "时间线关键节点" in g
+        assert "剧情走向与时间线设计" in g
+        assert "邻国内阁会议" in g  # 具体节点
+    delegate_g = build_delegate_g_global(sc, sc.venues[0].id)
+    assert "剧情走向与时间线设计" not in delegate_g  # 代表不可见
+
+
+@pytest.mark.asyncio
+async def test_adjudication_persists_takes_effect_at() -> None:
+    sc = load_scenario(SCENARIO_DIR)
+    config = _make_config()
+    db = tempfile.mktemp(suffix=".db")
+
+    engine = Engine(sc, config, master_seed=42, max_steps=3, db_path=db)
+    engine._llm = MockLLM(config, delegate_action="write_directive")
+    result = await engine.run()
+
+    adj = [e for e in result.events if e.type == "adjudication"]
+    assert adj
+    assert adj[0].payload.get("takes_effect_at") == "2026-03-15T05:00:00Z"
+
+
+@pytest.mark.asyncio
+async def test_resume_skips_opening_and_restores_clock() -> None:
+    """续推不重复 Opening phase_change, 且故事时间从 clock_advance 恢复."""
+    sc = load_scenario(SCENARIO_DIR)
+    config = _make_config()
+    db = tempfile.mktemp(suffix=".db")
+
+    engine = Engine(sc, config, master_seed=42, max_steps=3, db_path=db)
+    engine._llm = MockLLM(config, delegate_action="write_directive")
+    first = await engine.run()
+    session_id = first.session_id
+
+    resume = Engine(sc, config, master_seed=42, max_steps=2, db_path=db)
+    resume.session_id = session_id
+    resume._llm = MockLLM(config)
+    second = await resume.run()
+
+    from munagent.core.bus import EventBus
+    from munagent.core.reducer import reduce
+
+    bus = EventBus(db, session_id)
+    await bus.init_db()
+    all_events = await bus.query("god")
+    await bus.close()
+
+    opening_changes = [
+        e for e in all_events
+        if e.type == "phase_change" and e.payload.get("from") == "Opening"
+    ]
+    assert len(opening_changes) == 1
+
+    chair_clocks = [
+        e for e in all_events
+        if e.type == "clock_advance" and e.actor == "chair"
+    ]
+    assert chair_clocks
+    assert chair_clocks[-1].payload.get("to") == "2026-03-15T02:30:00Z"
+
+    state = reduce(all_events, session_id)
+    # 续推后至少恢复到主席跳时; 续推步内发言还会按 clock_rate 累加
+    assert state.venues["cabinet"].story_time >= "2026-03-15T02:30:00Z"
+    assert second.total_steps >= 1

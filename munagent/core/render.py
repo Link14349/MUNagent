@@ -87,8 +87,10 @@ def render(event: Event, *, timezone: str | None = None) -> str:
     elif t == "crisis_update":
         parts.append(f"危机更新: {event.payload.get('text', '')}")
     elif t == "clock_advance":
+        reason = event.payload.get("reason") or ""
+        reason_part = f" ({reason})" if reason else ""
         parts.append(
-            f"时钟推进: {event.payload.get('from', '')} → {event.payload.get('to', '')}"
+            f"时钟推进: {event.payload.get('from', '')} → {event.payload.get('to', '')}{reason_part}"
         )
     elif t == "presiding_change":
         parts.append(

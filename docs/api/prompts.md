@@ -133,7 +133,9 @@ G 段为固定 `G_RECORDER`; L1=`你是会议书记.`; L2/L3 为空.
 
 ## 主席 / DM Agent
 
-主席的 G 段为常量 `G_CHAIR`; DM 的 G 段由 `build_dm_g(scenario)` 组装——**判定规则 + 背景文书全文 + 全席位权力清单(合法性检查依据)**, 会话内字节级稳定(缓存友好). DM 判定的 L4 只放动态内容: 指令全文、当前 stats 数值(概率档位核心依据)、dm 摘要——不再截断背景文书.
+主席的 G 段由 `build_chair_g(scenario)` 组装(职责 + 剧情走向设计 + 时间线节点); DM 的 G 段由 `build_dm_g(scenario)` 组装——**判定规则 + 背景文书全文 + 剧情走向设计 + 时间线节点 + 全席位权力清单**, 会话内字节级稳定(缓存友好). DM 判定的 L4 放动态内容: <当前故事时间>、指令全文、当前 stats 数值、dm 摘要.
+
+`clock_decision`(主席): 每次危机更新后调用——L4 给当前时间/刚播报的更新/在途生效点, 主席对照 G 段时间线节点决定 `advance_to`(留空=不跳); 引擎 `_validate_clock_advance` 程序校验(只向前、默认≤24h), 生效即 `clock_advance` 事件(带 reason).
 
 当前主席/DM 的 L2 摘要**已生成但未接入**其 context 构建(DM 摘要经 `_adjudicate` 的 context_summary 传入 L4).
 

@@ -8,6 +8,8 @@ from typing import Literal
 import yaml
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from munagent.core.timezone import to_utc_iso
+
 
 class EndCondition(BaseModel):
     type: Literal["story_time_reached", "dm_judgement"]
@@ -29,7 +31,7 @@ class Manifest(BaseModel):
     @classmethod
     def _must_have_tz(cls, v: str) -> str:
         _require_tz(v)
-        return v
+        return to_utc_iso(v)
 
 
 class DecisionRule(BaseModel):
@@ -140,6 +142,7 @@ class ArcTrigger(BaseModel):
     def _tz(cls, v: str | None) -> str | None:
         if v is not None:
             _require_tz(v)
+            return to_utc_iso(v)
         return v
 
 
@@ -156,9 +159,24 @@ class RandomPoolEntry(BaseModel):
     content: str = ""
 
 
+class TimelineNode(BaseModel):
+    """故事时间关键节点(主席团专用): 主席跳时依据, DM推算takes_effect_at的参照."""
+
+    at: str
+    label: str = ""
+    note: str = ""
+
+    @field_validator("at")
+    @classmethod
+    def _must_have_tz(cls, v: str) -> str:
+        _require_tz(v)
+        return to_utc_iso(v)
+
+
 class CrisisArcs(BaseModel):
     main_arc: list[CrisisArc] = Field(default_factory=list)
     random_pool: list[RandomPoolEntry] = Field(default_factory=list)
+    timeline: list[TimelineNode] = Field(default_factory=list)
 
 
 class Scenario:
@@ -173,6 +191,7 @@ class Scenario:
         seats: dict[str, SeatSpec],
         crisis_arcs: CrisisArcs,
         stats: StatsConfig,
+        story_design: str = "",
     ) -> None:
         self.path = path
         self.manifest = manifest
@@ -181,6 +200,7 @@ class Scenario:
         self.seats = seats
         self.crisis_arcs = crisis_arcs
         self.stats = stats
+        self.story_design = story_design  # 剧情走向与时间线设计(主席团专用, 代表不可见)
 
     @property
     def id(self) -> str:
@@ -263,8 +283,13 @@ def load_scenario(path: str | Path) -> Scenario:
     if stats_path.exists():
         stats = StatsConfig.model_validate(yaml.safe_load(stats_path.read_text(encoding="utf-8")))
 
+    story_design = ""
+    sd_path = p / "story-design.md"
+    if sd_path.exists():
+        story_design = sd_path.read_text(encoding="utf-8")
+
     _validate_references(manifest, venues, seats, crisis_arcs, stats)
-    return Scenario(p, manifest, background, venues, seats, crisis_arcs, stats)
+    return Scenario(p, manifest, background, venues, seats, crisis_arcs, stats, story_design)
 
 
 def _validate_references(

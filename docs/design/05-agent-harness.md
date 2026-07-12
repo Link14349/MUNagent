@@ -81,10 +81,12 @@ class BaseAgent:
 | `motion_ruling` | `{ruling: accept\|reject, reason}` (无主持席的会场) |
 | `appeal_ruling` | `{ruling: sustain\|overrule, reason}` — 申诉终裁, 中立行使 |
 | `broadcast_decision` | 收到DM结果后: `{plan: [{venue, text, delay_story_minutes}], withhold: [venue]}` — 每会场文本可不同、可延迟、可扣发 |
-| `clock_decision` | `{advance_to, reason}` |
+| `clock_decision` | `{advance_to, reason}` — 危机更新后跳时, advance_to留空=不跳; 程序校验向前/限步长 |
 
 ### 3.3 DM Agent
 判定流水线见[06](06-directives-adjudication.md). 任务: `adjudicate`(五步流水线中的②可行性评估与④结果撰写两次LLM调用)、`arc_condition_check`(评估condition型弧线触发)、`random_pool_draw`建议.
+
+**时间意识**: DM的G段含剧情走向设计与时间线节点(story-design.md); 判定L4带<当前故事时间>——评估须对照下一节点思考"赶不赶得上", takes_effect_at诚实推算, 错过窗口的行动效果打折.
 
 ### 3.4 书记Agent(RecorderAgent): 章节追加摘要
 

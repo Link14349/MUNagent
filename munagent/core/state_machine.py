@@ -12,6 +12,8 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from typing import Literal
 
+from munagent.core.events import Event
+
 Phase = Literal[
     "Opening",
     "ModeratedCaucus",
@@ -77,8 +79,13 @@ class VenueStateMachine:
         self.seat_status: dict[str, str] = {sid: "active" for sid in seat_ids}
         self.phase: Phase = initial_phase
         self.presiding_seat = presiding_seat
-        self.story_time = start_story_time
-        self._story_dt = datetime.fromisoformat(start_story_time)
+        from munagent.core.timezone import parse_story_datetime, to_utc_iso
+
+        self.story_time = to_utc_iso(start_story_time)
+        parsed = parse_story_datetime(self.story_time)
+        if parsed is None:
+            raise ValueError(f"非法故事时间: {start_story_time}")
+        self._story_dt = parsed
         self.per_mod_speech_delta = parse_clock_delta(per_mod_speech)
         self.per_unmod_round_delta = parse_clock_delta(per_unmod_round)
         self.max_speeches = max_speeches
@@ -136,16 +143,81 @@ class VenueStateMachine:
         # Voting 结束后返回时, 恢复计数器不变(继续被打断的阶段)
 
     def advance_clock(self, *, unmod: bool = False) -> str:
+        from munagent.core.timezone import parse_story_datetime, to_utc_iso
+
         delta = self.per_unmod_round_delta if unmod else self.per_mod_speech_delta
         self._story_dt = self._story_dt + delta
-        self.story_time = self._story_dt.isoformat()
+        self.story_time = to_utc_iso(self._story_dt.isoformat())
+        parsed = parse_story_datetime(self.story_time)
+        if parsed is not None:
+            self._story_dt = parsed
         return self.story_time
 
     def advance_clock_to(self, target: str) -> str:
         """显式跳时(clock_advance 事件用)."""
-        self._story_dt = datetime.fromisoformat(target)
-        self.story_time = self._story_dt.isoformat()
+        from munagent.core.timezone import parse_story_datetime, to_utc_iso
+
+        self.story_time = to_utc_iso(target)
+        parsed = parse_story_datetime(self.story_time)
+        if parsed is None:
+            raise ValueError(f"非法跳时目标: {target}")
+        self._story_dt = parsed
         return self.story_time
+
+    def replay_from_events(self, events: list[Event]) -> None:
+        """从已落库事件回放前场状态(续推用). 转移校验放宽, 以事件日志为准."""
+        for e in events:
+            if e.venue_id != self.venue_id:
+                continue
+            t = e.type
+            if t == "clock_advance":
+                to = e.payload.get("to")
+                if to:
+                    self.advance_clock_to(to)
+            elif t == "phase_change":
+                to = e.payload.get("to")
+                if to:
+                    self.phase = to  # type: ignore[assignment]
+                    if to == "ModeratedCaucus":
+                        self.mod_speech_count = 0
+                        self.spoken_this_phase = []
+                        self.unspoken_count = 0
+                    elif to == "UnmoderatedCaucus":
+                        self.unmod_round_count = 0
+                        self.groups = []
+                    elif to == "Voting":
+                        self.vote_casts = {}
+                        self.vote_index = 0
+            elif t == "speech" and self.phase == "ModeratedCaucus":
+                seat = e.actor.replace("seat:", "")
+                if seat:
+                    self.record_speech(seat)
+            elif t == "seat_status_change":
+                seat = e.payload.get("seat", "")
+                to_status = e.payload.get("to", "")
+                if seat in self.seat_status and to_status:
+                    self.set_seat_status(seat, to_status)
+            elif t == "presiding_change":
+                to_seat = e.payload.get("to_seat")
+                self.presiding_seat = to_seat or None
+            elif t == "vote_call":
+                self.active_vote_directive_id = e.payload.get("directive_id")
+                self.interrupted_phase = self.phase
+                self.phase = "Voting"  # type: ignore[assignment]
+                self.vote_casts = {}
+                self.vote_index = 0
+            elif t == "vote_cast":
+                seat = e.actor.replace("seat:", "")
+                if seat:
+                    self.record_vote(seat, e.payload.get("choice", "abstain"))
+            elif t == "vote_result":
+                self.active_vote_directive_id = None
+                self.vote_casts = {}
+                self.vote_order = []
+                self.vote_index = 0
+                restore = self.interrupted_phase or "ModeratedCaucus"
+                self.interrupted_phase = None
+                self.phase = restore  # type: ignore[assignment]
 
     # --- Mod 阶段 ---
     def record_speech(self, seat_id: str) -> None:

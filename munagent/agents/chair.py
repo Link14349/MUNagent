@@ -28,6 +28,13 @@ class BroadcastDecisionAction(BaseModel):
     withhold: list[str] = []
 
 
+class ClockDecisionAction(BaseModel):
+    """危机更新后的跳时决策: advance_to为空=不跳时(小步自然推进)."""
+
+    advance_to: str = ""  # 目标故事时间(ISO带时区), 不得早于当前, 不得跳过在途生效点
+    reason: str = ""
+
+
 class AppealRulingAction(BaseModel):
     ruling: Literal["sustain", "overrule"]  # sustain=维持主持裁决, overrule=推翻
     reason: str = ""
@@ -39,12 +46,28 @@ class MotionRulingAction(BaseModel):
 
 
 G_CHAIR = """你是模拟联合国危机推演的戏外会议主席(中立). 职责:
-- 游戏层: 点名(无主持席时)、阶段决策、Crisis Update 播报、预算控制.
+- 游戏层: 点名(无主持席时)、阶段决策、Crisis Update 播报、时间推进、预算控制.
 - 申诉终裁: 代表动议 appeal 申诉主持席裁决时, 由你中立终裁.
 - 你没有戏内立场, 不偏袒任何代表.
 - 播报文风: 新闻简报体, 克制客观准确——只陈述事实, 不渲染气氛, 不替任何代表编写台词或行动.
+- 时间推进: 每次危机更新后, 由你决定故事时间推进到哪个节点——会场空转时跳向下一个压力节点,
+  重大转折后小步推进给代表反应空间; 永不回拨, 不跳过在途行动的生效点.
 在```json代码块中按指定 schema 输出.
 """
+
+
+def build_chair_g(scenario) -> str:
+    """主席G段: 职责 + 剧情走向设计 + 时间线(主席团专用, 会话内稳定)."""
+    from munagent.agents.dm import format_timeline
+
+    parts = [G_CHAIR.rstrip()]
+    story_design = getattr(scenario, "story_design", "")
+    if story_design.strip():
+        parts.append(f"## 剧情走向与时间线设计(导航图, 不是剧本)\n\n{story_design.strip()}")
+    tl = format_timeline(scenario)
+    if tl:
+        parts.append(tl)
+    return "\n\n".join(parts)
 
 
 L1_CHAIR = "你是戏外中立会议主席."
@@ -57,10 +80,11 @@ class ChairAgent(BaseAgent):
     ChairAgent 保留 phase_decision/broadcast_decision/appeal_ruling.
     """
 
-    def __init__(self, llm: LLMClient, venue_id: str, seat_ids: list[str]) -> None:
+    def __init__(self, llm: LLMClient, venue_id: str, seat_ids: list[str], g_chair: str = G_CHAIR) -> None:
         super().__init__(llm, max_tokens=4096)
         self.venue_id = venue_id
         self.seat_ids = seat_ids
+        self._g = g_chair
 
     async def next_speaker(
         self,
@@ -79,7 +103,7 @@ class ChairAgent(BaseAgent):
             '{"seat": "席位id", "reason": "简短理由"}'
         )
         ctx = self.build_context(
-            task, g=G_CHAIR, l1=L1_CHAIR, l2="", l3=l3, l4=l4
+            task, g=self._g, l1=L1_CHAIR, l2="", l3=l3, l4=l4
         )
         result = await self.act(task, ctx, schema_model=NextSpeakerAction)
         if isinstance(result, NextSpeakerAction):
@@ -105,7 +129,7 @@ class ChairAgent(BaseAgent):
             '{"ruling": "accept|reject", "reason": "理由"}'
         )
         ctx = self.build_context(
-            task, g=G_CHAIR, l1=L1_CHAIR, l2="", l3=l3, l4=l4
+            task, g=self._g, l1=L1_CHAIR, l2="", l3=l3, l4=l4
         )
         result = await self.act(task, ctx, schema_model=MotionRulingAction)
         if isinstance(result, MotionRulingAction):
@@ -142,7 +166,7 @@ class ChairAgent(BaseAgent):
             '{"action": "keep|switch|adjourn", "to_phase": "目标阶段", "announcement": "当众宣布的话"}'
         )
         ctx = self.build_context(
-            task, g=G_CHAIR, l1=L1_CHAIR, l2="", l3=l3, l4=l4
+            task, g=self._g, l1=L1_CHAIR, l2="", l3=l3, l4=l4
         )
         result = await self.act(task, ctx, schema_model=PhaseDecisionAction)
         if isinstance(result, PhaseDecisionAction):
@@ -162,7 +186,7 @@ class ChairAgent(BaseAgent):
             '{"plan": [{"venue": "会场id", "text": "播报文本"}], "withhold": []}'
         )
         ctx = self.build_context(
-            task, g=G_CHAIR, l1=L1_CHAIR, l2="", l3="", l4=l4
+            task, g=self._g, l1=L1_CHAIR, l2="", l3="", l4=l4
         )
         result = await self.act(task, ctx, schema_model=BroadcastDecisionAction)
         if isinstance(result, BroadcastDecisionAction):
@@ -190,9 +214,33 @@ class ChairAgent(BaseAgent):
             '{"ruling": "sustain|overrule", "reason": "理由"}'
         )
         ctx = self.build_context(
-            task, g=G_CHAIR, l1=L1_CHAIR, l2="", l3=l3, l4=l4
+            task, g=self._g, l1=L1_CHAIR, l2="", l3=l3, l4=l4
         )
         result = await self.act(task, ctx, schema_model=AppealRulingAction)
         if isinstance(result, AppealRulingAction):
             return result
         return AppealRulingAction(ruling="sustain", reason="fallback: 维持原裁决")
+
+    async def clock_decision(
+        self,
+        task: TaskSpec,
+        story_time: str,
+        crisis_text: str,
+        pending_effects: str = "",
+    ) -> ClockDecisionAction:
+        """危机更新后的跳时决策. 见 04§5."""
+        pending_part = f"在途行动生效点(不得跳过):\n{pending_effects}\n" if pending_effects else ""
+        l4 = (
+            f"当前故事时间: {story_time}\n"
+            f"刚播报的危机更新:\n{crisis_text}\n"
+            f"{pending_part}"
+            f"决定故事时间是否向前推进: 参考系统消息中的时间线节点与跳时指引——"
+            f"会场空转跳向下一个压力节点, 重大转折后小步推进(或不跳). "
+            f"在```json中输出: "
+            '{"advance_to": "目标时间ISO格式带时区(不跳时则留空)", "reason": "一句话理由"}'
+        )
+        ctx = self.build_context(task, g=self._g, l1=L1_CHAIR, l2="", l3="", l4=l4)
+        result = await self.act(task, ctx, schema_model=ClockDecisionAction)
+        if isinstance(result, ClockDecisionAction):
+            return result
+        return ClockDecisionAction()

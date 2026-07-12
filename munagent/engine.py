@@ -12,7 +12,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from munagent.agents.base import TaskSpec
-from munagent.agents.chair import AppealRulingAction, ChairAgent
+from munagent.agents.chair import AppealRulingAction, ChairAgent, build_chair_g
 from munagent.agents.delegate import (
     DelegateAgent,
     DelegateTurnAction,
@@ -120,11 +120,18 @@ class Engine:
     async def run(self) -> RunResult:
         bus = EventBus(self.db_path, self.session_id)
         await bus.init_db()
-        await bus.create_session(
-            self.scenario.id,
-            master_seed=self.master_seed,
-            config={"max_steps": self.max_steps},
-        )
+        existing = await bus.query("god")
+        is_resume = len(existing) > 0
+
+        session_row = await bus.get_session()
+        if session_row is None:
+            await bus.create_session(
+                self.scenario.id,
+                master_seed=self.master_seed,
+                config={"max_steps": self.max_steps},
+            )
+        elif session_row.get("master_seed") is not None:
+            self.master_seed = int(session_row["master_seed"])
 
         # 预算追踪(必须在 _make_llm 之前定义)
         total_tokens = 0
@@ -161,7 +168,8 @@ class Engine:
             s.id: DelegateAgent(llm, s, delegate_g)
             for s in seat_specs
         }
-        chair = ChairAgent(llm, venue_spec.id, seat_ids)
+        chair = ChairAgent(llm, venue_spec.id, seat_ids, g_chair=build_chair_g(self.scenario))
+        self._chair = chair  # 判定后跳时决策用(见 _adjudicate)
         dm = DMAgent(llm, self.master_seed, g_dm=build_dm_g(self.scenario))
         from munagent.agents.recorder import RecorderAgent, estimate_tokens
         recorder = RecorderAgent(llm)
@@ -238,28 +246,31 @@ class Engine:
         all_events: list[Event] = []
         step = 0
 
-        # Opening → 初始阶段
-        initial = venue_spec.initial_phase
-        phase_payload: dict = {"from": "Opening", "to": initial, "reason": "会议开始"}
-        if initial == "ModeratedCaucus":
-            self._on_enter_moderated_caucus("Opening")
-            phase_payload["agenda_no"] = self._agenda_no
-        bus.stage(
-            Event(
-                session_id=self.session_id,
-                story_time=sm.story_time,
-                type="phase_change",
-                actor="chair",
-                venue_id=sm.venue_id,
-                scope="venue",
-                payload=phase_payload,
-            ),
-            venue_seats=sm.active_seat_ids,
-        )
-        committed = await bus.commit_step()
-        all_events.extend(committed)
-        self._emit_committed(committed)
-        sm.transition(initial)
+        if is_resume:
+            sm.replay_from_events(existing)
+        else:
+            # Opening → 初始阶段
+            initial = venue_spec.initial_phase
+            phase_payload: dict = {"from": "Opening", "to": initial, "reason": "会议开始"}
+            if initial == "ModeratedCaucus":
+                self._on_enter_moderated_caucus("Opening")
+                phase_payload["agenda_no"] = self._agenda_no
+            bus.stage(
+                Event(
+                    session_id=self.session_id,
+                    story_time=sm.story_time,
+                    type="phase_change",
+                    actor="chair",
+                    venue_id=sm.venue_id,
+                    scope="venue",
+                    payload=phase_payload,
+                ),
+                venue_seats=sm.active_seat_ids,
+            )
+            committed = await bus.commit_step()
+            all_events.extend(committed)
+            self._emit_committed(committed)
+            sm.transition(initial)
 
         while step < self.max_steps and sm.phase != "Adjourned":
             step += 1
@@ -335,6 +346,119 @@ class Engine:
             total_steps=step,
             events=all_committed,
         )
+
+    # --- 时间推进 ---
+
+    @staticmethod
+    def _pending_effect_times(
+        adjudication_events: list[Event],
+        story_time: str,
+        *,
+        extra: str = "",
+    ) -> list[str]:
+        """汇总故事时间尚未到达的 takes_effect_at(在途生效点)."""
+        from munagent.core.timezone import parse_story_datetime, to_utc_iso
+
+        cur = parse_story_datetime(story_time)
+        if cur is None:
+            return []
+        pending: list[str] = []
+        for e in adjudication_events:
+            te = e.payload.get("takes_effect_at") or ""
+            if not te:
+                continue
+            try:
+                te_norm = to_utc_iso(te)
+            except ValueError:
+                continue
+            te_dt = parse_story_datetime(te_norm)
+            if te_dt and te_dt > cur:
+                pending.append(te_norm)
+        if extra:
+            try:
+                extra_norm = to_utc_iso(extra)
+            except ValueError:
+                extra_norm = ""
+            if extra_norm:
+                extra_dt = parse_story_datetime(extra_norm)
+                if extra_dt and extra_dt > cur and extra_norm not in pending:
+                    pending.append(extra_norm)
+        return pending
+
+    @staticmethod
+    def _format_pending_effects(
+        adjudication_events: list[Event],
+        story_time: str,
+        *,
+        extra_directive_id: str = "",
+        extra_takes_effect_at: str = "",
+    ) -> str:
+        """主席 clock_decision 用的在途生效点文本."""
+        extra = extra_takes_effect_at if extra_takes_effect_at else ""
+        times = Engine._pending_effect_times(adjudication_events, story_time, extra=extra)
+        if not times:
+            return ""
+        # 按时间排序, 关联 directive_id
+        id_by_time: dict[str, str] = {}
+        from munagent.core.timezone import to_utc_iso
+
+        for e in adjudication_events:
+            te = e.payload.get("takes_effect_at") or ""
+            if not te:
+                continue
+            try:
+                te_norm = to_utc_iso(te)
+            except ValueError:
+                continue
+            id_by_time[te_norm] = e.payload.get("directive_id", "")
+        if extra_takes_effect_at and extra_directive_id:
+            try:
+                id_by_time[to_utc_iso(extra_takes_effect_at)] = extra_directive_id
+            except ValueError:
+                pass
+        lines = []
+        for te in sorted(times):
+            did = id_by_time.get(te, "")
+            label = f"{did} " if did else ""
+            lines.append(f"- {label}生效于 {te}")
+        return "\n".join(lines)
+
+    @staticmethod
+    def _validate_clock_advance(
+        current: str,
+        target: str,
+        max_jump_hours: int = 24,
+        pending_effect_times: list[str] | None = None,
+    ) -> str | None:
+        """校验主席跳时目标: 只向前、限步长、不得越过在途生效点; 非法返回 None."""
+        from datetime import datetime, timedelta
+
+        from munagent.core.timezone import parse_story_datetime, to_utc_iso
+
+        cur = parse_story_datetime(current)
+        if cur is None:
+            return None
+        tgt = parse_story_datetime(target)
+        if tgt is None:
+            return None
+        if tgt <= cur or tgt - cur > timedelta(hours=max_jump_hours):
+            return None
+        if pending_effect_times:
+            future: list[datetime] = []
+            for raw in pending_effect_times:
+                try:
+                    norm = to_utc_iso(raw)
+                except ValueError:
+                    continue
+                dt = parse_story_datetime(norm)
+                if dt and dt > cur:
+                    future.append(dt)
+            if future and tgt > min(future):
+                return None
+        try:
+            return to_utc_iso(target)
+        except ValueError:
+            return None
 
     # --- 草案线(D16, 见06§2) ---
 
@@ -956,7 +1080,8 @@ class Engine:
             assignment = self._assign_doc_number(d, target_seat)
             directive_id = f"{assignment['doc_line']}-v{assignment['version']}"
         else:
-            directive_id = f"d-{self.session_id}-{self._directive_count + 1}"  # 计数器保证唯一且确定
+            # 计数器保证会话内唯一且确定; 不含session_id/时钟——掷骰seed依赖id, 墙钟会毁掉同seed可复现
+            directive_id = f"d-{self._directive_count + 1}"
         diff_summary = None
         if assignment.get("parent_body") is not None:
             diff_summary = self._diff_summary(assignment["parent_body"], d.body)
@@ -1375,7 +1500,9 @@ class Engine:
         context_summary = "\n\n".join(parts) or "(局势尚无特别记录)"
 
         assess_task = TaskSpec(role="dm", task="adjudicate", phase=sm.phase, venue_id=sm.venue_id)
-        assessment = await dm.assess_feasibility(assess_task, directive_text, context_summary)
+        assessment = await dm.assess_feasibility(
+            assess_task, directive_text, context_summary, story_time=sm.story_time
+        )
 
         seed, roll = dm.roll(directive_id)
         margin = assessment.probability_tier - roll
@@ -1383,8 +1510,17 @@ class Engine:
 
         result_task = TaskSpec(role="dm", task="adjudicate", phase=sm.phase, venue_id=sm.venue_id)
         result = await dm.write_result(
-            result_task, directive_text, assessment.probability_tier, roll, outcome, context_summary
+            result_task, directive_text, assessment.probability_tier, roll, outcome,
+            context_summary, story_time=sm.story_time,
         )
+
+        takes_effect_at = ""
+        if assessment.takes_effect_at:
+            from munagent.core.timezone import to_utc_iso
+            try:
+                takes_effect_at = to_utc_iso(assessment.takes_effect_at)
+            except ValueError:
+                takes_effect_at = assessment.takes_effect_at
 
         bus.stage(
             Event(
@@ -1400,6 +1536,7 @@ class Engine:
                     "roll": roll,
                     "outcome": outcome,
                     "narrative_full": result.narrative_full,
+                    "takes_effect_at": takes_effect_at,
                 },
                 rng={"seed": seed, "rolls": [roll]},
             ),
@@ -1471,6 +1608,45 @@ class Engine:
                 payload={"text": broadcast_text, "source_directive_ids": [directive_id]},
             ),
         )
+
+        # 危机更新后由主席决定跳时(见 04§5): 依据G段时间线节点与局势
+        chair = getattr(self, "_chair", None)
+        if chair is not None:
+            prior_adj = await bus.query("god", types=["adjudication"])
+            pending_times = self._pending_effect_times(
+                prior_adj, sm.story_time, extra=takes_effect_at,
+            )
+            pending = self._format_pending_effects(
+                prior_adj, sm.story_time,
+                extra_directive_id=directive_id,
+                extra_takes_effect_at=takes_effect_at,
+            )
+            clock_task = TaskSpec(role="chair", task="clock_decision",
+                                  phase=sm.phase, venue_id=sm.venue_id)
+            decision = await chair.clock_decision(
+                clock_task, sm.story_time, broadcast_text, pending
+            )
+            if decision.advance_to:
+                validated = self._validate_clock_advance(
+                    sm.story_time, decision.advance_to,
+                    pending_effect_times=pending_times,
+                )
+                if validated is not None:
+                    old_time = sm.story_time
+                    sm.advance_clock_to(validated)
+                    bus.stage(
+                        Event(
+                            session_id=self.session_id,
+                            story_time=sm.story_time,
+                            type="clock_advance",
+                            actor="chair",
+                            venue_id=sm.venue_id,
+                            scope="venue",
+                            payload={"from": old_time, "to": sm.story_time,
+                                     "reason": decision.reason},
+                        ),
+                        venue_seats=sm.active_seat_ids,
+                    )
 
     async def _adjudicate_crisis_note(
         self,

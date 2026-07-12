@@ -62,11 +62,16 @@ def apply(state: RuntimeState, e: Event) -> RuntimeState:
     s = state.model_copy(deep=True)
     s.last_seq = e.seq or s.last_seq
 
+    def _venue(venue_id: str) -> VenueState:
+        if venue_id not in s.venues:
+            s.venues[venue_id] = VenueState(id=venue_id)
+        return s.venues[venue_id]
+
     t = e.type
 
     if t == "phase_change":
-        if e.venue_id and e.venue_id in s.venues:
-            v = s.venues[e.venue_id]
+        if e.venue_id:
+            v = _venue(e.venue_id)
             v.phase = e.payload.get("to", v.phase)
             if v.phase == "ModeratedCaucus":
                 v.mod_speech_count = 0
@@ -75,26 +80,26 @@ def apply(state: RuntimeState, e: Event) -> RuntimeState:
                 v.groups = []
 
     elif t == "speech":
-        if e.venue_id and e.venue_id in s.venues:
-            v = s.venues[e.venue_id]
+        if e.venue_id:
+            v = _venue(e.venue_id)
             if v.phase == "ModeratedCaucus":
                 v.mod_speech_count += 1
 
     elif t == "vote_call":
-        if e.venue_id and e.venue_id in s.venues:
-            v = s.venues[e.venue_id]
+        if e.venue_id:
+            v = _venue(e.venue_id)
             v.active_vote = VoteState(directive_id=e.payload.get("directive_id", ""))
             v.interrupted_phase = v.phase
 
     elif t == "vote_cast":
-        if e.venue_id and e.venue_id in s.venues:
-            v = s.venues[e.venue_id]
+        if e.venue_id:
+            v = _venue(e.venue_id)
             if v.active_vote:
                 v.active_vote.cast[e.actor.replace("seat:", "")] = e.payload.get("choice", "abstain")
 
     elif t == "vote_result":
-        if e.venue_id and e.venue_id in s.venues:
-            v = s.venues[e.venue_id]
+        if e.venue_id:
+            v = _venue(e.venue_id)
             v.active_vote = None
             d_id = e.payload.get("directive_id", "")
             result = e.payload.get("result", "")
@@ -127,13 +132,13 @@ def apply(state: RuntimeState, e: Event) -> RuntimeState:
                 s.stats.setdefault(entity, {})[field] = to
 
     elif t == "presiding_change":
-        if e.venue_id and e.venue_id in s.venues:
-            v = s.venues[e.venue_id]
+        if e.venue_id:
+            v = _venue(e.venue_id)
             v.presiding_seat = e.payload.get("to_seat")
 
     elif t == "clock_advance":
-        if e.venue_id and e.venue_id in s.venues:
-            v = s.venues[e.venue_id]
+        if e.venue_id:
+            v = _venue(e.venue_id)
             v.story_time = e.payload.get("to", v.story_time)
 
     elif t == "session_control":

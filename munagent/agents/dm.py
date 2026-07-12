@@ -62,6 +62,11 @@ G_DM = """你是模拟联合国历史委员会危机联动推演的危机导演(
 - 资格变化必须来自**会场外部力量**(议会弹劾生效/军方拘押/司法逮捕)或指令作者自身行动的直接反噬——不得假手于某位在场代表的"当场决定"(那是他自己的回合该做的事).
 - 仅在结果明确导致资格变化时使用, 不要作为普通惩罚滥用; 无变化时输出空数组.
 
+## 时间走向(重要)
+- 你的判定活在时间线上: 每次评估都要对照<当前故事时间>与时间线上的下一个节点思考——这个行动**赶不赶得上**? 部队调动、外交往返、舆论发酵都有物理耗时, takes_effect_at必须诚实推算, 不许"立即生效"地糊弄;
+- 结果叙述要体现时间压力: 离关键节点越近, 半途行动的风险越高; 已错过窗口的行动(如对方舆论定调后才发的解释信号)效果应打折;
+- 剧情走向设计是导航不是剧本: 参考它给叙述方向感, 但代表的选择永远优先.
+
 ## 判定通用做法
 - 概率反映现实约束而非戏剧需要: 不因为行动"精彩"而上调, 不因为平淡而下调.
 - 同类行动同标准: 对不同代表的相似行动给出一致的档位, 你的公信力来自一致性.
@@ -75,14 +80,29 @@ G_DM = """你是模拟联合国历史委员会危机联动推演的危机导演(
 """
 
 
+def format_timeline(scenario) -> str:
+    """时间线节点 → prompt文本(主席团专用)."""
+    nodes = getattr(scenario.crisis_arcs, "timeline", [])
+    if not nodes:
+        return ""
+    lines = [f"- {n.at} {n.label}: {n.note}" for n in nodes]
+    return "## 时间线关键节点(外部世界的心跳, 与会议节奏无关地逼近)\n" + "\n".join(lines)
+
+
 def build_dm_g(scenario) -> str:
-    """组装 DM 的 G 段: 判定规则 + 背景文书全文 + 全席位权力清单.
+    """组装 DM 的 G 段: 判定规则 + 背景全文 + 权力清单 + 剧情走向设计 + 时间线.
 
     会话内字节级稳定(前缀缓存), 判定上下文(L4)只放动态内容(指令/stats/摘要).
     """
     parts = [G_DM.rstrip()]
     if scenario.background.strip():
         parts.append(f"## 背景文书\n\n{scenario.background.strip()}")
+    story_design = getattr(scenario, "story_design", "")
+    if story_design.strip():
+        parts.append(f"## 剧情走向与时间线设计(导航图, 不是剧本)\n\n{story_design.strip()}")
+    tl = format_timeline(scenario)
+    if tl:
+        parts.append(tl)
     roster = ["## 各席位权力清单(合法性检查依据)"]
     for seat in scenario.seats.values():
         roster.append(f"### {seat.name} (`{seat.id}`)")
@@ -133,9 +153,12 @@ class DMAgent(BaseAgent):
         task: TaskSpec,
         directive_text: str,
         context_summary: str,
+        story_time: str = "",
     ) -> FeasibilityAssessment:
         self._schema_model = FeasibilityAssessment
+        time_part = f"<当前故事时间>{story_time}</当前故事时间>\n" if story_time else ""
         l4 = (
+            f"{time_part}"
             f"待判定指令:\n{directive_text}\n\n"
             f"当前局势:\n{context_summary}\n\n"
             f"评估成功概率档位(90/70/50/30/10). 在```json中输出: "
@@ -159,9 +182,12 @@ class DMAgent(BaseAgent):
         roll: int,
         outcome: str,
         context_summary: str,
+        story_time: str = "",
     ) -> AdjudicationResult:
         self._schema_model = AdjudicationResult
+        time_part = f"<当前故事时间>{story_time}</当前故事时间>\n" if story_time else ""
         l4 = (
+            f"{time_part}"
             f"指令:\n{directive_text}\n\n"
             f"概率档位: {probability_tier}%, 掷骰: {roll}, 结果: {outcome}\n"
             f"当前局势:\n{context_summary}\n\n"

@@ -25,3 +25,11 @@ P1 推演引擎: 单会场 + 三 Agent 闭环.
 - `_supersede_other_lines(...)`: 一版通过, 同议程其余 active 线批量发 superseded 事件
 - 联合指令/公报 directive_id = "D<议程>.<递交序>-v<版本>"; 个人指令/危机笔记保留内部 id, 不进公开编号
 - `_docs_dossier(seat_id)`: 该席位可见现行文件的原文档案(已通过/待决当前版/本人私密指令/本人收到的已送达危机笔记), 注入 turn/vote 上下文的<当前有效文件>区; delivered 标记随 note_delivered 事件持久化并在续推时回灌
+
+## 时间推进
+- `_pending_effect_times` / `_format_pending_effects`: 从 `adjudication` 事件汇总在途 `takes_effect_at`(故事时间尚未到达)
+- `_validate_clock_advance(current, target, max_jump_hours=24, pending_effect_times=...) -> str | None`: 主席跳时校验(只向前/限步长/不得越过在途生效点/归一化 UTC Z)
+- 危机更新播报后引擎调 `chair.clock_decision(...)`; 合法则 `sm.advance_clock_to` + `clock_advance` 事件(actor=chair, 带 reason)
+- `adjudication` payload 含 `takes_effect_at`(UTC Z)
+- 续推: `VenueStateMachine.replay_from_events` 从已落库事件恢复 phase/时钟; 有历史事件时跳过 Opening `phase_change`
+- DM 判定(`assess_feasibility`/`write_result`)传入 `story_time`; 场景包加载时 `start_story_time`/timeline/arc trigger 归一化为 UTC Z
