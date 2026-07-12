@@ -46,6 +46,7 @@ class Event(BaseModel):
 | `group_move` | 系统 | venue* | seat, from_group, to_group (*会场内可见谁在串门, 但组内谈话内容不可见) |
 | `group_join_request` / `group_join_decision` | 系统/发起人 | group+申请者 | seat, decision |
 | `presiding_change` | 主席/系统 | venue | from_seat, to_seat, cause(指令判定/投票/主席决定) |
+| `seat_status_change` | 系统(源自DM判定/导演) | venue | seat, to(active/suspended/removed), reason, cause_directive |
 | `clock_advance` | 主席/系统 | venue | from, to |
 | `summary_written` | 书记 | 同源层级 | level, text, covers_seq_range |
 | `note_delivered` | 系统 | private | 危机笔记送达(内容在directive_submitted中) |
@@ -65,6 +66,8 @@ scope=dm-only                        → 仅主席团/上帝视角
 ```
 
 - `visible_to`物化规则: venue事件=发出时刻该会场在场席位; group事件=发出时刻组内成员; private事件=显式指定(如危机笔记的收件人+主席团); self事件=仅行为者本席位;
+- **canonical viewer形式**: visible_to成员与query的viewer必须同形——席位一律`seat:<id>`, 主席团为`chair`/`dm`/`recorder`. 物化时对裸席位id自动加前缀(`canonical_viewer`), 否则可见性判定会静默失败(全盲或泄漏);
+- **group过滤语义**: `query(viewer, group=g)`只排除**其他组**的组内事件, venue/global事件保留——非正式磋商中代表仍能看到Crisis Update;
 - 主席团(chair/dm/recorder)可见**除self外**的一切(DM不读心, 判定依据是代表主动写出的指令与危机笔记); 复盘"上帝视角"(给人类的戏外观察)可见一切, 含self;
 - Agent构建上下文、前端按视角订阅, 都走同一个过滤函数: `bus.query(viewer, filters) `. **过滤必须在服务端做**, 前端永远只收到过滤后的事件.
 
@@ -143,6 +146,7 @@ class VenueState(BaseModel):
     phase: str                      # Opening|ModCaucus|UnmodCaucus|Suspended|Adjourned
     interrupted_phase: str | None   # Voting/CrisisUpdate结束后要返回的阶段
     present_seats: list[str]        # 在场席位(被借出的不在)
+    seat_status: dict[str, str]     # seat -> active|suspended|removed(解职/被捕/死亡), 见04§3
     presiding_seat: str | None      # 戏内主持席(04§3), 可在推演中易手; None=中立主席主持
     agenda: str
     groups: list[GroupState]        # 仅UnmodCaucus期间非空
@@ -183,6 +187,7 @@ class RuntimeState(BaseModel):
 | `crisis_update` | pending_interrupts移除对应项; fired_arcs追加(弧线来源时) |
 | `group_formed/move/dissolved`, `group_join_*` | groups增删改 |
 | `presiding_change` | venue.presiding_seat更新 |
+| `seat_status_change` | venue.seat_status更新; 主持席失活时presiding_seat回落None |
 | `clock_advance` | venue.story_time |
 | `summary_written` | epochs[viewer]更新(summary_seq, l3_start_seq) |
 | `session_control`/`human_control` | 运行标志/待消费干预 |

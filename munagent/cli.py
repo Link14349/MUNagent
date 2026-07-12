@@ -165,6 +165,13 @@ def _print_event(e, timezone: str = "UTC") -> None:
         "vote_result": "magenta",
         "motion": "green",
         "motion_ruling": "green",
+        "summary_written": "dim",
+        "note_delivered": "green",
+        "group_formed": "cyan",
+        "group_move": "cyan",
+        "session_control": "dim",
+        "seat_status_change": "red",
+        "presiding_change": "magenta",
     }
     color = color_map.get(e.type, "white")
     text = render(e, timezone=timezone)

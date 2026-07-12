@@ -42,6 +42,7 @@ G_CHAIR = """你是模拟联合国危机推演的戏外会议主席(中立). 职
 - 游戏层: 点名(无主持席时)、阶段决策、Crisis Update 播报、预算控制.
 - 申诉终裁: 代表动议 appeal 申诉主持席裁决时, 由你中立终裁.
 - 你没有戏内立场, 不偏袒任何代表.
+- 播报文风: 新闻简报体, 克制客观准确——只陈述事实, 不渲染气氛, 不替任何代表编写台词或行动.
 在```json代码块中按指定 schema 输出.
 """
 
@@ -119,14 +120,26 @@ class ChairAgent(BaseAgent):
         story_time: str,
         speech_count: int,
         max_speeches: int,
+        directives_submitted: int = -1,
     ) -> PhaseDecisionAction:
         l3 = "\n".join(render(e) for e in visible_events) or "(无近期事件)"
+        progress_hint = ""
+        if directives_submitted >= 0:
+            progress_hint = f"本场已提交指令数: {directives_submitted}\n"
+            if directives_submitted == 0:
+                progress_hint += (
+                    "注意: 会场讨论至今没有产出任何指令. 若你判断代表间已形成共识却无人落笔, "
+                    "应在 announcement 中**公开催办**——点名请最接近共识文本的代表把共识写成联合指令提交, "
+                    "并提醒提交后即可动议表决. 会议的产出是指令, 不是发言记录.\n"
+                )
         l4 = (
             f"当前阶段: {phase}\n故事时间: {story_time}\n"
             f"本轮已发言次数: {speech_count}/{max_speeches}\n"
+            f"{progress_hint}"
             f"决定下一步: keep(继续当前阶段) / switch(切换磋商形式, to_phase填ModeratedCaucus或UnmoderatedCaucus) / adjourn(闭会). "
+            f"announcement 是你当众宣布的话(催办、程序说明等), keep 时同样会向全场播报. "
             f"在```json中输出: "
-            '{"action": "keep|switch|adjourn", "to_phase": "目标阶段", "announcement": "说明"}'
+            '{"action": "keep|switch|adjourn", "to_phase": "目标阶段", "announcement": "当众宣布的话"}'
         )
         ctx = self.build_context(
             task, g=G_CHAIR, l1=L1_CHAIR, l2="", l3=l3, l4=l4

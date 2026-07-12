@@ -33,18 +33,58 @@ class AgentContext:
     g_global: str = ""  # 全局共享段
     l1_seat: str = ""  # 席位固定段
     l2_summary: str = ""  # 纪元摘要段(P1 stub)
+    docs: str = ""  # 当前有效文件档案(该视角可见的指令/决议/公报原文, 仅当前版本)
     l3_events: str = ""  # 追加事件段
     l4_task: str = ""  # 任务段
 
     def to_messages(self) -> list[ChatMessage]:
         """组装为 system + user 两条消息."""
         system = f"{self.g_global}\n{self.l1_seat}"
+        docs_part = (
+            f"<当前有效文件(原文, 仅当前版本, 历史版本已隐藏)>\n{self.docs}\n</当前有效文件>\n"
+            if self.docs
+            else ""
+        )
         user = (
             f"<此前局势(书记摘要)>\n{self.l2_summary}\n</此前局势>\n"
+            f"{docs_part}"
             f"<最近发生(原文)>\n{self.l3_events}\n</最近发生>\n"
             f"<当前任务>\n{self.l4_task}\n</当前任务>"
         )
         return [ChatMessage(role="system", content=system), ChatMessage(role="user", content=user)]
+
+
+def normalize_json_delimiter_quotes(json_str: str) -> str:
+    """将模型误写在 JSON 结构边界上的弯引号/全角引号归一为 ASCII 双引号.
+
+    只处理 delimiter 位置(键名两侧、值首尾), 不改动字符串内部的引述用引号.
+    """
+    s = json_str.strip()
+    # 键名两侧: { "text": 或 , "action":
+    s = re.sub(
+        r'([\{,]\s*)[\u201c\u201d\uff02"]([a-zA-Z_][a-zA-Z0-9_]*)[\u201c\u201d\uff02"](\s*:)',
+        r'\1"\2"\3',
+        s,
+    )
+    # 字符串值起始: 冒号后第一个引号
+    s = re.sub(
+        r'(:\s*)[\u201c\uff02"](?=\S)',
+        r'\1"',
+        s,
+    )
+    # 字符串值结束: 弯引号后紧跟 , 或 }
+    s = re.sub(
+        r'[\u201d\uff02"](\s*[\},])',
+        r'"\1',
+        s,
+    )
+    # 整条对象末尾: ...内容"} 中错误的闭合引号
+    s = re.sub(
+        r'[\u201d\uff02"](\s*\})\s*$',
+        r'"\1',
+        s,
+    )
+    return s
 
 
 def parse_json_block(raw: str, schema_model: type[BaseModel] | None = None) -> tuple[Any | None, str | None]:
@@ -60,10 +100,16 @@ def parse_json_block(raw: str, schema_model: type[BaseModel] | None = None) -> t
         # 没有代码块, 尝试整段当 JSON
         json_str = raw.strip()
 
+    json_str = normalize_json_delimiter_quotes(json_str)
+
     try:
-        data = json.loads(json_str)
+        # strict=False: 容忍字符串内的裸控制字符(模型写长发言时常忘转义换行)
+        data = json.loads(json_str, strict=False)
     except json.JSONDecodeError as e:
-        return None, f"JSON 解析失败: {e}. 原文片段: {json_str[:200]}"
+        return None, (
+            f"JSON 解析失败: {e}. 常见原因: 字符串内的换行要写成\\n; "
+            f'JSON 的引号必须是半角双引号("), 不能用弯引号""作为闭合. 原文片段: {json_str[:200]}'
+        )
 
     if schema_model is not None:
         try:
@@ -171,12 +217,15 @@ class BaseAgent:
                 pass
         return {"action": "pass"}
 
-    def build_context(self, task: TaskSpec, *, g: str, l1: str, l2: str, l3: str, l4: str) -> AgentContext:
-        """构造五段上下文."""
+    def build_context(
+        self, task: TaskSpec, *, g: str, l1: str, l2: str, l3: str, l4: str, docs: str = ""
+    ) -> AgentContext:
+        """构造上下文(五段 + 可选文件档案区)."""
         return AgentContext(
             g_global=g,
             l1_seat=l1,
             l2_summary=l2,
+            docs=docs,
             l3_events=l3,
             l4_task=l4,
         )

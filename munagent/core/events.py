@@ -50,6 +50,17 @@ class Event(BaseModel):
         return viewer in self.visible_to
 
 
+def canonical_viewer(v: str) -> str:
+    """归一化为 canonical viewer 形式: 裸席位 id -> `seat:<id>`.
+
+    visible_to 与 query 的 viewer 必须同形, 否则可见性判定静默失败(全盲或泄漏).
+    主席团角色(chair/dm/recorder)、god、已带前缀的名字原样保留.
+    """
+    if v in PRESIDIUM_VIEWERS or v == GOD_VIEWER or ":" in v:
+        return v
+    return f"seat:{v}"
+
+
 def materialize_visible_to(
     scope: Scope,
     *,
@@ -65,17 +76,19 @@ def materialize_visible_to(
     - group: 发出时刻组内成员
     - private: 显式指定(如危机笔记收件人 + 主席团)
     - self: 仅行为者本席位
+
+    一切名单成员经 canonical_viewer 归一化(裸席位 id 自动加 `seat:` 前缀).
     """
     if scope in ("global", "dm-only"):
         return None
     if scope == "self":
-        return [actor]
+        return [canonical_viewer(actor)]
     if scope == "venue":
-        return list(venue_seats or [])
+        return [canonical_viewer(s) for s in (venue_seats or [])]
     if scope == "group":
-        return list(group_members or [])
+        return [canonical_viewer(s) for s in (group_members or [])]
     if scope == "private":
-        recipients = list(private_recipients or [])
+        recipients = [canonical_viewer(s) for s in (private_recipients or [])]
         # 主席团始终可见 private
         for p in PRESIDIUM_VIEWERS:
             if p not in recipients:

@@ -96,3 +96,43 @@ class TestMaterializeVisibleTo:
         assert "chair" in result
         assert "dm" in result
         assert "recorder" in result
+
+
+class TestCanonicalViewer:
+    """裸席位 id 归一化: visible_to 与 query viewer 必须同形(seat:<id>), 否则代表全盲."""
+
+    def test_bare_seat_ids_are_prefixed(self) -> None:
+        from munagent.core.events import materialize_visible_to
+
+        vt = materialize_visible_to("venue", actor="seat:a", venue_seats=["a", "b"])
+        assert vt == ["seat:a", "seat:b"]
+
+    def test_prefixed_ids_untouched(self) -> None:
+        from munagent.core.events import materialize_visible_to
+
+        vt = materialize_visible_to("group", actor="seat:a", group_members=["seat:a", "seat:b"])
+        assert vt == ["seat:a", "seat:b"]
+
+    def test_private_presidium_names_not_prefixed(self) -> None:
+        from munagent.core.events import materialize_visible_to
+
+        vt = materialize_visible_to("private", actor="seat:a", private_recipients=["a"])
+        assert "seat:a" in vt
+        assert "chair" in vt and "dm" in vt and "recorder" in vt
+        assert "seat:chair" not in vt
+
+    def test_bare_venue_event_visible_to_prefixed_viewer(self) -> None:
+        """engine 传裸 id 的场景: 席位 viewer 必须可见(此前的全盲 bug)."""
+        from munagent.core.events import Event, materialize_visible_to
+
+        e = Event(
+            session_id="s",
+            type="speech",
+            actor="seat:a",
+            venue_id="v",
+            scope="venue",
+            visible_to=materialize_visible_to("venue", actor="seat:a", venue_seats=["a", "b"]),
+        )
+        assert e.is_visible_to("seat:a")
+        assert e.is_visible_to("seat:b")
+        assert not e.is_visible_to("seat:c")

@@ -33,7 +33,7 @@ class ChatRequest:
     phase: str | None = None
     scope: str | None = None
     max_tokens: int = 1024
-    temperature: float = 0.7
+    temperature: float = 0.6
 
 
 class LLMClient:

@@ -39,9 +39,11 @@ def render(event: Event, *, timezone: str | None = None) -> str:
             f" (动议#{event.payload.get('motion_seq', '')}) {event.payload.get('reason', '')}"
         )
     elif t == "phase_change":
+        agenda = event.payload.get("agenda_no")
+        agenda_txt = f" 议程序号#{agenda}" if agenda is not None else ""
         parts.append(
             f"阶段切换: {event.payload.get('from', '')} → {event.payload.get('to', '')}"
-            f" ({event.payload.get('reason', '')})"
+            f" ({event.payload.get('reason', '')}){agenda_txt}"
         )
     elif t == "vote_call":
         parts.append(f"主席发起表决: 指令 {event.payload.get('directive_id', '')}")
@@ -56,14 +58,25 @@ def render(event: Event, *, timezone: str | None = None) -> str:
             f"= {event.payload.get('result', '')} ({event.payload.get('tally', '')})"
         )
     elif t == "directive_submitted":
+        num = event.payload.get("directive_id", "") if event.payload.get("doc_line") else ""
+        num_part = f" {num}" if num else ""
+        parent = event.payload.get("parent") or ""
+        forked = event.payload.get("forked_from") or ""
+        lineage = f" [修订自 {parent}]" if parent else (f" [分叉自 {forked}]" if forked else "")
+        body = event.payload.get("body", "")
+        body_part = f"\n  正文: {body}" if body else ""
+        diff = event.payload.get("diff_summary") or ""
+        diff_part = f"\n  修改摘要: {diff}" if diff else ""
         parts.append(
-            f"{event.actor}提交{event.payload.get('kind', '')}指令: "
-            f"{event.payload.get('title', '')}"
+            f"{event.actor}提交{event.payload.get('kind', '')}指令{num_part}: "
+            f"《{event.payload.get('title', '')}》{lineage}{body_part}{diff_part}"
         )
     elif t == "directive_status":
+        reason = event.payload.get("reason") or ""
+        reason_part = f" ({reason})" if reason else ""
         parts.append(
             f"指令 {event.payload.get('directive_id', '')} 状态: "
-            f"{event.payload.get('status', '')}"
+            f"{event.payload.get('status', '')}{reason_part}"
         )
     elif t == "adjudication":
         parts.append(
@@ -82,10 +95,20 @@ def render(event: Event, *, timezone: str | None = None) -> str:
             f"主持权变更: {event.payload.get('from_seat', '')} → {event.payload.get('to_seat', '')}"
             f" ({event.payload.get('cause', '')})"
         )
-    elif t == "note_delivered":
+    elif t == "seat_status_change":
+        _status_zh = {"active": "复席", "suspended": "停职离席", "removed": "除名离席"}
         parts.append(
-            f"危机笔记送达: {event.payload.get('directive_id', '')}"
-            f" → {event.payload.get('recipient', '')}"
+            f"席位状态: {event.payload.get('seat', '')}"
+            f" → {_status_zh.get(event.payload.get('to', ''), event.payload.get('to', ''))}"
+            f" ({event.payload.get('reason', '')})"
+        )
+    elif t == "note_delivered":
+        body = event.payload.get("body", "")
+        body_part = f"\n  内容: {body}" if body else ""
+        parts.append(
+            f"危机笔记送达: 来自 {event.payload.get('from', '')} "
+            f"《{event.payload.get('title', '')}》→ {event.payload.get('recipient', '')}"
+            f"{body_part}"
         )
     elif t == "session_control":
         parts.append(f"会话控制: {event.payload.get('action', '')}")

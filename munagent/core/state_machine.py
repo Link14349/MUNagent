@@ -72,6 +72,9 @@ class VenueStateMachine:
     ) -> None:
         self.venue_id = venue_id
         self.seat_ids = seat_ids
+        # 席位状态: active(在席) | suspended(停职) | removed(除名/死亡/被捕)
+        # 非 active 席位不参与点名/轮询/分组/投票, 见 04§3
+        self.seat_status: dict[str, str] = {sid: "active" for sid in seat_ids}
         self.phase: Phase = initial_phase
         self.presiding_seat = presiding_seat
         self.story_time = start_story_time
@@ -96,6 +99,20 @@ class VenueStateMachine:
         self.vote_casts: dict[str, str] = {}  # seat -> aye|nay|abstain
         self.vote_order: list[str] = []  # 投票顺序
         self.vote_index = 0  # 当前等谁投
+
+    @property
+    def active_seat_ids(self) -> list[str]:
+        return [s for s in self.seat_ids if self.seat_status.get(s) == "active"]
+
+    def set_seat_status(self, seat_id: str, status: str) -> None:
+        """更新席位状态; 主持席失去 active 时主持权自动回落中立主席."""
+        if seat_id not in self.seat_status:
+            raise ValueError(f"未知席位: {seat_id}")
+        if status not in ("active", "suspended", "removed"):
+            raise ValueError(f"非法席位状态: {status}")
+        self.seat_status[seat_id] = status
+        if status != "active" and self.presiding_seat == seat_id:
+            self.presiding_seat = None
 
     def can_transition(self, to: Phase) -> bool:
         return to in _TRANSITIONS.get(self.phase, set())
@@ -142,18 +159,19 @@ class VenueStateMachine:
 
     @property
     def floor_rotation_due(self) -> bool:
-        return self.unspoken_count >= len(self.seat_ids)
+        return self.unspoken_count >= len(self.active_seat_ids)
 
     @property
     def budget_exceeded(self) -> bool:
         return self.mod_speech_count >= self.max_speeches
 
     def next_for_floor_rotation(self) -> str | None:
-        for sid in self.seat_ids:
+        active = self.active_seat_ids
+        for sid in active:
             if sid not in self.spoken_this_phase:
                 return sid
         self.spoken_this_phase = []
-        return self.seat_ids[0] if self.seat_ids else None
+        return active[0] if active else None
 
     # --- Unmod 阶段 ---
     def init_groups(self, groups: list[GroupState]) -> None:

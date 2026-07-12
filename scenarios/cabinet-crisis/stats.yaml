@@ -1,6 +1,7 @@
 mode: tags
 visibility: faction
 entities:
+  # --- 全局态势 ---
   - id: cabinet_stability
     label: 内阁稳定性
     owner: faction:温和派
@@ -9,3 +10,32 @@ entities:
     label: 军方备战状态
     owner: faction:强硬派
     tags: { 陆军动员: 中, 边境部署: 强 }
+
+  # --- 各席位政治基本盘(解职/政变/弹劾类行动的判定依据) ---
+  - id: premier_political_base
+    label: 总理政治基本盘
+    owner: seat:premier
+    tags:
+      议会支持: 中          # 执政联盟席位勉强过半, 反对党随时可发起弹劾
+      民意支持: 中
+      宪政权威: 强          # 程序合法性在总理一边
+      军队直接掌控: 弱      # 依赖总参谋长转达, 无一线部队私人纽带
+      情报系统掌控: 中      # 国安部门大体听命于总理府
+  - id: defense_military_grip
+    label: 国防部长军中根基
+    owner: seat:defense_minister
+    tags:
+      一线部队忠诚: 强      # 第1机步师师长是其旧部, 边境部队团长多为其提拔
+      总参谋部支持: 中      # 总参谋长态度摇摆, 关键时刻可能倒向宪政一边
+      国防部行政掌控: 中    # 常务次官是其亲信, 但文官系统有总理任命的人
+      议会支持: 弱          # 议会主流警惕军人干政
+      舆论形象: 中          # "铁腕护边"有市场, 但"军人抗命"是红线
+  - id: foreign_diplomatic_assets
+    label: 外交部长政治资产
+    owner: seat:foreign_minister
+    tags:
+      秘密渠道可靠度: 强    # 与邻国副外长的私人线路直达对方决策层
+      国际声誉: 强
+      议会支持: 中          # 两大党团都视其为可接受的中间人
+      军中人脉: 弱
+      邻国强硬派敌意: 中    # 对方军方视其渠道为"绕过正式管道的小动作"

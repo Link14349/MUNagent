@@ -14,7 +14,7 @@
 ### 指令数据结构
 ```python
 class Directive(BaseModel):
-    id: str
+    id: str                    # 联合指令/公报: "D<议程>.<递交序>-v<版本>"; 私密指令: 内部id
     kind: str                  # directive | personal | communique | crisis_note
     author: str                # seat_id; 联合指令为发起席位, 附co_sponsors
     co_sponsors: list[str]
@@ -23,17 +23,44 @@ class Directive(BaseModel):
     body: str                  # 自由文本, 强调可执行步骤
     uses_powers: list[str]     # 声称动用的权力(个人指令必填)
     recipient: str | None      # crisis_note收件人(席位/幕后角色)
+    revises: str | None        # 代表填写: 被修订草案的编号(引擎解析为parent/fork)
     status: str                # 生命周期, 见§2
+    # 以下由引擎在提交时分配(代表不自拟):
+    doc_line: str | None       # 草案线号, 如 "D1.2"(仅directive/communique)
+    version: int | None        # 线内版本号
+    parent: str | None         # 同线修订: 父版本id
+    forked_from: str | None    # 分叉: 源版本id
+    diff_summary: str | None   # 与父版本的程序diff摘要(提交时计算, 保render纯函数)
 ```
 
-## 2. 指令生命周期
+## 2. 指令生命周期: 草案线(doc line)模型
+
+联合指令/公报按**草案线**管理——git式版本树(决策D16), 命名对齐真实模联惯例(编号由主席团编写、"一版通过其余作废"):
+
+- **编号程序分配**: 每份根草案开一条线, 线号`D<议程序号>.<递交序>`, 版本号线内递增(`D1.2-v3`). **议程序号**=正式 ModeratedCaucus 会议序号: 首次进入 Mod 为 1; 每次非正式磋商结束回到正式 Mod 时 +1(递交序从 `.1` 重计, 如 `D2.1`); 表决中断后回到 Mod 不换序号. 标题仍由代表自拟——**编号定位, 标题传意**. 个人指令/危机笔记是私密文件, 不进公开编号体系;
+- **commit不可变**: 每次提交=一个新版本(新事件), 已提交文本不可原地改动. 修订版提交时引擎计算与父版本的**diff摘要**存入payload(render保持纯函数), 代表不必通读全文找改动;
+- **修订权=联署集团**(git权限的会场政治翻译): 提交者在该线最新版的发起人/联署人名单内→同线新版本; 否则自动**分叉(fork)**为新线并记录`forked_from`——想夺文本主导权, 就拉人另立门户;
+- **表决对象用编号**: 动议`motion_target`填线号(默认取最新版)或显式版本号, 不用标题匹配(防碰撞);
+- **线状态机**:
+
+```
+active ──表决通过──→ merged(进DM判定, 并入既定现实)
+   │──被否────────→ rejected(可从任意版本fork重开新线)
+   │──他线通过────→ superseded(同议程自动作废)
+   └──发起人撤回──→ withdrawn(P3+)
+```
+
+- 表决通过瞬间, 引擎对同议程全部active线批量发`superseded`的`directive_status`事件——"多版齐飞"程序化收场;
+- 刻意不抄git的部分: 无merge conflict解决(冲突靠表决+DM时序裁定)、无rebase(历史不可变)、无cherry-pick(想借条款就写进自己的新版).
+
+单个版本的细粒度生命周期不变:
 
 ```
 draft → submitted → [voting → passed | rejected]   # 仅需投票的类型走中括号段
       passed/submitted → queued → adjudicating → resolved → announced | withheld
 ```
 
-每次状态变化产生`directive_status`事件. `rejected`可修改后重新提交(新id, 链接旧id). `withheld`(扣发)状态下结果已生效但未播报, 主席可后续补播.
+每次状态变化产生`directive_status`事件. `withheld`(扣发)状态下结果已生效但未播报, 主席可后续补播.
 
 ## 3. DM判定流水线(五步)
 
@@ -96,7 +123,8 @@ DM按结果档位撰写叙述, 输出schema:
 ## 5. 跨会场交互与危机笔记送达
 
 - 跨会场一切交互走指令→DM→主席链路; 面对面谈判由主席开临时会场(见04);
-- `crisis_note`送达判定: 默认成功送达; DM可对敏感收件人/紧张局势判定"截获"(走同一掷骰流水线, 概率档位依据双方情报能力tags), 截获产生给第三方的private事件——这是玩家间猜疑链的主要来源, 设计上鼓励DM低频使用.
+- `crisis_note`送达判定: 默认成功送达; DM可对敏感收件人/紧张局势判定"截获"(走同一掷骰流水线, 概率档位依据双方情报能力tags), 截获产生给第三方的private事件——这是玩家间猜疑链的主要来源, 设计上鼓励DM低频使用;
+- **截获时不通知作者**: 作者只会发现笔记石沉大海(status事件为dm-only), 猜疑链由此而来; 送达成功时`note_delivered`事件携带笔记正文, 收件人由此读到内容.
 
 ## 6. 公报(Communiqué)特例
 公报一般不判成败(发出去就是发出去了), DM的工作是评估**各方反应**并把反应写进后续Crisis Update; 但"假旗公报"、冒名公报等骚操作仍走完整判定流水线(可能被识破).

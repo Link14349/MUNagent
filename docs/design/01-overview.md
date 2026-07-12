@@ -51,7 +51,8 @@ MUNagent是基于LLM Agent的自动化模拟联合国场景设计&推演工具, 
 | D13 | V4 Thinking按角色/task开关(代表Unmod组内关, `write_directive`一律开) | 见05§5 |
 | D14 | 公报一律需投票; `master_seed`默认随机, CLI可`--seed`复现 | 见06§1, 07§7 |
 | D15 | 戏内主持席与戏外主席分离: `presiding_seat`可选、允许偏心、appeal由戏外主席终裁、主持权可易手 | 见04§3 |
-| D16 | stats席位可见性可配置, 默认`faction`(同阵营共享) | 见02§3 stats.yaml |
+| D16 | 联合指令/公报按"草案线"管理(git式): 编号程序分配、修订权=联署集团、外人修订自动fork、表决用编号、一版通过同议程其余superseded | 见06§2 |
+| D17 | stats席位可见性可配置, 默认`faction`(同阵营共享) | 见02§3 stats.yaml |
 
 ## 技术选型
 

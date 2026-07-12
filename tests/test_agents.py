@@ -5,7 +5,7 @@ from __future__ import annotations
 import httpx
 import pytest
 
-from munagent.agents.base import AgentContext, TaskSpec, parse_json_block
+from munagent.agents.base import AgentContext, TaskSpec, normalize_json_delimiter_quotes, parse_json_block
 from munagent.agents.delegate import DelegateAgent, DelegateTurnAction, build_delegate_g_global
 from munagent.agents.dm import DMAgent, outcome_tier, roll_directive
 from munagent.config.models import MunagentConfig, ProviderConfig, RoleConfig
@@ -116,3 +116,31 @@ def test_g_rules_covers_all_output_schema_fields() -> None:
             assert field_name in G_RULES, (
                 f"{model.__name__}.{field_name} 未出现在 G_RULES 的输出格式说明中"
             )
+
+
+def test_parse_json_block_tolerates_raw_newlines_in_strings() -> None:
+    """模型在长发言里输出裸换行(未转义)时不应解析失败(strict=False)."""
+    raw = '```json\n{\n  "action": "speech",\n  "text": "第一段。\n\n第二段。"\n}\n```'
+    parsed, err = parse_json_block(raw)
+    assert err is None
+    assert parsed["text"] == "第一段。\n\n第二段。"
+
+
+def test_parse_json_block_fixes_smart_closing_quote() -> None:
+    """书记摘要常见错误: 字符串末尾用弯引号 ” 闭合."""
+    raw = (
+        '```json\n'
+        '{"text": "09:50 国防部长提出调整。\\n11:05 外长通报会谈准备。”}\n'
+        '```'
+    )
+    parsed, err = parse_json_block(raw)
+    assert err is None
+    assert "11:05" in parsed["text"]
+    assert parsed["text"].endswith("会谈准备。")
+
+
+def test_normalize_json_delimiter_quotes_key_and_close() -> None:
+    s = '{“text”: "内容全文。”}'
+    fixed = normalize_json_delimiter_quotes(s)
+    data = __import__("json").loads(fixed, strict=False)
+    assert data["text"] == "内容全文。"

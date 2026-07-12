@@ -25,6 +25,7 @@ class AdjudicationResult(BaseModel):
     per_venue_visible: list[dict] = []
     author_private_result: str = ""
     suggest_broadcast: Literal["immediate", "delayed", "withhold"] = "immediate"
+    seat_status_changes: list[dict] = []  # [{seat, to: active|suspended|removed, reason}] 叙事导致的席位资格变化
 
 
 G_DM = """你是模拟联合国历史委员会危机联动推演的危机导演(DM). 职责:
@@ -47,6 +48,20 @@ G_DM = """你是模拟联合国历史委员会危机联动推演的危机导演(
 - 失败: 未达成, 无严重后果
 - 灾难性失败: 未达成且暴露/反噬
 
+## 叙事文风(重要)
+你决定的是**事态走向**, 不是写小说. 一切结果叙述用**新闻通讯社电讯体**——克制、客观、准确:
+- 只写可核实的事实: 谁、何时、何地、发生了什么、规模多大. 数字、番号、地名要具体.
+- **禁止**描写人物表情、语气、内心与气氛渲染("面色阴沉""厉声宣布""气氛降至冰点"一律不许出现). 事实自己会说话.
+- **不得替会场内的代表编写台词、决定或行动**——他们如何反应由他们自己的回合决定. 你只写: 指令本身的执行后果, 以及**会场之外**的世界反应(部队动向、外国照会、媒体报道、议会动作、街头民情). 会场内人物只能作为后果的知情者被提及(如"该报告已送达总理办公室"), 不能被你安排说话或做事.
+- 篇幅克制: narrative_full 一般不超过200字; per_venue_visible 更短, 只写该会场能观察到的现象.
+
+## 席位资格变化(seat_status_changes)
+若结果导致某席位**失去或恢复参会资格**(被捕/死亡/被外部机构罢免/复职等), 必须同时在 seat_status_changes 中声明, 否则不产生机制效果, 该角色仍会继续开会:
+- 格式: [{"seat": "席位id", "to": "suspended|removed|active", "reason": "一句话缘由"}]
+- suspended=停职(可复席), removed=除名/死亡(通常不可逆), active=复席.
+- 资格变化必须来自**会场外部力量**(议会弹劾生效/军方拘押/司法逮捕)或指令作者自身行动的直接反噬——不得假手于某位在场代表的"当场决定"(那是他自己的回合该做的事).
+- 仅在结果明确导致资格变化时使用, 不要作为普通惩罚滥用; 无变化时输出空数组.
+
 ## 判定通用做法
 - 概率反映现实约束而非戏剧需要: 不因为行动"精彩"而上调, 不因为平淡而下调.
 - 同类行动同标准: 对不同代表的相似行动给出一致的档位, 你的公信力来自一致性.
@@ -58,6 +73,27 @@ G_DM = """你是模拟联合国历史委员会危机联动推演的危机导演(
 
 在```json代码块中按指定 schema 输出.
 """
+
+
+def build_dm_g(scenario) -> str:
+    """组装 DM 的 G 段: 判定规则 + 背景文书全文 + 全席位权力清单.
+
+    会话内字节级稳定(前缀缓存), 判定上下文(L4)只放动态内容(指令/stats/摘要).
+    """
+    parts = [G_DM.rstrip()]
+    if scenario.background.strip():
+        parts.append(f"## 背景文书\n\n{scenario.background.strip()}")
+    roster = ["## 各席位权力清单(合法性检查依据)"]
+    for seat in scenario.seats.values():
+        roster.append(f"### {seat.name} (`{seat.id}`)")
+        if seat.portfolio_powers:
+            for pw in seat.portfolio_powers:
+                limit = f" (限制: {pw.limits})" if pw.limits else ""
+                roster.append(f"- {pw.power}{limit}")
+        else:
+            roster.append("- (未列明)")
+    parts.append("\n".join(roster))
+    return "\n\n".join(parts)
 
 
 def roll_directive(master_seed: int, directive_id: str) -> tuple[int, int, int]:
@@ -87,9 +123,10 @@ def outcome_tier(margin: int, thresholds: dict | None = None) -> str:
 
 
 class DMAgent(BaseAgent):
-    def __init__(self, llm: LLMClient, master_seed: int) -> None:
+    def __init__(self, llm: LLMClient, master_seed: int, g_dm: str = G_DM) -> None:
         super().__init__(llm, max_tokens=8192)
         self.master_seed = master_seed
+        self._g_dm = g_dm
 
     async def assess_feasibility(
         self,
@@ -107,7 +144,7 @@ class DMAgent(BaseAgent):
             '"visible_consequences": "预期"}'
         )
         ctx = self.build_context(
-            task, g=G_DM, l1="你是危机导演(DM).", l2="", l3="", l4=l4
+            task, g=self._g_dm, l1="你是危机导演(DM).", l2="", l3="", l4=l4
         )
         result = await self.act(task, ctx)
         if isinstance(result, FeasibilityAssessment):
@@ -130,10 +167,11 @@ class DMAgent(BaseAgent):
             f"当前局势:\n{context_summary}\n\n"
             f"撰写结果叙述. 在```json中输出: "
             '{"narrative_full": "完整结果", "per_venue_visible": [{"venue":"cabinet","text":"可见版本"}], '
-            '"author_private_result": "给作者的私密回执", "suggest_broadcast": "immediate"}'
+            '"author_private_result": "给作者的私密回执", "suggest_broadcast": "immediate", '
+            '"seat_status_changes": []}'
         )
         ctx = self.build_context(
-            task, g=G_DM, l1="你是危机导演(DM).", l2="", l3="", l4=l4
+            task, g=self._g_dm, l1="你是危机导演(DM).", l2="", l3="", l4=l4
         )
         result = await self.act(task, ctx)
         if isinstance(result, AdjudicationResult):

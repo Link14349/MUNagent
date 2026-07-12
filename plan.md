@@ -55,6 +55,7 @@
 - [x] Unmod: initial_grouping→小轮并行(asyncio)→next_move收集→屏障固定顺序结算 (04§3)
 - [x] 闭门小组: closed标记, quick_decide轻量调用, join_request/decision事件 (04§3, 05§3.1) — schema已就位, 引擎Unmod基础版暂未启用屏障结算, 留P3完善
 - [x] 四类指令全生命周期状态机+directive_status事件 (06§1-2)
+- [x] 草案线模型: 编号程序分配/版本链/fork判定/diff摘要/表决用编号/superseded批量作废 (06§2, D16)
 - [x] 判定流水线完整五步: 合法性(程序+LLM)/可行性/掷骰/结果撰写/上报 (06§3)
 - [x] 危机笔记送达与截获判定 (06§5)
 - [x] RecorderAgent: venue/私人/dm-only三层摘要 (05§3.4)

@@ -134,3 +134,39 @@ async def test_query_includes_buffer(bus: EventBus) -> None:
     assert len(events) == 2
     assert events[0].payload["text"] == "first"
     assert events[1].payload["text"] == "second"
+
+
+@pytest.mark.asyncio
+async def test_group_query_keeps_venue_events(tmp_path) -> None:
+    """group 过滤只排除其他组的事件, venue/global 事件仍可见(Unmod 中要能看到 Crisis Update)."""
+    bus = EventBus(str(tmp_path / "t.db"), "s1")
+    await bus.init_db()
+    bus.stage(
+        Event(
+            session_id="s1", type="crisis_update", actor="chair",
+            venue_id="v1", scope="venue", payload={"text": "危机!"},
+        ),
+        venue_seats=["seat:a", "seat:b"],
+    )
+    bus.stage(
+        Event(
+            session_id="s1", type="speech", actor="seat:a",
+            venue_id="v1", group_id="g1", scope="group", payload={"text": "组内话"},
+        ),
+        group_members=["seat:a"],
+    )
+    bus.stage(
+        Event(
+            session_id="s1", type="speech", actor="seat:b",
+            venue_id="v1", group_id="g2", scope="group", payload={"text": "别组的话"},
+        ),
+        group_members=["seat:b"],
+    )
+    await bus.commit_step()
+
+    events = await bus.query("seat:a", venue="v1", group="g1")
+    types = [e.type for e in events]
+    assert "crisis_update" in types  # venue 事件保留
+    assert any(e.group_id == "g1" for e in events)  # 本组事件保留
+    assert not any(e.group_id == "g2" for e in events)  # 他组事件排除
+    await bus.close()

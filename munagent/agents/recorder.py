@@ -1,11 +1,15 @@
-"""书记 Agent: 滚动摘要. 见 05§3.4.
+"""书记 Agent: 章节追加摘要. 见 05§3.4.
 
 三层摘要:
 - venue: 会场公开记录摘要(全体可见事件)
 - private: 每席位私人记忆摘要(仅该席位可见事件)
 - dm-only: 主席团全量摘要
 
-触发: 纪元机制——某视角 L3 累积超过阈值时, 书记将旧摘要+新事件压缩进新版摘要.
+模型(章节追加, 非滚动重写):
+- 每纪元只把本期新事件压缩为**一章**, 程序追加到该视角的章节列表尾部——旧章节
+  不经LLM之手, 杜绝"合并时静默丢失早期记忆"; L2只从尾部生长, 缓存前缀更稳;
+- 章节总量超阈值时做一次低频**合并**(squash): 全部章节压成一章, 明确要求覆盖
+  全部时间范围.
 """
 
 from __future__ import annotations
@@ -22,19 +26,27 @@ from munagent.llm.client import LLMClient
 # 送入 LLM 的输入预算(防 prompt 过长); 输出侧由 max_tokens 控制
 SUMMARIZE_MAX_INPUT_TOKENS = 12_000
 SUMMARIZE_MAX_SPEECH_CHARS = 400
-SUMMARIZE_MAX_OLD_SUMMARY_CHARS = 4_000
 
 
 class SummaryResult(BaseModel):
     text: str
 
 
-G_RECORDER = """你是模拟联合国危机联动推演的会议书记. 职责:
+JSON_TEXT_OUTPUT_RULES = """## JSON 输出纪律
+- 只输出一个 ```json 代码块, 不要附加说明文字.
+- 键名与字符串值的**边界引号**必须是半角 ASCII 双引号 (键盘 Shift+'), 即 " 而不是弯引号 "" 或全角 ＂.
+- 摘要正文里引述用语请用单引号 '…' 或「…」, 不要用弯双引号作为 JSON 的闭合引号.
+- 段落之间用 \\n 连接, 不要在 JSON 字符串里写裸换行.
+示例: {"text": "09:00 外长发言。\\n09:05 防长回应。"}
+"""
+
+
+G_RECORDER = f"""你是模拟联合国危机联动推演的会议书记. 职责:
 - 将近期事件压缩为编年体摘要.
 - 保留: 立场表态、承诺与背弃、指令及结果、投票结果、关键危机更新.
 - 丢弃: 寒暄、重复表态、无关细节.
 - 按故事时间排列, 简明扼要.
-在```json代码块中输出: {"text": "摘要正文"}
+{JSON_TEXT_OUTPUT_RULES}
 """
 
 
@@ -63,16 +75,6 @@ def render_for_summarize(event: Event, *, max_text_chars: int = SUMMARIZE_MAX_SP
         return line
     short = _truncate_text(raw, max_text_chars)
     return line.replace(raw, short, 1)
-
-
-def _trim_old_summary(old_summary: str) -> str:
-    if not old_summary:
-        return "(无)"
-    if len(old_summary) <= SUMMARIZE_MAX_OLD_SUMMARY_CHARS:
-        return old_summary
-    head = old_summary[: SUMMARIZE_MAX_OLD_SUMMARY_CHARS // 2]
-    tail = old_summary[-SUMMARIZE_MAX_OLD_SUMMARY_CHARS // 2 :]
-    return f"{head}\n...(旧摘要过长, 中部省略)...\n{tail}"
 
 
 def _trim_events_for_input(events: list[Event], budget_tokens: int) -> list[Event]:
@@ -107,54 +109,86 @@ def _trim_events_for_input(events: list[Event], budget_tokens: int) -> list[Even
     return kept
 
 
-def build_summarize_prompt(
-    old_summary: str,
+_LEVEL_DESC = {
+    "venue": "会场公开记录",
+    "private": "该席位私人记忆(含内心盘算)",
+    "dm-only": "主席团全量记录(含判定细节)",
+}
+
+
+def build_chapter_prompt(
     new_events: list[Event],
     level: Literal["venue", "private", "dm-only"],
 ) -> tuple[str, list[Event]]:
-    """组装 L4 任务段, 并在输入 token 预算内裁剪事件."""
-    level_desc = {
-        "venue": "会场公开记录",
-        "private": "该席位私人记忆(含内心盘算)",
-        "dm-only": "主席团全量记录(含判定细节)",
-    }
-    trimmed_old = _trim_old_summary(old_summary)
+    """摘章 L4: 只压缩本期新事件为一章(旧章节不经LLM之手, 由程序拼接)."""
     events_for_prompt = _trim_events_for_input(
-        new_events,
-        SUMMARIZE_MAX_INPUT_TOKENS - estimate_tokens(trimmed_old) - 200,
+        new_events, SUMMARIZE_MAX_INPUT_TOKENS - 200,
     )
     events_text = "\n".join(render_for_summarize(e) for e in events_for_prompt) or "(无新事件)"
     l4 = (
-        f"摘要层级: {level_desc.get(level, level)}\n"
-        f"<旧摘要>\n{trimmed_old}\n</旧摘要>\n"
+        f"摘要层级: {_LEVEL_DESC.get(level, level)}\n"
         f"<本期新事件>\n{events_text}\n</本期新事件>\n"
-        f"将以上内容合并为一份新的编年体摘要. "
+        f"将本期新事件压缩为一章编年体摘要(只写本期, 不要虚构此前的内容). "
         f"保留立场表态、承诺与背弃、指令及结果、投票结果、关键危机更新. "
-        f"丢弃寒暄与重复. 在```json中输出: "
-        '{"text": "新摘要正文"}'
+        f"丢弃寒暄与重复. 在```json中输出, 边界引号必须用 ASCII 双引号: "
+        '{"text": "本章摘要正文"}'
     )
     return l4, events_for_prompt
 
 
+def build_consolidate_prompt(
+    chapters: list[str],
+    level: Literal["venue", "private", "dm-only"],
+) -> str:
+    """合并 L4: 全部章节压成一章(低频squash), 必须覆盖全部时间范围."""
+    joined = "\n\n".join(
+        f"<第{i}章>\n{c}\n</第{i}章>" for i, c in enumerate(chapters, 1)
+    )
+    return (
+        f"摘要层级: {_LEVEL_DESC.get(level, level)}\n"
+        f"{joined}\n"
+        f"将以上全部章节合并压缩为一份更精炼的编年体摘要. "
+        f"**必须覆盖全部章节的时间范围, 从最早记录开始**——只输出后期内容视为错误. "
+        f"保留立场表态、承诺与背弃、指令及结果、投票结果、关键危机更新. "
+        f"在```json中输出, 边界引号必须用 ASCII 双引号: "
+        '{"text": "合并后的摘要正文"}'
+    )
+
+
 class RecorderAgent(BaseAgent):
-    """书记 Agent: 生成滚动摘要. 见 05§3.4."""
+    """书记 Agent: 章节追加摘要. 见 05§3.4."""
 
     def __init__(self, llm: LLMClient) -> None:
         super().__init__(llm, max_tokens=16384)
 
-    async def summarize(
+    async def summarize_chapter(
         self,
         task: TaskSpec,
-        old_summary: str,
         new_events: list[Event],
         level: Literal["venue", "private", "dm-only"] = "venue",
     ) -> str:
-        """将旧摘要 + 新事件压缩为新摘要."""
-        l4, _ = build_summarize_prompt(old_summary, new_events, level)
+        """本期新事件 → 一章摘要(追加到章节列表由引擎负责)."""
+        l4, _ = build_chapter_prompt(new_events, level)
         ctx = self.build_context(
             task, g=G_RECORDER, l1="你是会议书记.", l2="", l3="", l4=l4
         )
         result = await self.act(task, ctx, schema_model=SummaryResult)
         if isinstance(result, SummaryResult):
             return result.text
-        return old_summary  # fallback: 保留旧摘要
+        return ""  # fallback: 本章缺失, 旧章节不受影响
+
+    async def consolidate(
+        self,
+        task: TaskSpec,
+        chapters: list[str],
+        level: Literal["venue", "private", "dm-only"] = "venue",
+    ) -> str:
+        """低频squash: 全部章节合并为一章; 失败时保留原章节拼接."""
+        l4 = build_consolidate_prompt(chapters, level)
+        ctx = self.build_context(
+            task, g=G_RECORDER, l1="你是会议书记.", l2="", l3="", l4=l4
+        )
+        result = await self.act(task, ctx, schema_model=SummaryResult)
+        if isinstance(result, SummaryResult) and result.text.strip():
+            return result.text
+        return "\n\n".join(chapters)

@@ -313,11 +313,15 @@ class EventBus:
 
 
 def _visible(e: Event, viewer: str, venue: str | None, group: str | None) -> bool:
-    """query 内部用: scope 过滤 + venue/group 过滤."""
+    """query 内部用: scope 过滤 + venue/group 过滤.
+
+    group 过滤语义: 排除**其他组**的组内事件, 但保留非组事件(venue/global等)——
+    非正式磋商中代表仍需看到 Crisis Update 与会场级事件.
+    """
     if not e.is_visible_to(viewer):
         return False
     if venue is not None and e.venue_id != venue:
         return False
-    if group is not None and e.group_id != group:
+    if group is not None and e.group_id is not None and e.group_id != group:
         return False
     return True

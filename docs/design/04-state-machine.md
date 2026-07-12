@@ -63,6 +63,8 @@ ModCaucus ⇄ UnmodCaucus          指令队列 → DM判定 → 主席处理
 - **主持权可易手**: `presiding_seat`是venue运行时状态的一部分(RuntimeState, 见03§7), 可经指令判定/投票/政变在推演中变更, 产生`presiding_change`事件(venue scope). "罢免议长"是合法玩法;
 - 主持席同时保有代表身份: 仍可发言、写指令、投票(主持任务与行动回合是不同task).
 
+**席位状态(seat status)**: 每席位有`active/suspended/removed`三态. 叙事导致的资格变化(解职/被捕/死亡/复职)由DM在结果撰写中通过`seat_status_changes`显式声明, 引擎产生`seat_status_change`事件并执行——非active席位退出点名/保底轮询/Unmod分组/投票分母, 亦不再进入新事件的可见名单(离席); 主持席失活时主持权自动回落中立主席(`presiding_change`); 在席席位不足2时会议自动闭会. **叙事必须配合机制声明才生效**——DM只写"某某被解职"而不声明状态变化, 该角色会继续开会.
+
 阶段切换: 戏内的磋商形式切换(Mod⇄Unmod)由主持者决定; 议程终结(Adjourned)、临时会场创建等游戏层切换仍由戏外主席决定(输入: 会场近期氛围摘要+待决动议+阶段预算余量; 输出schema见05). 人类导演可通过`human_control`事件强制切换, 优先级最高.
 
 ### ModeratedCaucus回合流程
@@ -97,7 +99,7 @@ def run_unmod(venue, rounds):                     # rounds默认4, 可配
 玩家模式下人类的换组/申请同样在屏障生效, 引擎逻辑不分叉.
 
 ### Voting子流程
-1. 代表动议表决某联合指令(草稿已在会场传阅=一条venue事件);
+1. 代表动议表决某联合指令(草稿已在会场传阅=一条venue事件); `motion_target`填**草案线编号**(如D1.2, 默认最新版), 见06§2;
 2. 主持者受理 → `vote_call`事件, 冻结前场(主持席拒不受理时, 动议方可appeal至戏外主席);
 3. **在场**席位依次投票(aye/nay/abstain; 借出到临时会场的"离场"席位不参与), 玩家席位走WS等待(超时按弃权);
 4. **程序**按venue的`decision_rule`计票 → `vote_result`(含完整唱票). LLM只负责投票行为本身, 通过与否是纯程序逻辑;

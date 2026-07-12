@@ -132,3 +132,50 @@ def test_build_delegate_g_global_includes_background_and_seats() -> None:
     assert "本会场主持席" in g
     assert "<你的秘密信息>" not in g  # 秘密目标只在 L1
 
+
+
+class TestSeatStatus:
+    """席位状态: 非active席位退出点名/轮询/投票, 主持权回落. 见 04§3."""
+
+    def _sm(self):
+        from munagent.core.state_machine import VenueStateMachine
+
+        return VenueStateMachine(
+            venue_id="v",
+            seat_ids=["a", "b", "c"],
+            initial_phase="ModeratedCaucus",
+            start_story_time="2026-03-15T09:00:00+08:00",
+            presiding_seat="a",
+        )
+
+    def test_removed_seat_excluded_from_active(self) -> None:
+        sm = self._sm()
+        sm.set_seat_status("b", "removed")
+        assert sm.active_seat_ids == ["a", "c"]
+
+    def test_presiding_falls_back_when_presider_removed(self) -> None:
+        sm = self._sm()
+        sm.set_seat_status("a", "suspended")
+        assert sm.presiding_seat is None
+
+    def test_floor_rotation_skips_inactive(self) -> None:
+        sm = self._sm()
+        sm.set_seat_status("a", "removed")
+        sm.record_speech("b")
+        assert sm.next_for_floor_rotation() == "c"
+
+    def test_suspended_can_return(self) -> None:
+        sm = self._sm()
+        sm.set_seat_status("c", "suspended")
+        assert "c" not in sm.active_seat_ids
+        sm.set_seat_status("c", "active")
+        assert "c" in sm.active_seat_ids
+
+    def test_invalid_status_rejected(self) -> None:
+        import pytest as _pytest
+
+        sm = self._sm()
+        with _pytest.raises(ValueError):
+            sm.set_seat_status("a", "dead")
+        with _pytest.raises(ValueError):
+            sm.set_seat_status("nobody", "removed")

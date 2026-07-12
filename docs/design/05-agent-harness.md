@@ -35,6 +35,7 @@ class BaseAgent:
 | G 全局共享段 | 历史委通用惯例(玩法/前后场分工/指令写作/博弈规范/扮演纪律)+会议规则+四类指令格式+全部任务输出schema+背景文书摘要(**所有代表一字不差**, 跨Agent共享缓存) | 场景包+固定文案 | ~2k |
 | L1 席位固定段 | 人格卡+席位公开/私密信息+权力清单+可见stats子集(`stats_for_seat`) | 场景包 | ~1k |
 | L2 纪元摘要段 | 会场公开记录摘要+本席位私人记忆摘要(本纪元冻结版) | 书记摘要(§4) | ~2k |
+| 文件档案区 | 该席位可见的现行文件**原文**: 已通过文件+各草案线当前版本(历史版隐藏, fork对抗版并列)+本人私密指令 | 引擎`_docs_dossier` | 随现行文件量 |
 | L3 追加事件段 | 本纪元内该席位可见事件原文, 只追加不删除(含自己的speech_thought——记得自己的盘算) | `bus.query(viewer=seat)` | ~3k(纪元切换阈值) |
 | L4 任务段 | 当前阶段+故事时间+本次任务+指定schema | 引擎TaskSpec | <0.5k |
 
@@ -85,10 +86,12 @@ class BaseAgent:
 ### 3.3 DM Agent
 判定流水线见[06](06-directives-adjudication.md). 任务: `adjudicate`(五步流水线中的②可行性评估与④结果撰写两次LLM调用)、`arc_condition_check`(评估condition型弧线触发)、`random_pool_draw`建议.
 
-### 3.4 书记Agent(RecorderAgent): 滚动摘要
+### 3.4 书记Agent(RecorderAgent): 章节追加摘要
 
 - **分层**: 每会场维护venue公开摘要; 每席位维护私人记忆摘要(输入=仅该席位可见事件); 主席团另有dm-only全量摘要;
-- **触发**: 由**纪元机制**驱动(见[11-cost-and-caching.md](11-cost-and-caching.md)§3)——某视角的L3追加段累积超过`epoch_l3_max_tokens`(默认3k)时切换纪元: 书记将L3压缩进新版摘要(旧摘要+新事件→新摘要), L3清空重积, 产出`summary_written`事件. 摘要更新与缓存失效绑定在同一时刻;
+- **章节追加模型**(取代早期"滚动重写"): 每纪元只把本期新事件压缩为**一章**, 程序追加到该视角的章节列表尾部, L2=全部章节拼接. 旧章节不经LLM之手——杜绝"合并时静默丢失早期记忆"(实测flash有时只摘新事件而丢旧摘要); 且L2只从尾部生长, 纪元切换的缓存miss范围从"L2起"缩小到"新章节起";
+- **低频合并(squash)**: 章节总量超过`2×epoch_l3_max_tokens`时, 全部章节压成一章(prompt强制"覆盖全部时间范围, 从最早记录开始"), 产出`kind=consolidated`的`summary_written`事件; 续推回灌时consolidated章替换此前全部章节;
+- **触发**: 由**纪元机制**驱动(见[11-cost-and-caching.md](11-cost-and-caching.md)§3)——某视角的L3追加段累积超过`epoch_l3_max_tokens`时切换纪元: 摘章追加, L3清空重积, 产出`kind=chapter`的`summary_written`事件. 摘要更新与缓存失效绑定在同一时刻;
 - **格式**: 按故事时间排列的编年体要点, 保留: 立场表态、承诺与背弃、指令及结果、投票结果; 丢弃: 寒暄与重复表态;
 - 私人摘要技术上由recorder服务用flash模型代跑, 但输入严格限制为该席位可见事件, 不泄密.
 
