@@ -1,4 +1,4 @@
-"""分层配置模型. 见 docs/design/08-config.md."""
+"""配置 schema — 与 docs/design/08-config.md 对齐."""
 
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ class RoleConfig(BaseModel):
 
 
 class MineruToolConfig(BaseModel):
-    base_url: str = "http://36.139.151.129:8282"
+    base_url: str = ""
 
 
 class SearchToolConfig(BaseModel):
@@ -55,23 +55,30 @@ class ServerConfig(BaseModel):
     debug_dump_prompts: bool = False
 
 
-class MunagentConfig(BaseModel):
-    providers: dict[str, ProviderConfig]
-    roles: dict[str, RoleConfig]
+class AppConfig(BaseModel):
+    """运行时全局配置(不含会话级快照)."""
+
+    providers: dict[str, ProviderConfig] = Field(default_factory=dict)
+    roles: dict[str, RoleConfig] = Field(default_factory=dict)
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
     engine: EngineConfig = Field(default_factory=EngineConfig)
     server: ServerConfig = Field(default_factory=ServerConfig)
 
-    def resolve_role(self, role: str) -> tuple[ProviderConfig, str]:
-        """角色路由: role -> (provider配置, model名)."""
-        if role not in self.roles:
-            raise KeyError(f"未知角色路由: {role}")
-        route = self.roles[role]
-        if route.provider not in self.providers:
-            raise KeyError(f"角色 {role} 引用的 provider 不存在: {route.provider}")
-        return self.providers[route.provider], route.model
 
-    def default_provider_name(self) -> str:
-        if "deepseek" in self.providers:
-            return "deepseek"
-        return next(iter(self.providers))
+def default_config() -> AppConfig:
+    """内置默认值 — 无 key, 供 env/yaml 覆盖."""
+    return AppConfig(
+        providers={
+            "deepseek": ProviderConfig(
+                base_url="https://api.deepseek.com",
+                api_key="",
+            ),
+        },
+        roles={
+            "delegate": RoleConfig(provider="deepseek", model="deepseek-v4-flash"),
+            "chair": RoleConfig(provider="deepseek", model="deepseek-v4-pro"),
+            "dm": RoleConfig(provider="deepseek", model="deepseek-v4-pro"),
+            "recorder": RoleConfig(provider="deepseek", model="deepseek-v4-flash"),
+            "designer": RoleConfig(provider="deepseek", model="deepseek-v4-pro"),
+        },
+    )

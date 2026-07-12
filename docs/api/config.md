@@ -1,17 +1,10 @@
-# config 模块 API
+# 配置
 
-## `load_config(path=None) -> MunagentConfig`
-加载配置. 优先级: 环境变量 > YAML 文件 > 内置默认. 默认文件 `~/.munagent/config.yaml`.
+| 函数 | 说明 |
+|---|---|
+| `load_config(path=None) -> AppConfig` | env > yaml > 默认 三层加载 |
+| `save_config(config, path=None) -> Path` | 写入 yaml 并 chmod 600 |
+| `mask_api_key(key) -> str` | 展示用掩码, 不回传明文 |
+| `default_config() -> AppConfig` | 内置默认(无 key) |
 
-## `save_config(config, path=None) -> Path`
-写入用户配置, `chmod 600`.
-
-## `mask_api_key(api_key) -> str`
-返回掩码字符串, 供 GUI 展示, 禁止回传完整 key.
-
-## `MunagentConfig.resolve_role(role) -> (ProviderConfig, model)`
-角色→provider+model 路由.
-
-## 环境变量
-- `MUNAGENT_API_KEY` / `MUNAGENT_BASE_URL`: 覆盖默认 provider
-- `MUNAGENT_MINERU_URL`, `MUNAGENT_PORT`, `MUNAGENT_CONFIG_PATH`
+路径常量: `CONFIG_PATH` = `~/.munagent/config.yaml`

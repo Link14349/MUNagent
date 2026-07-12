@@ -1,49 +1,47 @@
-"""LLM 客户端单元测试(mock, 不打真实 API)."""
+"""LLM 客户端 mock 测试 — 不打真实 API."""
 
 from __future__ import annotations
 
 import httpx
 import pytest
 
-from munagent.llm.client import ChatMessage, ChatRequest, LLMClient, LLMError
+from munagent.llm import ChatMessage, LLMClient
 
 
 @pytest.mark.asyncio
-async def test_chat_records_usage(
-    llm_client_factory,
-    mock_llm_transport,
+async def test_chat_success(
+    sample_config,
+    mock_llm_transport: httpx.MockTransport,
+    usage_collector,
 ) -> None:
-    records = []
-    client = llm_client_factory(transport=mock_llm_transport, usage_sink=records.append)
-    try:
-        content = await client.chat(
-            ChatRequest(
-                role="delegate",
-                task="turn",
-                messages=[ChatMessage(role="user", content="hello")],
-                phase="ModeratedCaucus",
-            )
-        )
-        assert '{"ok": true}' in content
-        assert len(records) == 1
-        assert records[0].cache_hit_tokens == 8
-        assert records[0].cache_miss_tokens == 2
-        assert records[0].thinking_enabled is True
-    finally:
-        await client.aclose()
+    client = LLMClient(
+        sample_config,
+        usage_sink=usage_collector.emit,
+        transport=mock_llm_transport,
+    )
+    text = await client.chat(
+        "delegate",
+        [ChatMessage(role="user", content="ping")],
+        max_tokens=1,
+        thinking_enabled=False,
+    )
+    assert text == "pong"
+    assert len(usage_collector.records) == 1
+    rec = usage_collector.records[0]
+    assert rec.cache_hit_tokens == 3
+    assert rec.thinking_enabled is False
 
 
 @pytest.mark.asyncio
-async def test_chat_unmod_disables_thinking(
-    llm_client_factory,
-    mock_llm_transport,
+async def test_chat_thinking_enabled_by_default(
+    sample_config,
 ) -> None:
     captured: dict = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
         import json
 
-        captured["body"] = json.loads(request.content.decode())
+        captured.update(json.loads(request.content.decode()))
         return httpx.Response(
             200,
             json={
@@ -52,38 +50,38 @@ async def test_chat_unmod_disables_thinking(
             },
         )
 
-    client = llm_client_factory(transport=httpx.MockTransport(handler))
-    try:
-        await client.chat(
-            ChatRequest(
-                role="delegate",
-                task="turn",
-                messages=[ChatMessage(role="user", content="hi")],
-                phase="UnmoderatedCaucus",
-                scope="group",
-            )
-        )
-        assert "thinking" not in captured["body"]
-    finally:
-        await client.aclose()
+    client = LLMClient(sample_config, transport=httpx.MockTransport(handler))
+    await client.chat(
+        "dm",
+        [ChatMessage(role="user", content="x")],
+        max_tokens=1,
+    )
+    assert captured.get("thinking") == {"type": "enabled"}
 
 
 @pytest.mark.asyncio
-async def test_missing_api_key_raises(sample_config) -> None:
-    sample_config.providers["deepseek"].api_key = ""
-    client = LLMClient(sample_config)
-    with pytest.raises(LLMError, match="API key"):
-        await client.chat(
-            ChatRequest(role="delegate", task="turn", messages=[ChatMessage("user", "x")])
+async def test_chat_thinking_disabled_param(
+    sample_config,
+) -> None:
+    captured: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        import json
+
+        captured.update(json.loads(request.content.decode()))
+        return httpx.Response(
+            200,
+            json={
+                "choices": [{"message": {"content": "ok"}}],
+                "usage": {"prompt_tokens": 1, "completion_tokens": 1},
+            },
         )
 
-
-@pytest.mark.asyncio
-async def test_test_provider_success(llm_client_factory, mock_llm_transport) -> None:
-    client = llm_client_factory(transport=mock_llm_transport)
-    try:
-        record = await client.test_provider("deepseek")
-        assert record.task == "config_test"
-        assert record.thinking_enabled is False
-    finally:
-        await client.aclose()
+    client = LLMClient(sample_config, transport=httpx.MockTransport(handler))
+    await client.chat(
+        "delegate",
+        [ChatMessage(role="user", content="ping")],
+        max_tokens=16,
+        thinking_enabled=False,
+    )
+    assert captured.get("thinking") == {"type": "disabled"}

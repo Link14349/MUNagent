@@ -1,19 +1,20 @@
-"""key 脱敏单元测试."""
+"""密钥脱敏测试."""
 
-from munagent.security.sanitize import sanitize_text
+from munagent.security import sanitize_exception, sanitize_text
 
 
-def test_sanitize_openai_key() -> None:
-    raw = "401 Unauthorized: sk-abcdefghijklmnopqrstuvwxyz invalid"
-    assert "sk-abcdefghijklmnopqrstuvwxyz" not in sanitize_text(raw)
+def test_sanitize_sk_key() -> None:
+    raw = "401 Unauthorized: sk-abcdefghijklmnop not valid"
+    assert "sk-abcdefghijklmnop" not in sanitize_text(raw)
     assert "sk-****" in sanitize_text(raw)
 
 
-def test_sanitize_tavily_key() -> None:
-    raw = "failed with tvly-abcdefghijklmnop"
+def test_sanitize_tvly_key() -> None:
+    raw = "error tvly-abcdefghijklmnop timeout"
     assert "tvly-****" in sanitize_text(raw)
 
 
-def test_sanitize_bearer() -> None:
-    raw = "Authorization Bearer sk-secret-token failed"
-    assert "Bearer ****" in sanitize_text(raw)
+def test_sanitize_exception() -> None:
+    exc = RuntimeError("Bearer sk-secretkey1234567890 failed")
+    text = sanitize_exception(exc)
+    assert "sk-secretkey1234567890" not in text

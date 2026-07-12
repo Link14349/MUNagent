@@ -1,185 +1,166 @@
-"""OpenAI 兼容异步 LLM 客户端."""
+"""OpenAI 兼容异步 LLM 客户端 — provider 档案 + 角色路由."""
 
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable
-from dataclasses import dataclass
-from typing import Any
+import time
+from typing import Any, Literal
 
 import httpx
+from pydantic import BaseModel, Field
 
-from munagent.config.models import MunagentConfig
-from munagent.llm.thinking import resolve_thinking
-from munagent.llm.usage import UsageRecord
-from munagent.security.sanitize import sanitize_text
+from munagent.config.models import AppConfig
+from munagent.llm.usage import UsageRecord, UsageSink
+from munagent.security.sanitize import sanitize_exception, sanitize_text
 
-
-class LLMError(RuntimeError):
-    """LLM 调用失败(已脱敏)."""
+MessageRole = Literal["system", "user", "assistant"]
 
 
-@dataclass
-class ChatMessage:
-    role: str
+class ChatMessage(BaseModel):
+    role: MessageRole
     content: str
 
 
-@dataclass
-class ChatRequest:
-    role: str
-    task: str
-    messages: list[ChatMessage]
-    phase: str | None = None
-    scope: str | None = None
-    max_tokens: int = 1024
-    temperature: float = 0.6
-
-
 class LLMClient:
-    """Provider 档案 + 角色路由 + thinking 开关 + 重试."""
+    """统一 chat 入口; Agent 不直接碰 httpx."""
 
     def __init__(
         self,
-        config: MunagentConfig,
+        config: AppConfig,
         *,
-        timeout_s: float = 60.0,
+        usage_sink: UsageSink | None = None,
+        timeout_s: float = 120.0,
         max_retries: int = 3,
-        usage_sink: Callable[[UsageRecord], None] | None = None,
         transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         self._config = config
-        self._timeout = timeout_s
-        self._max_retries = max_retries
         self._usage_sink = usage_sink
+        self._timeout_s = timeout_s
+        self._max_retries = max_retries
         self._transport = transport
-        self._client: httpx.AsyncClient | None = None
 
-    async def _get_client(self) -> httpx.AsyncClient:
-        if self._client is None:
-            self._client = httpx.AsyncClient(
-                timeout=self._timeout, transport=self._transport
-            )
-        return self._client
+    def resolve_route(self, role: str) -> tuple[str, str, str]:
+        """role → (provider_name, base_url, model)."""
+        role_cfg = self._config.roles.get(role)
+        if role_cfg is None:
+            raise KeyError(f"未知角色路由: {role}")
+        provider = self._config.providers.get(role_cfg.provider)
+        if provider is None:
+            raise KeyError(f"角色 {role} 引用的 provider 不存在: {role_cfg.provider}")
+        return role_cfg.provider, provider.base_url, role_cfg.model
 
-    async def aclose(self) -> None:
-        """关闭底层 HTTP 客户端. 测试结束时应调用."""
-        if self._client is not None:
-            await self._client.aclose()
-            self._client = None
+    @staticmethod
+    def _normalize_base_url(base_url: str) -> str:
+        url = base_url.rstrip("/")
+        if not url.endswith("/v1"):
+            url = f"{url}/v1"
+        return url
 
-    async def chat(self, request: ChatRequest) -> str:
-        provider, model = self._config.resolve_role(request.role)
-        if not provider.api_key or provider.api_key == "none":
-            raise LLMError("API key 未配置, 请设置 ~/.munagent/config.yaml 或 MUNAGENT_API_KEY")
+    @staticmethod
+    def _extract_assistant_text(message: dict[str, Any]) -> str:
+        """解析 assistant 正文; thinking 模式下小 max_tokens 可能只有 reasoning_content."""
+        content = message.get("content")
+        if content is not None and str(content).strip():
+            return str(content).strip()
+        reasoning = message.get("reasoning_content")
+        if reasoning is not None and str(reasoning).strip():
+            return str(reasoning).strip()
+        return ""
 
-        thinking_enabled = resolve_thinking(
-            request.role,
-            request.task,
-            phase=request.phase,
-            scope=request.scope,
-        )
-        body: dict[str, Any] = {
+    async def chat(
+        self,
+        role: str,
+        messages: list[ChatMessage],
+        *,
+        max_tokens: int = 4096,
+        err_hint: str | None = None,
+        thinking_enabled: bool = True,
+    ) -> str:
+        """调用 chat/completions; 失败时指数退避重试."""
+        _provider, base_url, model = self.resolve_route(role)
+        api_key = self._config.providers[self._config.roles[role].provider].api_key
+        if not api_key or api_key == "none":
+            raise ValueError(f"provider 未配置 api_key, 无法调用 LLM (role={role})")
+
+        payload: dict[str, Any] = {
             "model": model,
-            "messages": [{"role": m.role, "content": m.content} for m in request.messages],
-            "max_tokens": request.max_tokens,
-            "temperature": request.temperature,
-            "stream": False,
+            "messages": [m.model_dump() for m in messages],
+            "max_tokens": max_tokens,
         }
-        if thinking_enabled:
-            body["thinking"] = {"type": "enabled"}
+        if err_hint:
+            payload["messages"] = payload["messages"] + [
+                {"role": "user", "content": f"上次输出校验失败, 请修正:\n{err_hint}"}
+            ]
+        # DeepSeek V4 部分模型默认开 thinking; 显式 disabled 保证非推理任务拿到 content
+        payload["thinking"] = {"type": "enabled" if thinking_enabled else "disabled"}
 
-        url = provider.base_url.rstrip("/") + "/chat/completions"
-        headers = {
-            "Authorization": f"Bearer {provider.api_key}",
-            "Content-Type": "application/json",
-        }
+        url = f"{self._normalize_base_url(base_url)}/chat/completions"
+        headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
 
-        client = await self._get_client()
-        last_error: Exception | None = None
+        last_exc: Exception | None = None
         for attempt in range(self._max_retries):
+            started = time.perf_counter()
             try:
-                response = await client.post(url, json=body, headers=headers)
-                if response.status_code >= 500:
-                    raise httpx.HTTPStatusError(
-                        "server error",
-                        request=response.request,
-                        response=response,
-                    )
-                if response.status_code >= 400:
-                    detail = sanitize_text(response.text)
-                    raise LLMError(
-                        f"LLM 请求失败 HTTP {response.status_code}: {detail[:500]}"
-                    )
-                payload = response.json()
-                content = payload["choices"][0]["message"]["content"]
-                usage = payload.get("usage", {})
-                record = UsageRecord.from_response(
-                    role=request.role,
-                    task=request.task,
-                    model=model,
-                    provider=self._config.roles[request.role].provider,
-                    usage=usage,
-                    thinking_enabled=thinking_enabled,
-                )
-                if self._usage_sink:
-                    self._usage_sink(record)
+                async with httpx.AsyncClient(
+                    timeout=self._timeout_s, transport=self._transport
+                ) as client:
+                    resp = await client.post(url, json=payload, headers=headers)
+                    resp.raise_for_status()
+                    data = resp.json()
+                latency_ms = (time.perf_counter() - started) * 1000
+                self._record_usage(role, model, data, thinking_enabled, latency_ms)
+                choices = data.get("choices") or []
+                if not choices:
+                    raise RuntimeError("LLM 响应无 choices")
+                message = choices[0].get("message") or {}
+                content = self._extract_assistant_text(message)
+                if not content:
+                    raise RuntimeError("LLM 响应 content 为空")
                 return content
-            except (httpx.TimeoutException, httpx.HTTPStatusError) as exc:
-                last_error = exc
-                if attempt + 1 < self._max_retries:
-                    await asyncio.sleep(2**attempt)
-                continue
-            except httpx.HTTPError as exc:
-                raise LLMError(sanitize_text(str(exc))) from exc
+            except (httpx.HTTPStatusError, httpx.TimeoutException, httpx.TransportError) as exc:
+                last_exc = exc
+                if attempt + 1 >= self._max_retries:
+                    break
+                await asyncio.sleep(2**attempt)
+            except Exception as exc:
+                raise RuntimeError(sanitize_text(sanitize_exception(exc))) from exc
 
-        raise LLMError(sanitize_text(str(last_error or "LLM 调用失败")))
+        assert last_exc is not None
+        raise RuntimeError(sanitize_text(sanitize_exception(last_exc))) from last_exc
 
-    async def test_provider(self, provider_name: str | None = None) -> UsageRecord:
-        """最小补全连通性测试(约 1 token)."""
-        name = provider_name or self._config.default_provider_name()
-        if name not in self._config.providers:
-            raise LLMError(f"provider 不存在: {name}")
-        provider = self._config.providers[name]
-        if not provider.api_key or provider.api_key == "none":
-            raise LLMError(f"provider {name} 的 API key 未配置")
-
-        role_for_test = next(
-            (r for r, cfg in self._config.roles.items() if cfg.provider == name),
-            "delegate",
-        )
-        _, model = self._config.resolve_role(role_for_test)
-        body = {
-            "model": model,
-            "messages": [{"role": "user", "content": "ping"}],
-            "max_tokens": 1,
-            "stream": False,
-        }
-        url = provider.base_url.rstrip("/") + "/chat/completions"
-        headers = {
-            "Authorization": f"Bearer {provider.api_key}",
-            "Content-Type": "application/json",
-        }
-        client = await self._get_client()
-        try:
-            response = await client.post(url, json=body, headers=headers)
-        except httpx.HTTPError as exc:
-            raise LLMError(sanitize_text(str(exc))) from exc
-        if response.status_code >= 400:
-            raise LLMError(
-                f"连接测试失败 HTTP {response.status_code}: "
-                f"{sanitize_text(response.text)[:500]}"
-            )
-        payload = response.json()
-        usage = payload.get("usage", {})
-        record = UsageRecord.from_response(
-            role=role_for_test,
-            task="config_test",
+    def _record_usage(
+        self,
+        role: str,
+        model: str,
+        data: dict[str, Any],
+        thinking: bool,
+        latency_ms: float,
+    ) -> None:
+        if self._usage_sink is None:
+            return
+        usage = data.get("usage") or {}
+        hit = int(usage.get("prompt_cache_hit_tokens") or 0)
+        miss = int(usage.get("prompt_cache_miss_tokens") or 0)
+        if hit == 0 and miss == 0:
+            # 部分兼容端点只有 prompt_tokens
+            miss = int(usage.get("prompt_tokens") or 0)
+        record = UsageRecord(
+            role=role,
             model=model,
-            provider=name,
-            usage=usage,
-            thinking_enabled=False,
+            prompt_tokens=int(usage.get("prompt_tokens") or 0),
+            completion_tokens=int(usage.get("completion_tokens") or 0),
+            cache_hit_tokens=hit,
+            cache_miss_tokens=miss,
+            thinking_enabled=thinking,
+            latency_ms=latency_ms,
         )
-        if self._usage_sink:
-            self._usage_sink(record)
-        return record
+        self._usage_sink(record)
+
+
+class ChatRequest(BaseModel):
+    """测试/文档用请求体摘要."""
+
+    role: str
+    messages: list[ChatMessage]
+    max_tokens: int = Field(default=4096, ge=1)
+    thinking_enabled: bool = True

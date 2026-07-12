@@ -224,3 +224,5 @@ __marimo__/
 config.local.yaml
 *.db
 debug_prompts/
+munagent/web/node_modules/
+munagent/web/dist/

@@ -1,7 +1,11 @@
-"""LLM 调用层: OpenAI 兼容客户端、角色路由、用量统计."""
+"""LLM 调用层."""
 
-from munagent.llm.client import LLMClient, LLMError
-from munagent.llm.thinking import resolve_thinking
-from munagent.llm.usage import UsageRecord
+from munagent.llm.client import ChatMessage, LLMClient
+from munagent.llm.usage import UsageCollector, UsageRecord
 
-__all__ = ["LLMClient", "LLMError", "UsageRecord", "resolve_thinking"]
+__all__ = [
+    "ChatMessage",
+    "LLMClient",
+    "UsageCollector",
+    "UsageRecord",
+]

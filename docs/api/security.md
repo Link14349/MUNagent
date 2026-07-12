@@ -1,4 +1,8 @@
-# security 模块 API
+# 安全
 
-## `sanitize_text(text) -> str`
-剥离日志/异常中的 api key、Bearer token 等敏感片段. **事件落地与 LLM 报错必须先过此函数.**
+| 函数 | 说明 |
+|---|---|
+| `sanitize_text(text) -> str` | 脱敏日志/异常中的 api key |
+| `sanitize_exception(exc) -> str` | 异常转安全字符串 |
+
+约束: key 不进事件日志; LLM 层抛错前必须过脱敏.

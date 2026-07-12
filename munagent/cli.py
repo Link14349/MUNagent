@@ -1,16 +1,15 @@
-"""MUNagent 命令行入口."""
+"""CLI 入口."""
 
 from __future__ import annotations
 
 import argparse
 import asyncio
 import sys
-from pathlib import Path
 
 from munagent import __version__
-from munagent.config import load_config
-from munagent.core.render import render
-from munagent.engine import ANSI_COLORS, Engine, colorize
+from munagent.config import load_config, mask_api_key
+from munagent.llm import ChatMessage, LLMClient
+from munagent.security import sanitize_text
 
 
 def _cmd_version(_: argparse.Namespace) -> int:
@@ -18,200 +17,85 @@ def _cmd_version(_: argparse.Namespace) -> int:
     return 0
 
 
-def _cmd_config_test(args: argparse.Namespace) -> int:
-    config = load_config()
-    from munagent.llm import LLMClient
-
-    client = LLMClient(config)
-
-    async def run() -> None:
-        record = await client.test_provider(args.provider)
-        provider_name = args.provider or config.default_provider_name()
-        print("连接测试成功")
-        print(f"  provider: {provider_name}")
-        print(f"  model: {record.model}")
-        print(f"  prompt_tokens: {record.prompt_tokens}")
-        print(f"  completion_tokens: {record.completion_tokens}")
-
+async def _test_provider(config, role: str = "delegate") -> tuple[bool, str]:
+    """发 1 token 补全验证连通性."""
     try:
-        asyncio.run(run())
-    except Exception as exc:  # noqa: BLE001
-        print(f"连接测试失败: {exc}", file=sys.stderr)
-        return 1
-    return 0
-
-
-def _cmd_run(args: argparse.Namespace) -> int:
-    from munagent.core.scenario import load_scenario
-
-    config = load_config()
-    scenario = load_scenario(args.scenario)
-
-    venue_timezone = scenario.venues[0].timezone
-
-    def on_event(e):
-        _print_event(e, timezone=venue_timezone)
-
-    engine = Engine(
-        scenario,
-        config,
-        master_seed=args.seed,
-        max_steps=args.max_steps,
-        db_path=args.db,
-        on_event=on_event,
-    )
-
-    async def run() -> int:
-        print(colorize(f"=== 推演开始: {scenario.manifest.title} ===", "cyan"))
-        print(colorize(f"会场: {scenario.venues[0].name}", "dim"))
-        print(colorize(f"席位: {', '.join(s.name for s in scenario.seats_of(scenario.venues[0].id))}", "dim"))
-        print()
-        result = await engine.run()
-        print()
-        print(colorize(f"=== 推演完成: {result.session_id} ({result.total_steps} 步, {len(result.events)} 事件) ===", "cyan"))
-        print(colorize(f"master_seed: {engine.master_seed}", "dim"))
-        print(colorize(f"回放: munagent replay {result.session_id} --viewpoint god --db {args.db}", "dim"))
-        return 0
-
-    return asyncio.run(run())
-
-
-def _cmd_resume(args: argparse.Namespace) -> int:
-    """断点续推: 从事件流重建状态, 继续推演."""
-    from munagent.core.bus import EventBus
-    from munagent.core.reducer import reduce
-    from munagent.core.scenario import load_scenario
-
-    config = load_config()
-    scenario = load_scenario(args.scenario)
-
-    async def run() -> int:
-        bus = EventBus(args.db, args.session)
-        await bus.init_db()
-        session = await bus.get_session()
-        if session is None:
-            print(f"会话不存在: {args.session}", file=sys.stderr)
-            return 1
-
-        # 从事件流重建状态
-        events = await bus.query("god")
-        state = reduce(events, args.session)
-        await bus.close()
-
-        print(colorize(f"=== 续推: {session['id']} ===", "cyan"))
-        print(colorize(f"已恢复 {len(events)} 事件, 状态: {state.session_status}", "dim"))
-        for vid, v in state.venues.items():
-            print(colorize(f"  会场 {vid}: {v.phase}, 发言{v.mod_speech_count}次, 指令队列{len(state.backroom_queue)}", "dim"))
-        print()
-
-        # 用已有的 master_seed 续推
-        engine = Engine(
-            scenario,
-            config,
-            master_seed=session.get("master_seed") or 0,
-            max_steps=args.max_steps,
-            db_path=args.db,
+        client = LLMClient(config)
+        provider_name, base_url, model = client.resolve_route(role)
+        key = config.providers[config.roles[role].provider].api_key
+        if not key or key == "none":
+            return False, "未配置 api_key (设置 MUNAGENT_API_KEY 或 ~/.munagent/config.yaml)"
+        await client.chat(
+            role,
+            [ChatMessage(role="user", content="回复 ok")],
+            max_tokens=16,
+            thinking_enabled=False,
         )
-        engine.session_id = args.session  # 复用同一会话 id
-        result = await engine.run()
-        print()
-        print(colorize(f"=== 续推完成: +{result.total_steps} 步, {len(result.events)} 事件 ===", "cyan"))
+        return True, f"provider={provider_name} model={model} url={base_url} key={mask_api_key(key)}"
+    except Exception as exc:
+        return False, sanitize_text(str(exc))
+
+
+def _cmd_config_test(args: argparse.Namespace) -> int:
+    try:
+        config = load_config()
+    except ValueError as exc:
+        print(f"配置错误: {exc}", file=sys.stderr)
+        return 1
+
+    ok, detail = asyncio.run(_test_provider(config, role=args.role))
+    if ok:
+        print(f"连接成功: {detail}")
         return 0
-
-    return asyncio.run(run())
-
-
-def _cmd_replay(args: argparse.Namespace) -> int:
-    from munagent.core.bus import EventBus
-
-    async def run() -> int:
-        bus = EventBus(args.db, args.session)
-        await bus.init_db()
-        session = await bus.get_session()
-        if session is None:
-            print(f"会话不存在: {args.session}", file=sys.stderr)
-            return 1
-        print(colorize(f"=== 回放: {session['id']} ===", "cyan"))
-        print(colorize(f"场景: {session['scenario_id']}", "dim"))
-        print(colorize(f"master_seed: {session['master_seed']}", "dim"))
-        print()
-        # 尝试从场景包获取时区
-        from munagent.core.scenario import load_scenario
-        from pathlib import Path
-        tz = "UTC"
-        # 从 sessions 表的 scenario_id 推断场景路径(简化: 用默认)
-        events = await bus.query(args.viewpoint)
-        for e in events:
-            _print_event(e, timezone=tz)
-        await bus.close()
-        return 0
-
-    return asyncio.run(run())
+    print(f"连接失败: {detail}", file=sys.stderr)
+    return 1
 
 
-def _print_event(e, timezone: str = "UTC") -> None:
-    """彩色输出单个事件, 按会场时区显示本地时间."""
-    color_map = {
-        "speech": "white",
-        "speech_thought": "dim",
-        "phase_change": "magenta",
-        "crisis_update": "yellow",
-        "adjudication": "cyan",
-        "directive_submitted": "green",
-        "directive_status": "green",
-        "clock_advance": "dim",
-        "vote_call": "magenta",
-        "vote_cast": "white",
-        "vote_result": "magenta",
-        "motion": "green",
-        "motion_ruling": "green",
-        "summary_written": "dim",
-        "note_delivered": "green",
-        "group_formed": "cyan",
-        "group_move": "cyan",
-        "session_control": "dim",
-        "seat_status_change": "red",
-        "presiding_change": "magenta",
-    }
-    color = color_map.get(e.type, "white")
-    text = render(e, timezone=timezone)
-    print(colorize(text, color))
+def _cmd_serve(args: argparse.Namespace) -> int:
+    import uvicorn
+
+    from munagent.config import load_config
+    from munagent.server.app import WEB_DIST
+
+    config = load_config()
+    host = args.host or config.server.host
+    port = args.port or config.server.port
+    if not WEB_DIST.is_dir():
+        print(
+            f"警告: 前端未构建 ({WEB_DIST}), 仅 API 可用。请执行: cd munagent/web && npm install && npm run build",
+            file=sys.stderr,
+        )
+    print(f"MUNagent 服务: http://{host}:{port}")
+    if args.reload:
+        uvicorn.run(
+            "munagent.server.app:create_app",
+            host=host,
+            port=port,
+            reload=True,
+            factory=True,
+        )
+    else:
+        from munagent.server.app import create_app
+
+        uvicorn.run(create_app(), host=host, port=port)
+    return 0
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="munagent", description="MUNagent CLI")
     sub = parser.add_subparsers(dest="command", required=True)
 
-    version_parser = sub.add_parser("version", help="显示版本号")
-    version_parser.set_defaults(func=_cmd_version)
+    sub.add_parser("version", help="显示版本号").set_defaults(func=_cmd_version)
 
-    test_parser = sub.add_parser("config-test", help="测试默认 provider 连通性")
-    test_parser.add_argument("--provider", default=None, help="provider 名称")
-    test_parser.set_defaults(func=_cmd_config_test)
+    p_test = sub.add_parser("config-test", help="测试默认 LLM provider 连通性")
+    p_test.add_argument("--role", default="delegate", help="用于路由的 Agent 角色名")
+    p_test.set_defaults(func=_cmd_config_test)
 
-    run_parser = sub.add_parser("run", help="运行推演")
-    run_parser.add_argument("scenario", help="场景包目录路径")
-    run_parser.add_argument("--max-steps", type=int, default=20, help="最大步数")
-    run_parser.add_argument("--seed", type=int, default=None, help="master_seed(可复现)")
-    run_parser.add_argument("--db", default="munagent.db", help="SQLite 路径")
-    run_parser.set_defaults(func=_cmd_run)
-
-    replay_parser = sub.add_parser("replay", help="回放会话")
-    replay_parser.add_argument("session", help="会话 ID")
-    replay_parser.add_argument(
-        "--viewpoint",
-        default="god",
-        help="视角: god | seat:<id>",
-    )
-    replay_parser.add_argument("--db", default="munagent.db", help="SQLite 路径")
-    replay_parser.set_defaults(func=_cmd_replay)
-
-    resume_parser = sub.add_parser("resume", help="断点续推")
-    resume_parser.add_argument("session", help="会话 ID")
-    resume_parser.add_argument("scenario", help="场景包目录路径")
-    resume_parser.add_argument("--max-steps", type=int, default=20, help="续推最大步数")
-    resume_parser.add_argument("--db", default="munagent.db", help="SQLite 路径")
-    resume_parser.set_defaults(func=_cmd_resume)
+    p_serve = sub.add_parser("serve", help="启动 Web 服务(FastAPI + 静态前端)")
+    p_serve.add_argument("--host", default=None, help="监听地址(默认读配置)")
+    p_serve.add_argument("--port", type=int, default=None, help="端口(默认读配置)")
+    p_serve.add_argument("--reload", action="store_true", help="开发热重载(仅后端)")
+    p_serve.set_defaults(func=_cmd_serve)
 
     args = parser.parse_args(argv)
     return int(args.func(args))

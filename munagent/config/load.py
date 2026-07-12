@@ -3,113 +3,90 @@
 from __future__ import annotations
 
 import os
-from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
 import yaml
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import ValidationError
 
-from munagent.config.models import MunagentConfig, ProviderConfig
+from munagent.config.models import AppConfig, default_config
 
-DEFAULT_CONFIG_PATH = Path.home() / ".munagent" / "config.yaml"
-DEFAULT_PROVIDER_NAME = "deepseek"
+CONFIG_DIR = Path.home() / ".munagent"
+CONFIG_PATH = CONFIG_DIR / "config.yaml"
 
-
-def default_config_dict() -> dict[str, Any]:
-    return {
-        "providers": {
-            "deepseek": {
-                "base_url": "https://api.deepseek.com",
-                "api_key": "",
-            },
-        },
-        "roles": {
-            "delegate": {"provider": "deepseek", "model": "deepseek-v4-flash"},
-            "chair": {"provider": "deepseek", "model": "deepseek-v4-pro"},
-            "dm": {"provider": "deepseek", "model": "deepseek-v4-pro"},
-            "recorder": {"provider": "deepseek", "model": "deepseek-v4-flash"},
-            "designer": {"provider": "deepseek", "model": "deepseek-v4-pro"},
-        },
-        "tools": {
-            "mineru": {"base_url": "http://36.139.151.129:8282"},
-            "search": {"provider": "tavily", "api_key": ""},
-        },
-    }
+_ENV_PREFIX = "MUNAGENT_"
 
 
-def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
-    merged = deepcopy(base)
-    for key, value in override.items():
-        if key in merged and isinstance(merged[key], dict) and isinstance(value, dict):
-            merged[key] = _deep_merge(merged[key], value)
+def _deep_merge(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str, Any]:
+    """递归合并 overlay 到 base 副本."""
+    out = dict(base)
+    for key, value in overlay.items():
+        if key in out and isinstance(out[key], dict) and isinstance(value, dict):
+            out[key] = _deep_merge(out[key], value)
         else:
-            merged[key] = value
-    return merged
+            out[key] = value
+    return out
 
 
 def _load_yaml(path: Path) -> dict[str, Any]:
-    if not path.exists():
+    if not path.is_file():
         return {}
-    raw = yaml.safe_load(path.read_text(encoding="utf-8"))
-    return raw if isinstance(raw, dict) else {}
+    with path.open(encoding="utf-8") as f:
+        data = yaml.safe_load(f)
+    return data if isinstance(data, dict) else {}
 
 
-def _apply_env_overrides(data: dict[str, Any]) -> None:
-    """环境变量优先级最高, 覆盖文件与默认值."""
-    providers = data.setdefault("providers", {})
-    default_name = DEFAULT_PROVIDER_NAME if DEFAULT_PROVIDER_NAME in providers else next(
-        iter(providers), DEFAULT_PROVIDER_NAME
-    )
-    provider = providers.setdefault(default_name, {"base_url": "", "api_key": ""})
+def _apply_env_overrides(data: dict[str, Any]) -> dict[str, Any]:
+    """常用环境变量快捷覆盖(优先级最高)."""
+    out = dict(data)
+    providers = dict(out.get("providers") or {})
+    deepseek = dict(providers.get("deepseek") or {})
 
-    api_key = os.environ.get("MUNAGENT_API_KEY")
-    if api_key:
-        provider["api_key"] = api_key
+    api_key = os.environ.get(f"{_ENV_PREFIX}API_KEY")
+    if api_key is not None:
+        deepseek["api_key"] = api_key
 
-    base_url = os.environ.get("MUNAGENT_BASE_URL")
-    if base_url:
-        provider["base_url"] = base_url
+    base_url = os.environ.get(f"{_ENV_PREFIX}BASE_URL")
+    if base_url is not None:
+        deepseek["base_url"] = base_url
 
-    mineru_url = os.environ.get("MUNAGENT_MINERU_URL")
-    if mineru_url:
-        data.setdefault("tools", {}).setdefault("mineru", {})["base_url"] = mineru_url
+    if deepseek:
+        providers["deepseek"] = deepseek
+        out["providers"] = providers
 
-    port = os.environ.get("MUNAGENT_PORT")
-    if port:
-        data.setdefault("server", {})["port"] = int(port)
+    tools = dict(out.get("tools") or {})
+    mineru = dict(tools.get("mineru") or {})
+    mineru_url = os.environ.get(f"{_ENV_PREFIX}MINERU_URL")
+    if mineru_url is not None:
+        mineru["base_url"] = mineru_url
+        tools["mineru"] = mineru
+        out["tools"] = tools
 
+    server = dict(out.get("server") or {})
+    port = os.environ.get(f"{_ENV_PREFIX}PORT")
+    if port is not None:
+        server["port"] = int(port)
+        out["server"] = server
 
-class EnvSettings(BaseSettings):
-    """仅承载扁平环境变量快捷项, 供与 YAML 合并."""
-
-    model_config = SettingsConfigDict(env_prefix="MUNAGENT_", extra="ignore")
-
-    api_key: str | None = None
-    base_url: str | None = None
-    mineru_url: str | None = None
-    port: int | None = None
-    config_path: str | None = None
+    return out
 
 
-def config_path_from_env() -> Path:
-    env = EnvSettings()
-    if env.config_path:
-        return Path(env.config_path).expanduser()
-    return DEFAULT_CONFIG_PATH
+def load_config(*, path: Path | None = None) -> AppConfig:
+    """加载配置: env > yaml > 默认."""
+    cfg_path = path or CONFIG_PATH
+    merged = default_config().model_dump()
+    merged = _deep_merge(merged, _load_yaml(cfg_path))
+    merged = _apply_env_overrides(merged)
+    try:
+        return AppConfig.model_validate(merged)
+    except ValidationError as exc:
+        raise ValueError(f"配置校验失败 ({cfg_path}): {exc}") from exc
 
 
-def load_config(*, path: Path | None = None) -> MunagentConfig:
-    config_path = path or config_path_from_env()
-    data = _deep_merge(default_config_dict(), _load_yaml(config_path))
-    _apply_env_overrides(data)
-    return MunagentConfig.model_validate(data)
-
-
-def mask_api_key(api_key: str) -> str:
-    """设置页展示用掩码, 不回传完整 key."""
-    if not api_key or api_key == "none":
+def mask_api_key(key: str) -> str:
+    """展示用掩码 — key 不回传明文."""
+    if not key or key == "none":
         return "(未设置)"
-    if len(api_key) <= 8:
+    if len(key) <= 8:
         return "****"
-    return f"{api_key[:3]}****{api_key[-4:]}"
+    return f"{key[:3]}****{key[-4:]}"
