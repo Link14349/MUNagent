@@ -1,13 +1,17 @@
 <script setup lang="ts">
-import { RouterLink, RouterView } from "vue-router";
+import { computed } from "vue";
+import { RouterLink, RouterView, useRoute } from "vue-router";
+
+const route = useRoute();
+const immersive = computed(() => route.name === "design");
 </script>
 
 <template>
-  <div class="layout">
-    <header class="topbar">
+  <div class="layout" :class="{ immersive }">
+    <header v-if="!immersive" class="topbar">
       <RouterLink to="/" class="brand">MUNagent</RouterLink>
       <nav>
-        <RouterLink to="/">场景包库</RouterLink>
+        <RouterLink to="/scenarios">场景设计</RouterLink>
         <RouterLink to="/settings">设置</RouterLink>
       </nav>
     </header>
@@ -21,17 +25,32 @@ import { RouterLink, RouterView } from "vue-router";
 .layout {
   min-height: 100vh;
 }
+.layout.immersive {
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.layout.immersive .main {
+  flex: 1;
+  min-height: 0;
+  max-width: none;
+  margin: 0;
+  padding: 0;
+  height: 100%;
+}
 .topbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
   padding: 0.75rem 1.5rem;
-  background: #102a43;
-  color: #fff;
+  background: var(--panel-bg);
+  border-bottom: 1px solid var(--border);
+  color: var(--text);
 }
 .brand {
   font-weight: 700;
-  color: #fff;
+  color: var(--text);
   text-decoration: none;
 }
 nav {
@@ -39,10 +58,11 @@ nav {
   gap: 1rem;
 }
 nav a {
-  color: #d9e2ec;
+  color: var(--text-muted);
+  text-decoration: none;
 }
 nav a.router-link-active {
-  color: #fff;
+  color: var(--accent);
   font-weight: 600;
 }
 .main {

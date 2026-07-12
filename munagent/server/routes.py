@@ -4,9 +4,11 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException
 
+from munagent.core import chats as chat_svc
 from munagent.core import scenario as scenario_svc
 from munagent.core.scenario import ScenarioCreate, ScenarioDetail, ScenarioSummary
 from munagent.server.config_service import get_config_public, put_config, test_config
+from munagent.server.design_schemas import ScenarioSummaryEnriched
 from munagent.server.schemas import ConfigPublic, ConfigTestRequest, ConfigTestResponse, ConfigUpdate
 
 router = APIRouter(prefix="/api")
@@ -15,6 +17,29 @@ router = APIRouter(prefix="/api")
 @router.get("/scenarios", response_model=list[ScenarioSummary])
 def list_scenarios() -> list[ScenarioSummary]:
     return scenario_svc.list_scenarios()
+
+
+@router.get("/scenarios-enriched", response_model=list[ScenarioSummaryEnriched])
+def list_scenarios_enriched() -> list[ScenarioSummaryEnriched]:
+    items: list[ScenarioSummaryEnriched] = []
+    for s in scenario_svc.list_scenarios():
+        try:
+            chats = chat_svc.list_chats(s.id)
+        except FileNotFoundError:
+            chats = []
+        items.append(
+            ScenarioSummaryEnriched(
+                id=s.id,
+                title=s.title,
+                author=s.author,
+                version=s.version,
+                source=s.source,
+                readonly=s.readonly,
+                chat_count=len(chats),
+                last_chat_at=chats[0].updated_at if chats else None,
+            )
+        )
+    return items
 
 
 @router.post("/scenarios", response_model=ScenarioDetail)

@@ -42,3 +42,20 @@ def test_spa_index_when_built() -> None:
     res = client.get("/")
     assert res.status_code == 200
     assert "MUNagent" in res.text
+
+
+def test_design_put_file(tmp_path, monkeypatch) -> None:
+    from munagent.core import scenario as svc
+    from munagent.core.scenario import ScenarioCreate
+
+    monkeypatch.setattr(svc, "user_scenarios_dir", lambda: tmp_path)
+    svc.create_scenario(ScenarioCreate(id="api-test", title="API 测试"))
+    client = TestClient(create_app())
+    design = client.get("/api/scenarios/api-test/design")
+    assert design.status_code == 200
+    assert design.json()["readonly"] is False
+    put = client.put("/api/scenarios/api-test/files/notes.md", json={"content": "# n\n"})
+    assert put.status_code == 200
+    got = client.get("/api/scenarios/api-test/files/notes.md")
+    assert got.status_code == 200
+    assert got.json()["content"].startswith("# n")

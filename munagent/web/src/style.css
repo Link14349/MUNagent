@@ -1,18 +1,38 @@
+html,
+body,
+#app {
+  height: 100%;
+}
+
 *,
 *::before,
 *::after {
   box-sizing: border-box;
 }
 
+:root {
+  --bg: #f7f7f4;
+  --panel-bg: #ffffff;
+  --border: #e8e8e5;
+  --text: #1b1b18;
+  --text-muted: #6e6e67;
+  --accent: #1b1b18;
+  --accent-soft: #efefec;
+  --hover: #efefec;
+  --composer-bg: #ffffff;
+  --composer-border: #d9d9d6;
+  --chip-bg: #ecece8;
+}
+
 body {
   margin: 0;
   font-family: "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
-  background: #f4f6f8;
-  color: #1a1a1a;
+  background: var(--bg);
+  color: var(--text);
 }
 
 a {
-  color: #1d5bbf;
+  color: #3b3b36;
   text-decoration: none;
 }
 

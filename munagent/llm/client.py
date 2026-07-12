@@ -3,22 +3,43 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import time
+from collections.abc import AsyncIterator
 from typing import Any, Literal
 
 import httpx
 from pydantic import BaseModel, Field
 
 from munagent.config.models import AppConfig
+from munagent.llm.stream import ChunkParser, StreamDelta, ToolCall
 from munagent.llm.usage import UsageRecord, UsageSink
 from munagent.security.sanitize import sanitize_exception, sanitize_text
 
-MessageRole = Literal["system", "user", "assistant"]
+MessageRole = Literal["system", "user", "assistant", "tool"]
 
 
 class ChatMessage(BaseModel):
     role: MessageRole
     content: str
+    tool_calls: list[ToolCall] | None = None  # assistant 回喂 function calling 用
+    tool_call_id: str | None = None  # role=tool 时对应 ToolCall.id
+
+    def to_payload(self) -> dict[str, Any]:
+        """转 API 消息体; 不带值为 None 的可选字段, reasoning_content 永不回喂."""
+        msg: dict[str, Any] = {"role": self.role, "content": self.content}
+        if self.tool_calls:
+            msg["tool_calls"] = [
+                {
+                    "id": c.id,
+                    "type": "function",
+                    "function": {"name": c.name, "arguments": c.arguments},
+                }
+                for c in self.tool_calls
+            ]
+        if self.tool_call_id:
+            msg["tool_call_id"] = self.tool_call_id
+        return msg
 
 
 class LLMClient:
@@ -30,12 +51,16 @@ class LLMClient:
         *,
         usage_sink: UsageSink | None = None,
         timeout_s: float = 120.0,
+        stream_read_timeout_s: float = 60.0,
         max_retries: int = 3,
         transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         self._config = config
         self._usage_sink = usage_sink
         self._timeout_s = timeout_s
+        # 流式下整体时限没有意义(长回复可以合法地跑很多分钟),
+        # 用"相邻增量间隔"判定断流: httpx 的 read 超时正是逐次读之间的时限.
+        self._stream_read_timeout_s = stream_read_timeout_s
         self._max_retries = max_retries
         self._transport = transport
 
@@ -77,25 +102,13 @@ class LLMClient:
         thinking_enabled: bool = True,
     ) -> str:
         """调用 chat/completions; 失败时指数退避重试."""
-        _provider, base_url, model = self.resolve_route(role)
-        api_key = self._config.providers[self._config.roles[role].provider].api_key
-        if not api_key or api_key == "none":
-            raise ValueError(f"provider 未配置 api_key, 无法调用 LLM (role={role})")
-
-        payload: dict[str, Any] = {
-            "model": model,
-            "messages": [m.model_dump() for m in messages],
-            "max_tokens": max_tokens,
-        }
+        model, url, headers, payload = self._build_request(
+            role, messages, max_tokens=max_tokens, thinking_enabled=thinking_enabled
+        )
         if err_hint:
             payload["messages"] = payload["messages"] + [
                 {"role": "user", "content": f"上次输出校验失败, 请修正:\n{err_hint}"}
             ]
-        # DeepSeek V4 部分模型默认开 thinking; 显式 disabled 保证非推理任务拿到 content
-        payload["thinking"] = {"type": "enabled" if thinking_enabled else "disabled"}
-
-        url = f"{self._normalize_base_url(base_url)}/chat/completions"
-        headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
 
         last_exc: Exception | None = None
         for attempt in range(self._max_retries):
@@ -118,6 +131,96 @@ class LLMClient:
                     raise RuntimeError("LLM 响应 content 为空")
                 return content
             except (httpx.HTTPStatusError, httpx.TimeoutException, httpx.TransportError) as exc:
+                last_exc = exc
+                if attempt + 1 >= self._max_retries:
+                    break
+                await asyncio.sleep(2**attempt)
+            except Exception as exc:
+                raise RuntimeError(sanitize_text(sanitize_exception(exc))) from exc
+
+        assert last_exc is not None
+        raise RuntimeError(sanitize_text(sanitize_exception(last_exc))) from last_exc
+
+    def _build_request(
+        self,
+        role: str,
+        messages: list[ChatMessage],
+        *,
+        max_tokens: int,
+        thinking_enabled: bool,
+        tools: list[dict[str, Any]] | None = None,
+    ) -> tuple[str, str, dict[str, str], dict[str, Any]]:
+        """chat 与 chat_stream 共用的路由/鉴权/payload 组装."""
+        _provider, base_url, model = self.resolve_route(role)
+        api_key = self._config.providers[self._config.roles[role].provider].api_key
+        if not api_key or api_key == "none":
+            raise ValueError(f"provider 未配置 api_key, 无法调用 LLM (role={role})")
+        payload: dict[str, Any] = {
+            "model": model,
+            "messages": [m.to_payload() for m in messages],
+            "max_tokens": max_tokens,
+        }
+        if tools:
+            payload["tools"] = tools
+        # DeepSeek V4 部分模型默认开 thinking; 显式 disabled 保证非推理任务拿到 content
+        payload["thinking"] = {"type": "enabled" if thinking_enabled else "disabled"}
+        url = f"{self._normalize_base_url(base_url)}/chat/completions"
+        headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+        return model, url, headers, payload
+
+    async def chat_stream(
+        self,
+        role: str,
+        messages: list[ChatMessage],
+        *,
+        tools: list[dict[str, Any]] | None = None,
+        max_tokens: int = 4096,
+        thinking_enabled: bool = True,
+    ) -> AsyncIterator[StreamDelta]:
+        """流式 chat/completions, 产出类型化增量(见 llm/stream.py).
+
+        重试纪律(design/designer/03§7.3): 只允许在首个增量产出之前静默重试;
+        一旦开始吐字, 中途断流直接抛错, 由上层决定整步重做——否则前端已渲染的文本会回退.
+        """
+        model, url, headers, payload = self._build_request(
+            role, messages, max_tokens=max_tokens, thinking_enabled=thinking_enabled, tools=tools
+        )
+        payload["stream"] = True
+        payload["stream_options"] = {"include_usage": True}
+        timeout = httpx.Timeout(
+            connect=10.0, read=self._stream_read_timeout_s, write=30.0, pool=10.0
+        )
+
+        last_exc: Exception | None = None
+        for attempt in range(self._max_retries):
+            started = time.perf_counter()
+            parser = ChunkParser()
+            yielded = False
+            try:
+                async with httpx.AsyncClient(timeout=timeout, transport=self._transport) as client:
+                    async with client.stream("POST", url, json=payload, headers=headers) as resp:
+                        resp.raise_for_status()
+                        async for line in resp.aiter_lines():
+                            if not line.startswith("data:"):
+                                continue
+                            data = line[len("data:") :].strip()
+                            if data == "[DONE]":
+                                break
+                            for delta in parser.feed(json.loads(data)):
+                                yielded = True
+                                yield delta
+                for delta in parser.finish():
+                    yielded = True
+                    yield delta
+                if parser.usage_raw is not None:
+                    latency_ms = (time.perf_counter() - started) * 1000
+                    self._record_usage(
+                        role, model, {"usage": parser.usage_raw}, thinking_enabled, latency_ms
+                    )
+                return
+            except (httpx.HTTPStatusError, httpx.TimeoutException, httpx.TransportError) as exc:
+                if yielded:
+                    raise RuntimeError(sanitize_text(sanitize_exception(exc))) from exc
                 last_exc = exc
                 if attempt + 1 >= self._max_retries:
                     break

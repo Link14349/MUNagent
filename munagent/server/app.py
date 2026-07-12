@@ -10,6 +10,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from munagent.server.routes import router
+from munagent.server.design_routes import router as design_router
 
 WEB_DIST = Path(__file__).resolve().parent.parent / "web" / "dist"
 
@@ -24,6 +25,7 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
     app.include_router(router)
+    app.include_router(design_router)
 
     if WEB_DIST.is_dir():
         assets = WEB_DIST / "assets"

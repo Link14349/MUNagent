@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import io
 import re
 import shutil
+import zipfile
 from pathlib import Path
 from typing import Any, Literal
 
@@ -11,6 +13,7 @@ import yaml
 from pydantic import BaseModel, Field, field_validator
 
 _SCENARIO_ID_RE = re.compile(r"^[a-z0-9-]+$")
+_HIDDEN_PREFIXES = ("chats/", ".history/")
 
 
 def _repo_root() -> Path:
@@ -74,6 +77,18 @@ class ScenarioCreate(BaseModel):
     start_story_time: str = "2026-01-01T09:00:00+08:00"
 
 
+class DuplicateScenarioRequest(BaseModel):
+    new_id: str
+    new_title: str
+
+    @field_validator("new_id")
+    @classmethod
+    def validate_new_id(cls, v: str) -> str:
+        if not _SCENARIO_ID_RE.match(v):
+            raise ValueError("new_id 须为 [a-z0-9-]")
+        return v
+
+
 def _load_yaml(path: Path) -> Any:
     with path.open(encoding="utf-8") as f:
         return yaml.safe_load(f)
@@ -114,6 +129,30 @@ def _validate_package(root: Path) -> Manifest:
     if not bg.is_file():
         raise ValueError("缺少 background.md")
     return manifest
+
+
+def _is_exportable_rel(rel: str, *, include_raw: bool) -> bool:
+    if rel.startswith(_HIDDEN_PREFIXES[0]) or rel.startswith(_HIDDEN_PREFIXES[1]):
+        return False
+    if rel.startswith("references/raw/") and not include_raw:
+        return False
+    return True
+
+
+def _list_copyable_rels(root: Path) -> list[str]:
+    rels: list[str] = []
+    for path in sorted(root.rglob("*")):
+        if not path.is_file():
+            continue
+        rel = path.relative_to(root).as_posix()
+        if _is_exportable_rel(rel, include_raw=False) and path.suffix.lower() in {
+            ".yaml",
+            ".yml",
+            ".md",
+            ".txt",
+        }:
+            rels.append(rel)
+    return rels
 
 
 def _scenario_root(scenario_id: str, source: Literal["builtin", "user"]) -> Path:
@@ -257,3 +296,45 @@ def delete_scenario(scenario_id: str) -> None:
     if source == "builtin":
         raise PermissionError("内置场景包不可删除")
     shutil.rmtree(root)
+
+
+def duplicate_scenario(scenario_id: str, new_id: str, new_title: str) -> ScenarioDetail:
+    src_root, _ = _find_scenario(scenario_id)
+    user_scenarios_dir().mkdir(parents=True, exist_ok=True)
+    dst_root = user_scenarios_dir() / new_id
+    if dst_root.exists():
+        raise ValueError(f"场景包已存在: {new_id}")
+    created = create_scenario(
+        ScenarioCreate(id=new_id, title=new_title, author="user", start_story_time="2026-01-01T09:00:00+08:00")
+    )
+    dst_root = user_scenarios_dir() / created.id
+    for rel in _list_copyable_rels(src_root):
+        if rel.startswith("references/raw/"):
+            continue
+        src = src_root / rel
+        dst = dst_root / rel
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src, dst)
+    manifest_path = dst_root / "manifest.yaml"
+    manifest = Manifest.model_validate(_load_yaml(manifest_path))
+    manifest.id = new_id
+    manifest.title = new_title
+    manifest_path.write_text(
+        yaml.safe_dump(manifest.model_dump(), allow_unicode=True, sort_keys=False),
+        encoding="utf-8",
+    )
+    return load_scenario(new_id)
+
+
+def export_scenario_zip(scenario_id: str, *, include_raw: bool = False) -> bytes:
+    root, _ = _find_scenario(scenario_id)
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for path in sorted(root.rglob("*")):
+            if not path.is_file():
+                continue
+            rel = path.relative_to(root).as_posix()
+            if not _is_exportable_rel(rel, include_raw=include_raw):
+                continue
+            zf.write(path, arcname=f"{scenario_id}/{rel}")
+    return buf.getvalue()
