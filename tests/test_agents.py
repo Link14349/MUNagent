@@ -6,7 +6,7 @@ import httpx
 import pytest
 
 from munagent.agents.base import AgentContext, TaskSpec, parse_json_block
-from munagent.agents.delegate import DelegateAgent, DelegateTurnAction
+from munagent.agents.delegate import DelegateAgent, DelegateTurnAction, build_delegate_g_global
 from munagent.agents.dm import DMAgent, outcome_tier, roll_directive
 from munagent.config.models import MunagentConfig, ProviderConfig, RoleConfig
 from munagent.core.scenario import SeatSpec
@@ -78,7 +78,7 @@ async def test_delegate_agent_parses_speech(config: MunagentConfig) -> None:
         name="总理",
         venue="cabinet",
     )
-    agent = DelegateAgent(llm, seat, background_summary="危机背景")
+    agent = DelegateAgent(llm, seat, g_global="测试G段")
     task = TaskSpec(role="delegate", task="turn", phase="ModeratedCaucus")
     ctx = agent.build_turn_context(task, [], "ModeratedCaucus", "2026-03-15T09:00:00+08:00")
     action = await agent.act(task, ctx)
@@ -92,10 +92,27 @@ async def test_delegate_agent_fallback_on_garbage(config: MunagentConfig) -> Non
     transport = _json_response("这不是JSON")
     llm = LLMClient(config, transport=transport)
     seat = SeatSpec(id="premier", name="总理", venue="cabinet")
-    agent = DelegateAgent(llm, seat, background_summary="背景")
+    agent = DelegateAgent(llm, seat, g_global="测试G段")
     task = TaskSpec(role="delegate", task="turn", phase="ModeratedCaucus")
     ctx = agent.build_turn_context(task, [], "ModeratedCaucus", "2026-03-15T09:00:00+08:00")
     action = await agent.act(task, ctx)
     # 3 次都失败 → fallback pass
     assert isinstance(action, DelegateTurnAction)
     assert action.action == "pass"
+
+
+def test_g_rules_covers_all_output_schema_fields() -> None:
+    """G 段的输出格式说明必须覆盖 pydantic 模型的全部字段, 防止文本与模型漂移."""
+    from munagent.agents.delegate import (
+        G_RULES,
+        DelegateTurnAction,
+        DelegateVoteAction,
+        DirectiveDraft,
+        NextMove,
+    )
+
+    for model in (DelegateTurnAction, DelegateVoteAction, DirectiveDraft, NextMove):
+        for field_name in model.model_fields:
+            assert field_name in G_RULES, (
+                f"{model.__name__}.{field_name} 未出现在 G_RULES 的输出格式说明中"
+            )

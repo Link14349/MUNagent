@@ -42,7 +42,7 @@ engine:                          # 推演默认参数(可被会话config覆盖)
   human_timeout_s: 300
   human_timeout_fallback: ai_delegate   # ai_delegate | pass
   adjudication_thresholds: { great: 40, success: 10, partial: 0, fail: -20 }
-  epoch_l3_max_tokens: 3000      # L3追加段纪元切换阈值, 见11§3
+  epoch_l3_max_tokens: 8192      # L3追加段纪元切换阈值, 见11§3
   cache_warmup: true             # 会话启动时预热G段缓存, 见11§6
 
 server:

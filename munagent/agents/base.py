@@ -52,8 +52,8 @@ def parse_json_block(raw: str, schema_model: type[BaseModel] | None = None) -> t
 
     返回 (parsed_action | None, error_message | None).
     """
-    # 提取 ```json ... ``` 块
-    match = re.search(r"```json\s*\n(.*?)\n```", raw, re.DOTALL)
+    # 提取 ```json ... ``` 块(允许单行块与围栏前后无换行)
+    match = re.search(r"```json\s*(.*?)\s*```", raw, re.DOTALL)
     if match:
         json_str = match.group(1)
     else:

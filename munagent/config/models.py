@@ -45,7 +45,7 @@ class EngineConfig(BaseModel):
     human_timeout_s: int = 300
     human_timeout_fallback: Literal["ai_delegate", "pass"] = "ai_delegate"
     adjudication_thresholds: AdjudicationThresholds = Field(default_factory=AdjudicationThresholds)
-    epoch_l3_max_tokens: int = 3000
+    epoch_l3_max_tokens: int = 8192
     cache_warmup: bool = True
 
 

@@ -117,3 +117,18 @@ def test_presiding_seat_must_be_in_seats(tmp_path: Path) -> None:
 
     with pytest.raises(Exception, match="不在会场席位列表中"):
         load_scenario(target)
+
+
+def test_build_delegate_g_global_includes_background_and_seats() -> None:
+    from munagent.agents.delegate import build_delegate_g_global
+
+    sc = load_scenario(SCENARIO_DIR)
+    g = build_delegate_g_global(sc, "cabinet")
+    assert "背景文书" in g
+    assert "宪政危机" in g  # background.md 全文
+    assert "内阁会议室" in g
+    assert "总理" in g and "国防部长" in g and "外交部长" in g
+    assert "召集内阁会议并设定议程" in g
+    assert "本会场主持席" in g
+    assert "<你的秘密信息>" not in g  # 秘密目标只在 L1
+
