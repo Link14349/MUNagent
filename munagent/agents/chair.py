@@ -54,7 +54,7 @@ class ChairAgent(BaseAgent):
     """
 
     def __init__(self, llm: LLMClient, venue_id: str, seat_ids: list[str]) -> None:
-        super().__init__(llm, max_tokens=512)
+        super().__init__(llm, max_tokens=4096)
         self.venue_id = venue_id
         self.seat_ids = seat_ids
 

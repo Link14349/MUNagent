@@ -265,10 +265,25 @@ class Engine:
 
         if presider_id:
             agent = delegates[presider_id]
-            result = await agent.presiding_next_speaker(
-                task, visible, sm.phase, sm.story_time, sm.spoken_this_phase, seat_ids
-            )
-            target = result.seat
+            # 驳回重试: 点了不存在的席位时, 最多重试 2 次
+            for attempt in range(3):
+                result = await agent.presiding_next_speaker(
+                    task, visible, sm.phase, sm.story_time, sm.spoken_this_phase, seat_ids
+                )
+                target = result.seat
+                if target in delegates:
+                    break
+                # 点了不存在的席位, 驳回
+                import sys
+                print(
+                    f"[驳回] 主持席点了不存在的席位 '{target}', "
+                    f"可用席位: {', '.join(seat_ids)}, 重试 {attempt+1}/3",
+                    file=sys.stderr,
+                )
+            else:
+                # 3 次都点了不存在的人, 保底轮询
+                target = seat_ids[0]
+                result = PresidingNextSpeaker(seat=target, announcement=f"请{target}发言。")
 
             # 主持席点名是戏内行为, 产生 venue 可见的 speech 事件
             announcement = result.announcement or f"请{target}发言。"
@@ -297,10 +312,20 @@ class Engine:
                     ),
                 )
         else:
-            result = await chair.next_speaker(
-                task, visible, sm.phase, sm.story_time, sm.spoken_this_phase
-            )
-            target = result.seat
+            for attempt in range(3):
+                result = await chair.next_speaker(
+                    task, visible, sm.phase, sm.story_time, sm.spoken_this_phase
+                )
+                target = result.seat
+                if target in delegates:
+                    break
+                import sys
+                print(
+                    f"[驳回] 主席点了不存在的席位 '{target}', 重试 {attempt+1}/3",
+                    file=sys.stderr,
+                )
+            else:
+                target = seat_ids[0]
 
         # 保底轮询覆盖
         if sm.floor_rotation_due:

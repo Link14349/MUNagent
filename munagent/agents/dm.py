@@ -79,7 +79,7 @@ def outcome_tier(margin: int, thresholds: dict | None = None) -> str:
 
 class DMAgent(BaseAgent):
     def __init__(self, llm: LLMClient, master_seed: int) -> None:
-        super().__init__(llm, max_tokens=768)
+        super().__init__(llm, max_tokens=8192)
         self.master_seed = master_seed
 
     async def assess_feasibility(

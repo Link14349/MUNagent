@@ -119,6 +119,9 @@ def _cmd_resume(args: argparse.Namespace) -> int:
         return 0
 
     return asyncio.run(run())
+
+
+def _cmd_replay(args: argparse.Namespace) -> int:
     from munagent.core.bus import EventBus
 
     async def run() -> int:

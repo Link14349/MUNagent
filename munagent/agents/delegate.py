@@ -225,12 +225,13 @@ class DelegateAgent(BaseAgent):
         l4 = (
             f"当前阶段: {phase}\n故事时间: {story_time}\n"
             f"你是本会场主持者({self.seat.name}). "
-            f"会场席位: {', '.join(all_seat_ids)}\n"
+            f"会场席位(只能从中选择): {', '.join(all_seat_ids)}\n"
             f"本轮已发言: {', '.join(spoken_seats) or '无'}\n"
             f"以你的立场选择下一位发言者(可以偏心).{first_hint}\n"
+            f"注意: seat 字段必须是上面列出的席位id之一, 不得编造不存在的角色.\n"
             f"announcement 是你当众说的话(如'请XX发言'或'我想先听听XX的看法'). "
             f"在```json中输出: "
-            '{"seat": "席位id", "announcement": "你当众说的话", "inner_thought": "你的盘算"}'
+            '{"seat": "席位id(必须从列表中选)", "announcement": "你当众说的话", "inner_thought": "你的盘算"}'
         )
         ctx = self._build_ctx(task, l3, l4)
         result = await self.act(task, ctx, schema_model=PresidingNextSpeaker)
