@@ -5,13 +5,13 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import Response
 
-from munagent.core import chats as chat_svc
-from munagent.core import scenario as scenario_svc
-from munagent.core import scenario_files as file_svc
-from munagent.core import scenario_history as history_svc
-from munagent.core.scenario import DuplicateScenarioRequest
-from munagent.core.scenario_files import FileContent, RenameFileRequest
-from munagent.core.scenario_history import CreateSnapshotRequest
+from munagent.scenario import chats as chat_svc
+from munagent.scenario import package as scenario_svc
+from munagent.scenario import files as file_svc
+from munagent.scenario import history as history_svc
+from munagent.scenario.package import DuplicateScenarioRequest
+from munagent.scenario.files import FileContent, RenameFileRequest
+from munagent.scenario.history import CreateSnapshotRequest
 from munagent.server.design_schemas import (
     ChatCreateRequest,
     ChatRenameRequest,

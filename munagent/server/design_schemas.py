@@ -6,10 +6,10 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-from munagent.core.chats import ChatMeta
-from munagent.core.scenario import DuplicateScenarioRequest
-from munagent.core.scenario_files import FileContent, FileNode, PutFileResult, RenameFileRequest, ValidationIssue
-from munagent.core.scenario_history import CreateSnapshotRequest, HistoryDiffEntry, HistorySnapshot
+from munagent.scenario.chats import ChatMeta
+from munagent.scenario.package import DuplicateScenarioRequest
+from munagent.scenario.files import FileContent, FileNode, PutFileResult, RenameFileRequest, ValidationIssue
+from munagent.scenario.history import CreateSnapshotRequest, HistoryDiffEntry, HistorySnapshot
 
 
 class ActiveTask(BaseModel):

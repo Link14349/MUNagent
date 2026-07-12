@@ -1,4 +1,4 @@
-# 场景包
+# 场景包 (`scenario/package.py`)
 
 | 函数 | 说明 |
 |---|---|
@@ -12,7 +12,7 @@
 
 路径: 内置 `scenarios/`, 用户 `~/.munagent/scenarios/`
 
-# 设计器文件 (`core/scenario_files.py`)
+# 设计器文件 (`scenario/files.py`)
 
 | 函数 | 说明 |
 |---|---|
@@ -20,14 +20,14 @@
 | `build_file_tree / scenario_design_meta` | 文件树(隐藏 chats/.history/) + 校验 issues |
 | `validate_package_issues(root)` | 软校验, 供顶栏 chip |
 
-# 历史快照 (`core/scenario_history.py`)
+# 历史快照 (`scenario/history.py`)
 
 | 函数 | 说明 |
 |---|---|
 | `create_snapshot` | manual/auto/restore_backup |
 | `list_snapshots / history_diff / restore_snapshot / delete_snapshot` | 历史面板 |
 
-# chats (`core/chats.py`)
+# chats (`scenario/chats.py`)
 
 | 函数 | 说明 |
 |---|---|

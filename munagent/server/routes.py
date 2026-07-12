@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException
 
-from munagent.core import chats as chat_svc
-from munagent.core import scenario as scenario_svc
-from munagent.core.scenario import ScenarioCreate, ScenarioDetail, ScenarioSummary
+from munagent.scenario import chats as chat_svc
+from munagent.scenario import package as scenario_svc
+from munagent.scenario.package import ScenarioCreate, ScenarioDetail, ScenarioSummary
 from munagent.server.config_service import get_config_public, put_config, test_config
 from munagent.server.design_schemas import ScenarioSummaryEnriched
 from munagent.server.schemas import ConfigPublic, ConfigTestRequest, ConfigTestResponse, ConfigUpdate

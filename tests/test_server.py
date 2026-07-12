@@ -45,8 +45,8 @@ def test_spa_index_when_built() -> None:
 
 
 def test_design_put_file(tmp_path, monkeypatch) -> None:
-    from munagent.core import scenario as svc
-    from munagent.core.scenario import ScenarioCreate
+    from munagent.scenario import package as svc
+    from munagent.scenario.package import ScenarioCreate
 
     monkeypatch.setattr(svc, "user_scenarios_dir", lambda: tmp_path)
     svc.create_scenario(ScenarioCreate(id="api-test", title="API 测试"))

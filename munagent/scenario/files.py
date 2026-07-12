@@ -8,7 +8,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-from munagent.core.scenario import (
+from munagent.scenario.package import (
     Manifest,
     _find_scenario,
     _load_yaml,

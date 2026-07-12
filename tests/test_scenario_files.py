@@ -6,11 +6,11 @@ from pathlib import Path
 
 import pytest
 
-from munagent.core import chats as chat_svc
-from munagent.core import scenario as scenario_svc
-from munagent.core import scenario_files as file_svc
-from munagent.core import scenario_history as history_svc
-from munagent.core.scenario import ScenarioCreate
+from munagent.scenario import chats as chat_svc
+from munagent.scenario import package as scenario_svc
+from munagent.scenario import files as file_svc
+from munagent.scenario import history as history_svc
+from munagent.scenario.package import ScenarioCreate
 
 
 @pytest.fixture()

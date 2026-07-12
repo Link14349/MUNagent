@@ -35,7 +35,7 @@ docs/tools/*.md          外部工具服务的调用文档
 ## 代码规范
 - Python 3.11+, 类型标注全覆盖, pydantic v2做一切schema(事件/配置/Agent输出/场景包);
 - asyncio并发; 模块划分严格按[01-overview.md](docs/design/01-overview.md)的目录图, 不擅自新建顶层模块;
-- **模块化与解耦**: 各功能模块(core/agents/llm/tools/engine/server)职责单一、边界清晰, 模块间只通过显式接口(公开函数/类/事件总线)交互, 禁止跨模块伸手拿内部状态; 依赖方向单向(server→engine→agents→core/llm, 反向禁止); 能通过事件总线解耦的交互不要直接函数调用耦合;
+- **模块化与解耦**: 按功能域切分为共享层(config/security/llm/scenario) + 两个子系统(designer/deducer), 各模块职责单一、边界清晰, 模块间只通过显式接口(公开函数/类/事件总线)交互, 禁止跨模块伸手拿内部状态; 依赖方向: **designer 与 deducer 互不依赖**, 两者都只依赖共享层; deducer 内部 server→engine→agents→core; 反向禁止; 能通过事件总线解耦的交互不要直接函数调用耦合;
 - 不引入LangChain/LlamaIndex等重框架; 新增第三方依赖前先问用户;
 - 注释与文档字符串写"为什么", 不写"是什么"; 保持与现有代码风格一致.
 

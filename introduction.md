@@ -226,25 +226,37 @@ tools:                # 外部工具服务
 GUI设置页提供"测试连接"按钮: 后端用当前配置发一次最小请求(如1 token的补全), 当场反馈key是否有效、base_url是否可达, 避免推演进行到一半才发现配置错误.
 
 ## 模块划分
+按功能域切分: 一层共享地基(config/security/llm/scenario) + 两个厚薄不均的子系统(designer 轻、deducer 重). designer 与 deducer 互不依赖, 都只依赖共享层.
+
 ```
 munagent/
-├── core/
-│   ├── events.py        # 事件模型与事件总线(scope过滤、持久化)
-│   ├── reducer.py       # RuntimeState + 事件折叠(续推重建)
-│   ├── state_machine.py # 会场状态机
-│   ├── clock.py         # 推演时钟(故事内时间, 内部UTC)
-│   └── scenario.py      # 场景包的加载/校验/保存
-├── agents/
-│   ├── base.py          # Agent基类: 上下文组装、结构化输出、重试
-│   ├── delegate.py      # 代表Agent
-│   ├── chair.py         # 主席Agent
-│   ├── dm.py            # DM Agent(含判定流水线)
-│   ├── recorder.py      # 书记Agent(滚动摘要)
-│   └── designer.py      # 会场设计Agent
-├── llm/                 # OpenAI兼容客户端、模型路由、用量统计
-├── tools/               # 设计Agent的工具: 联网搜索(Tavily)、下载、MinerU
-├── engine.py            # 推演引擎: 驱动状态机、调度Agent回合
-├── server/              # FastAPI: REST(设计/管理) + WebSocket(推演)
+├── config/              # 分层配置加载(共享)
+├── security/            # key脱敏等安全卫生(共享)
+├── llm/                 # OpenAI兼容客户端、流式增量、模型路由、用量统计(共享)
+├── scenario/            # 场景包库(共享契约: designer产出, deducer消费)
+│   ├── package.py       #   元信息/加载/校验/保存
+│   ├── files.py         #   单文件操作与文件树
+│   ├── history.py       #   .history 版本快照
+│   └── chats.py         #   设计对话 JSONL 持久化
+├── designer/            # 设计子系统
+│   ├── agent.py         #   场景设计 Agent loop(function calling + 流式)
+│   └── tools/           #   设计工具: 文件读写、联网搜索(Tavily)、下载、MinerU
+├── deducer/             # 推演子系统
+│   ├── core/            #   事件溯源核心
+│   │   ├── events.py    #     事件模型与事件总线(scope过滤、持久化)
+│   │   ├── bus.py       #     事件总线
+│   │   ├── reducer.py   #     RuntimeState + 事件折叠(续推重建)
+│   │   ├── state_machine.py #  会场状态机
+│   │   ├── clock.py     #     推演时钟(故事内时间, 内部UTC)
+│   │   └── render.py    #     事件渲染(纯函数, golden护住)
+│   ├── engine.py        #   推演引擎: 驱动状态机、调度Agent回合
+│   └── agents/          #   推演期Agent
+│       ├── base.py      #     Agent基类: 上下文组装、结构化输出、重试
+│       ├── delegate.py  #     代表Agent
+│       ├── chair.py     #     主席Agent
+│       ├── dm.py        #     DM Agent(含判定流水线)
+│       └── recorder.py  #     书记Agent(滚动摘要)
+├── server/              # FastAPI: REST(设计/管理) + WebSocket(推演)(共享)
 └── web/                 # 前端(Vue3 + Vite + TypeScript)
 ```
 

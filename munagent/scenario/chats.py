@@ -11,7 +11,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel
 
-from munagent.core.scenario import _find_scenario
+from munagent.scenario.package import _find_scenario
 
 _CHAT_ID_RE = re.compile(r"^\d{14}-[a-f0-9]{4}$")
 
