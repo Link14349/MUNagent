@@ -13,8 +13,8 @@ from typing import Any, Literal
 import yaml
 from pydantic import BaseModel, Field
 
-from munagent.scenario.package import _find_scenario, _read_text
-from munagent.scenario.files import (
+from munagent.designer.scenario.package import _find_scenario, _read_text
+from munagent.designer.scenario.files import (
     PutFileResult,
     ValidationIssue,
     _is_tree_visible,

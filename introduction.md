@@ -35,12 +35,12 @@
 
 ```
 scenario/
-├── manifest.yaml        # 元信息: 名称、作者、版本、起始时间、结束条件
+├── manifest.yaml        # 元信息: 名称、作者、版本、起始时间、简介与梗概
 ├── background.md        # 背景文书(公共知识)
-├── venues.yaml          # 会场定义: 结构、决策规则、初始议程、初始阶段
+├── venues.yaml          # 会场定义: 结构、决策规则、初始议程、席位清单(seats)
 ├── seats/               # 每个席位一个文件
 │   └── <seat_id>.yaml   # 公开信息 + 私密信息 + 权力清单 + 人格卡
-├── crisis_arcs.yaml     # 危机弧线: 预埋事件(触发条件+内容) + 随机事件池
+├── crisis_arcs.yaml     # 危机弧线: 预埋事件 + 随机事件池 + 推演终局条件
 ├── stats.yaml           # 数值体系(可选)
 └── references/          # 参考资料(设计阶段检索整理的历史资料)
     ├── index.yaml       # 资料清单: 每份资料的来源URL、获取日期、原始文件名
@@ -226,19 +226,19 @@ tools:                # 外部工具服务
 GUI设置页提供"测试连接"按钮: 后端用当前配置发一次最小请求(如1 token的补全), 当场反馈key是否有效、base_url是否可达, 避免推演进行到一半才发现配置错误.
 
 ## 模块划分
-按功能域切分: 一层共享地基(config/security/llm/scenario) + 两个厚薄不均的子系统(designer 轻、deducer 重). designer 与 deducer 互不依赖, 都只依赖共享层.
+按功能域切分: 一层共享地基(config/security/llm) + 两个厚薄不均的子系统(designer 轻、deducer 重). designer 与 deducer 互不依赖, 都只依赖共享层.
 
 ```
 munagent/
 ├── config/              # 分层配置加载(共享)
 ├── security/            # key脱敏等安全卫生(共享)
 ├── llm/                 # OpenAI兼容客户端、流式增量、模型路由、用量统计(共享)
-├── scenario/            # 场景包库(共享契约: designer产出, deducer消费)
-│   ├── package.py       #   元信息/加载/校验/保存
-│   ├── files.py         #   单文件操作与文件树
-│   ├── history.py       #   .history 版本快照
-│   └── chats.py         #   设计对话 JSONL 持久化
 ├── designer/            # 设计子系统
+│   ├── scenario/        #   场景包库: 磁盘 CRUD、单文件编辑、历史、chats
+│   │   ├── package.py   #     元信息/加载/校验/保存
+│   │   ├── files.py     #     单文件操作与文件树
+│   │   ├── history.py   #     .history 版本快照
+│   │   └── chats.py     #     设计对话 JSONL 持久化
 │   ├── agent.py         #   场景设计 Agent loop(function calling + 流式)
 │   └── tools/           #   设计工具: 文件读写、联网搜索(Tavily)、下载、MinerU
 ├── deducer/             # 推演子系统

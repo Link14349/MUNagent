@@ -1,5 +1,5 @@
-mode: tags
-visibility: faction
+mode: tags               # 定性/定量开关, 二选一(见 01-data-chats.md §1.4)
+tag_scale: [弱, 中, 强]   # 全文件统一词表, 从低到高; entities.*.tags 的值必须取自此表
 entities:
   # --- 全局态势 ---
   - id: cabinet_stability

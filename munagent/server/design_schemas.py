@@ -6,10 +6,10 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-from munagent.scenario.chats import ChatMeta
-from munagent.scenario.package import DuplicateScenarioRequest
-from munagent.scenario.files import FileContent, FileNode, PutFileResult, RenameFileRequest, ValidationIssue
-from munagent.scenario.history import CreateSnapshotRequest, HistoryDiffEntry, HistorySnapshot
+from munagent.designer.scenario.chats import ChatMeta
+from munagent.designer.scenario.package import DuplicateScenarioRequest
+from munagent.designer.scenario.files import FileContent, FileNode, PutFileResult, RenameFileRequest, ValidationIssue
+from munagent.designer.scenario.history import CreateSnapshotRequest, HistoryDiffEntry, HistorySnapshot
 
 
 class ActiveTask(BaseModel):
@@ -37,6 +37,11 @@ class ChatCreateRequest(BaseModel):
 
 class ChatRenameRequest(BaseModel):
     title: str
+
+
+class ChatDetailResponse(BaseModel):
+    records: list[dict[str, Any]]
+    todo: str | None = None
 
 
 class ScenarioSummaryEnriched(BaseModel):

@@ -7,8 +7,8 @@
 | `config/` | [config.md](config.md) |
 | `llm/` | [llm.md](llm.md) |
 | `security/` | [security.md](security.md) |
-| `scenario/` | [scenario.md](scenario.md) |
 | `server/` | [server.md](server.md) |
+| `designer/scenario/` | [designer/scenario.md](designer/scenario.md) |
 | `designer/agent.py` | [designer/agent.md](designer/agent.md) |
 | `designer/tools/` | [designer/tools.md](designer/tools.md) |
 | `deducer/core/` | [deducer/core.md](deducer/core.md) |

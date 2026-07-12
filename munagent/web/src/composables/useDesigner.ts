@@ -27,6 +27,7 @@ export interface DesignerStore {
   chats: ChatMeta[];
   activeChatId: string | null;
   records: ChatRecord[];
+  currentTodo: string | null;
   streamingText: string;
   activeTask: boolean;
   fileTree: FileNode[];
@@ -72,6 +73,7 @@ export function useDesigner(scenarioId: string): DesignerStore {
   const chats = ref<ChatMeta[]>([]);
   const activeChatId = ref<string | null>(null);
   const records = ref<ChatRecord[]>([]);
+  const currentTodo = ref<string | null>(null);
   const streamingText = ref("");
   const activeTask = ref(false);
   const fileTree = shallowRef<FileNode[]>([]);
@@ -106,6 +108,9 @@ export function useDesigner(scenarioId: string): DesignerStore {
     },
     get records() {
       return records.value;
+    },
+    get currentTodo() {
+      return currentTodo.value;
     },
     get streamingText() {
       return streamingText.value;
@@ -174,7 +179,9 @@ export function useDesigner(scenarioId: string): DesignerStore {
 
     async selectChat(id) {
       activeChatId.value = id;
-      records.value = await designerApi.getChat(scenarioId, id);
+      const detail = await designerApi.getChat(scenarioId, id);
+      records.value = detail.records;
+      currentTodo.value = detail.todo;
       streamingText.value = "";
     },
 
@@ -258,7 +265,9 @@ export function useDesigner(scenarioId: string): DesignerStore {
     async revertEdit(seq) {
       if (!activeChatId.value) return;
       await designerApi.revert(scenarioId, activeChatId.value, seq);
-      records.value = await designerApi.getChat(scenarioId, activeChatId.value);
+      const detail = await designerApi.getChat(scenarioId, activeChatId.value);
+      records.value = detail.records;
+      currentTodo.value = detail.todo;
       await store.refreshFiles();
     },
 
@@ -305,6 +314,9 @@ export function useDesigner(scenarioId: string): DesignerStore {
     if (ev.type === "record_appended" && ev.chat_id === activeChatId.value) {
       records.value = [...records.value, ev.record];
       if (ev.record.type === "agent_text") streamingText.value = "";
+      if (ev.record.type === "todo" && "text" in ev.record && typeof ev.record.text === "string") {
+        currentTodo.value = ev.record.text;
+      }
       if (ev.record.type === "usage") {
         totalTokens.value += ev.record.input_tokens + ev.record.output_tokens;
       }

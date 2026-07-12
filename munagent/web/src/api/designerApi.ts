@@ -62,8 +62,13 @@ export const designerApi = {
   },
 
   getChat: async (scenarioId: string, chatId: string) => {
-    const rows = await request<ChatRecord[]>(`/api/scenarios/${scenarioId}/chats/${chatId}`);
-    return normalizeRecords(rows);
+    const body = await request<{ records: ChatRecord[]; todo: string | null }>(
+      `/api/scenarios/${scenarioId}/chats/${chatId}`
+    );
+    return {
+      records: normalizeRecords(body.records),
+      todo: body.todo ?? null,
+    };
   },
 
   createChat: (scenarioId: string, title?: string) =>

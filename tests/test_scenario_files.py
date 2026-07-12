@@ -6,11 +6,11 @@ from pathlib import Path
 
 import pytest
 
-from munagent.scenario import chats as chat_svc
-from munagent.scenario import package as scenario_svc
-from munagent.scenario import files as file_svc
-from munagent.scenario import history as history_svc
-from munagent.scenario.package import ScenarioCreate
+from munagent.designer.scenario import chats as chat_svc
+from munagent.designer.scenario import package as scenario_svc
+from munagent.designer.scenario import files as file_svc
+from munagent.designer.scenario import history as history_svc
+from munagent.designer.scenario.package import ScenarioCreate
 
 
 @pytest.fixture()
@@ -57,3 +57,12 @@ def test_create_chat(user_root: Path) -> None:
     chats = chat_svc.list_chats("edit-me")
     assert len(chats) == 1
     assert chats[0].id == chat.id
+
+
+def test_venues_seats_consistency_builtin() -> None:
+    from munagent.designer.scenario import package as scenario_svc
+
+    root = scenario_svc.builtin_scenarios_dir() / "cabinet-crisis"
+    issues = file_svc.validate_package_issues(root)
+    errors = [i for i in issues if i.level == "error"]
+    assert errors == []

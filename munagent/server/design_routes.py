@@ -5,15 +5,16 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import Response
 
-from munagent.scenario import chats as chat_svc
-from munagent.scenario import package as scenario_svc
-from munagent.scenario import files as file_svc
-from munagent.scenario import history as history_svc
-from munagent.scenario.package import DuplicateScenarioRequest
-from munagent.scenario.files import FileContent, RenameFileRequest
-from munagent.scenario.history import CreateSnapshotRequest
+from munagent.designer.scenario import chats as chat_svc
+from munagent.designer.scenario import package as scenario_svc
+from munagent.designer.scenario import files as file_svc
+from munagent.designer.scenario import history as history_svc
+from munagent.designer.scenario.package import DuplicateScenarioRequest
+from munagent.designer.scenario.files import FileContent, RenameFileRequest
+from munagent.designer.scenario.history import CreateSnapshotRequest
 from munagent.server.design_schemas import (
     ChatCreateRequest,
+    ChatDetailResponse,
     ChatRenameRequest,
     DesignerState,
     PutFileBody,
@@ -167,10 +168,11 @@ def create_chat(scenario_id: str, body: ChatCreateRequest) -> dict:
         raise _http_from_exc(exc) from exc
 
 
-@router.get("/chats/{chat_id}")
-def get_chat(scenario_id: str, chat_id: str) -> list:
+@router.get("/chats/{chat_id}", response_model=ChatDetailResponse)
+def get_chat(scenario_id: str, chat_id: str) -> ChatDetailResponse:
     try:
-        return chat_svc.get_chat_records(scenario_id, chat_id)
+        records, todo = chat_svc.get_chat_detail(scenario_id, chat_id)
+        return ChatDetailResponse(records=records, todo=todo)
     except Exception as exc:
         raise _http_from_exc(exc) from exc
 

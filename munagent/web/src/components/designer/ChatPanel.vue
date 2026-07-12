@@ -3,6 +3,7 @@ import { computed, nextTick, ref, watch } from "vue";
 import type { ChatRecord } from "../../types/designer";
 import { injectDesigner } from "../../composables/useDesigner";
 import ChatMessage from "./ChatMessage.vue";
+import TodoPlanBar from "./TodoPlanBar.vue";
 
 const props = defineProps<{
   wide?: boolean;
@@ -134,12 +135,13 @@ watch(() => d.streamingText, scrollBottom);
       <div v-if="d.streamingText" class="bubble agent streaming">{{ d.streamingText }}</div>
     </div>
 
-    <div v-if="d.activeTask" class="running">
-      Agent 正在工作…
-      <button type="button" @click="d.abortTask()">中止</button>
-    </div>
-    <template v-else>
-      <footer class="composer-wrap">
+    <footer class="composer-wrap">
+      <TodoPlanBar v-if="d.currentTodo" :todo="d.currentTodo" />
+      <div v-if="d.activeTask" class="running">
+        Agent 正在工作…
+        <button type="button" @click="d.abortTask()">中止</button>
+      </div>
+      <template v-else>
         <div v-if="d.mode === 'edit' && d.contextFile" class="ctx">
           <span class="ctx-tag">{{ d.contextFile }}</span>
           <button type="button" class="x" title="取消附带" @click="d.contextFile = null">×</button>
@@ -174,8 +176,8 @@ watch(() => d.streamingText, scrollBottom);
             </svg>
           </button>
         </div>
-      </footer>
-    </template>
+      </template>
+    </footer>
   </div>
 </template>
 
@@ -238,13 +240,15 @@ watch(() => d.streamingText, scrollBottom);
   opacity: 0.85;
 }
 .running {
-  padding: 0.75rem 0.85rem;
-  border-top: 1px solid var(--border);
   display: flex;
   justify-content: space-between;
   align-items: center;
   font-size: 0.85rem;
   color: var(--text-muted);
+  padding: 0.55rem 0.65rem;
+  margin-bottom: 0.45rem;
+  border: 1px solid var(--border);
+  border-radius: 10px;
   background: var(--panel-bg);
 }
 .running button {

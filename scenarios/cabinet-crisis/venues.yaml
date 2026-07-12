@@ -9,7 +9,13 @@ venues:
       veto_seats: []
     initial_agenda: 讨论对边境危机的应对方案
     initial_phase: ModeratedCaucus
-    seats: [premier, defense_minister, foreign_minister]
+    seats:
+      - id: premier
+        name: 总理
+      - id: defense_minister
+        name: 国防部长
+      - id: foreign_minister
+        name: 外交部长
     clock_rate:
       per_mod_speech: 5m
       per_unmod_round: 15m

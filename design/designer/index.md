@@ -27,9 +27,9 @@
 
 | 文档 | 内容 |
 |---|---|
-| [01-data-chats.md](01-data-chats.md) | 场景包结构(含 chats/ 与 .history/)、chat 的 JSONL 记录格式(消息/工具调用/文件编辑/usage)、编辑落盘与撤销语义、对话生命周期、版本快照的数据与恢复语义 |
+| [01-data-chats.md](01-data-chats.md) | 场景包结构(manifest、venues.yaml 含 seats 清单、seats/ 角色卡、crisis_arcs、stats、chats/、.history/)、chat JSONL 格式(含 todo 派生状态)、编辑落盘与撤销、版本快照 |
 | [02-ui-modes.md](02-ui-modes.md) | 编辑/对话双模式布局与切换、路由与首页入口、文件树/编辑器/预览的行为、人机写冲突处理、校验 chip 与导出、历史版本面板 |
-| [03-agent-interaction.md](03-agent-interaction.md) | 对话面板(记录渲染/编辑卡/diff/撤销/思考块)、agent 任务与 SSE 流式协议、REST 契约(含快照接口)、前端代码组织、设计 Agent loop(原生 function calling + 流式三通道)与 LLM 层要求 |
+| [03-agent-interaction.md](03-agent-interaction.md) | 对话面板(记录渲染/编辑卡/diff/撤销/思考块/当前计划条)、agent 任务与 SSE 流式协议、REST 契约(含快照接口)、前端代码组织、设计 Agent loop(原生 function calling + 流式三通道)、9 个工具与 LLM 层要求 |
 
 
 

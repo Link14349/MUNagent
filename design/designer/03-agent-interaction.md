@@ -26,9 +26,11 @@
 | `file_edit` | **编辑卡**: `✎ seats/louis_blanc.yaml (+41)` 增删行数徽标; 点击展开内嵌 diff(unified 渲染, 绿加红减); 卡上动作: `[查看文件]`(编辑模式打开/对话模式右栏预览)、`[撤销]`(01§3 语义, 冲突时弹对照) |
 | `system` | 居中灰色短行(中止/错误/撤销说明); error 附 `[重试]`(把上一条 user_message 重发) |
 | `usage` | 不占消息位, 聚合进该轮尾部的小字(`本轮 18.2k→2.1k tokens · 3 次工具`) |
+| `todo` | 流内渲染成清单卡片: `[x]` 行划线打勾、`[ ] ` 行空框; 同时更新输入区上方的"当前计划"折叠条(见下) |
 
 - 对话历史来自 `GET chat 详情`(全量记录), 打开对话时渲染一次; 之后只靠 SSE 增量追加;
 - **思考块**: 任务运行中收到 `think_delta` 时, 在该轮当前位置渲染一个可折叠的灰色"思考中…"块, 流式追加; 一旦开始收到 `text_delta`/工具事件即自动折叠. 思维链不落盘(§7.4), 刷新页面后历史消息里没有思考块是预期行为;
+- **当前计划条**: 对话面板输入区上方常驻一条可折叠的"当前计划"提示(如 `2/5 ▾`), 内容 = 该 chat 最新的 `todo` 记录(01§2.4); 打开对话时取自 `GET chat 详情` 的派生 `todo` 字段, 之后随 `record_appended(todo)` 事件实时刷新; 无 todo 记录时不显示; 只读, 用户不能直接编辑;
 - 长对话虚拟滚动 v1 不做, 超过 500 条记录提示"建议开新对话"(也顺便控制 agent 上下文长度).
 
 ## 3. agent 任务生命周期与 SSE 协议
@@ -70,7 +72,7 @@ type DesignerEvent =
 | 方法与路径 | 用途 |
 |---|---|
 | `GET  /api/scenarios/{id}/design` | 设计器初始化状态: `{active_task, chats: ChatMeta[], validation: Issue[]}` |
-| `GET  /api/scenarios/{id}/chats/{chat_id}` | 对话全量记录 |
+| `GET  /api/scenarios/{id}/chats/{chat_id}` | 对话全量记录 + 派生 `todo` 字段(最后一条 todo 记录的 text, 无则 `null`; 见 01§2.4) |
 | `POST /api/scenarios/{id}/chats` | 新建对话 → ChatMeta |
 | `PATCH/DELETE /api/scenarios/{id}/chats/{chat_id}` | 重命名 / 删除 |
 | `POST /api/scenarios/{id}/chats/{chat_id}/messages` | 发消息(启动任务) |
@@ -155,6 +157,8 @@ messages = [system(角色与纪律), 上下文(文件清单+manifest 摘要+📎
 
 ### 7.4 其余前端可见约定
 
-- agent 的工具面: `read_file / write_file / list_files / web_search / fetch_page / download_file / mineru_convert`, 全部限制在本场景包目录内(路径逃逸后端拒绝); 前端工具卡图标按此枚举;
-- agent 每轮开场自动获得: 场景包文件清单 + manifest 摘要 + 当前文件(若有 📎)——用户不需要手动"给上下文";
+- agent 的工具面(9 个): `read_file / write_file / list_files / web_search / fetch_page / download_file / mineru_convert / check_todo / edit_todo`, 全部限制在本场景包目录内(路径逃逸后端拒绝); 前端工具卡图标按此枚举;
+- agent 每轮开场自动获得: 场景包文件清单 + manifest 摘要 + 当前文件(若有 📎)——用户不需要手动"给上下文"; **todo 不在此列**, 见下条;
+- **`check_todo` / `edit_todo`**(01§2.4 的数据层): `ToolContext` 除 `scenario_id + AppConfig` 外还需 `chat_id`(这两个工具是 chat 级, 不是场景级——loop 本来就知道当前跑在哪个 chat 上, 传入即可); `check_todo` 无参数, 返回当前 todo 全文(无则 `"(暂无 todo)"`); `edit_todo(todo: string)` 是**全量替换**: 先校验每个非空行以 `[ ] `/`[x] ` 开头(不合规返回业务错误字符串让模型自纠, 不抛异常), 校验通过后追加一条 `todo` 记录并推 `record_appended`, 工具返回值就是刚写入的全文(模型不需要紧接着再调一次 check_todo 确认);
+- **todo 不自动注入 system 上下文**: 高频变化的内容放进 system 前缀会打穿 prompt 缓存(每次 edit_todo 后前缀都变, 后续所有请求都無法命中缓存); agent 感知 todo 靠对话历史里的既往 `edit_todo` 调用、该工具的返回值、或主动 `check_todo`, 靠 system prompt 里的使用纪律引导("多步任务先 edit_todo 立计划, 每完成一项就更新"), 不是机制强制;
 - **thinking 纪律(设计器)**: 思维链实时推前端(think_delta)但**不落 chats/**——它不进模型上下文、不影响可复现性, 落盘只占体积; 刷新后思考块消失是预期. 注意这与推演侧纪律相反(代表 Agent 的思维链对其他席位保密), 两侧各自成立, 不要互相"统一".

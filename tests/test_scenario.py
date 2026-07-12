@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from munagent.scenario import package as svc
-from munagent.scenario.package import ScenarioCreate
+from munagent.designer.scenario import package as svc
+from munagent.designer.scenario.package import ScenarioCreate
 
 
 def test_list_includes_builtin() -> None:

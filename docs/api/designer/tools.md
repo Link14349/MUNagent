@@ -1,9 +1,35 @@
 # 设计 Agent 工具链 (`designer/tools/`)
 
-占位, 尚无公开接口(空壳模块). 实现时对应 [design/designer/03-agent-interaction.md](../../../design/designer/03-agent-interaction.md) §7.4 的工具面:
+对应 [design/designer/03-agent-interaction.md](../../../design/designer/03-agent-interaction.md) §7.4. 文件类工具委托 `designer/scenario/files.py`, 不重复实现 IO.
 
-| 分组 | 工具 |
+## 公开入口 (`designer/tools/__init__.py`)
+
+| 符号 | 说明 |
 |---|---|
-| 文件操作(场景包目录内, 拒绝路径逃逸) | `list_files` / `read_file` / `write_file` |
-| 资料检索 | `web_search` / `fetch_page` / `download_file` |
-| 格式转换 | `mineru_convert`(见 [docs/tools/agent-api-pdf-to-markdown-guide.md](../../tools/agent-api-pdf-to-markdown-guide.md)) |
+| `ToolContext` | `scenario_id` + `AppConfig` + 可选 `chat_id` / `turn`(todo 工具用) |
+| `ToolResult` | `ok` / `summary`(≤200字, 写入 chat tool_call) / `data` |
+| `TOOL_NAMES` | 9 个工具名元组 |
+| `execute_tool(ctx, name, arguments) -> ToolResult` | 统一执行; 业务错误不抛异常 |
+| `openai_tool_definitions() -> list[dict]` | OpenAI 兼容 `tools` 数组 |
+
+## 工具一览
+
+| 名称 | 模块 | 约束 |
+|---|---|---|
+| `list_files` | `files.py` | 可选 `path` 前缀; 含二进制 |
+| `read_file` | `files.py` | 仅文本后缀 yaml/md/txt |
+| `write_file` | `files.py` | 全量写入; 返回 validation |
+| `web_search` | `search.py` | `tools.search` provider: tavily/serper/bocha |
+| `fetch_page` | `fetch.py` | HTML→纯文本, `max_chars` 截断 |
+| `download_file` | `fetch.py` | 仅 `references/` 下, 上限 50MB |
+| `mineru_convert` | `mineru.py` | 场景内 PDF→`references/*.md`; 见 [MinerU 指南](../../tools/agent-api-pdf-to-markdown-guide.md) |
+| `check_todo` | `todo.py` | 无参; 读当前 chat 最新 todo 全文(无则 `"(暂无 todo)"`) |
+| `edit_todo` | `todo.py` | 全量替换计划清单; 校验行前缀后追加 `type:todo` 记录 |
+
+## scenario 扩展 (`designer/scenario/files.py`)
+
+| 函数 | 说明 |
+|---|---|
+| `list_package_files(id, prefix="")` | Agent 用文件清单(含 PDF 等) |
+| `read_bytes(id, path)` | 读二进制(供 MinerU 上传) |
+| `put_bytes(id, path, data)` | 写二进制(供 download_file) |

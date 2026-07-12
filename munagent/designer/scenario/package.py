@@ -10,14 +10,14 @@ from pathlib import Path
 from typing import Any, Literal
 
 import yaml
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 _SCENARIO_ID_RE = re.compile(r"^[a-z0-9-]+$")
 _HIDDEN_PREFIXES = ("chats/", ".history/")
 
 
 def _repo_root() -> Path:
-    return Path(__file__).resolve().parents[2]
+    return Path(__file__).resolve().parents[3]
 
 
 def builtin_scenarios_dir() -> Path:
@@ -29,9 +29,19 @@ def user_scenarios_dir() -> Path:
 
 
 class EndCondition(BaseModel):
+    """推演终局条件 — 定义在 crisis_arcs.yaml, 非 manifest."""
+
     type: str
     at: str | None = None
     desc: str | None = None
+
+    @model_validator(mode="after")
+    def check_type_fields(self) -> EndCondition:
+        if self.type == "story_time_reached" and not self.at:
+            raise ValueError("end_conditions: story_time_reached 须填写 at")
+        if self.type == "dm_judgement" and not self.desc:
+            raise ValueError("end_conditions: dm_judgement 须填写 desc")
+        return self
 
 
 class Manifest(BaseModel):
@@ -42,13 +52,109 @@ class Manifest(BaseModel):
     created: str = ""
     language: str = "zh"
     start_story_time: str
-    end_conditions: list[EndCondition] = Field(default_factory=list)
+    description: str = Field(default="", description="一句话简介, ≤100 字")
+    content: str = Field(default="", description="长梗概, ≤500 字")
 
     @field_validator("id")
     @classmethod
     def validate_id(cls, v: str) -> str:
         if not _SCENARIO_ID_RE.match(v):
             raise ValueError("manifest.id 须为 [a-z0-9-]")
+        return v
+
+    @field_validator("description")
+    @classmethod
+    def validate_description(cls, v: str) -> str:
+        if len(v) > 100:
+            raise ValueError("manifest.description 不得超过 100 字")
+        return v
+
+    @field_validator("content")
+    @classmethod
+    def validate_content(cls, v: str) -> str:
+        if len(v) > 500:
+            raise ValueError("manifest.content 不得超过 500 字")
+        return v
+
+
+class CrisisArcsFile(BaseModel):
+    """crisis_arcs.yaml 顶层结构(校验用)."""
+
+    main_arc: list[Any] = Field(default_factory=list)
+    random_pool: list[Any] = Field(default_factory=list)
+    end_conditions: list[EndCondition] = Field(default_factory=list)
+
+
+_SEAT_ID_RE = re.compile(r"^[a-z][a-z0-9_]*$")
+
+
+class VenueSeatEntry(BaseModel):
+    id: str
+    name: str
+
+    @field_validator("id")
+    @classmethod
+    def validate_seat_id(cls, v: str) -> str:
+        if not _SEAT_ID_RE.match(v):
+            raise ValueError(f"席位 id 须为 [a-z][a-z0-9_]*: {v}")
+        return v
+
+
+class VenueEntry(BaseModel):
+    id: str
+    name: str
+    kind: str = "main"
+    timezone: str = "Asia/Shanghai"
+    presiding_seat: str | None = None
+    decision_rule: dict[str, Any] = Field(default_factory=dict)
+    initial_agenda: str = ""
+    initial_phase: str = "ModeratedCaucus"
+    seats: list[VenueSeatEntry] = Field(default_factory=list)
+    clock_rate: dict[str, str] | None = None
+
+
+class VenuesFile(BaseModel):
+    venues: list[VenueEntry]
+
+
+class SeatPublic(BaseModel):
+    title: str = ""
+    faction: str = ""
+    stance: str = ""
+
+
+class SeatPrivate(BaseModel):
+    secret_goals: list[str] = Field(default_factory=list)
+    relationships: list[dict[str, Any]] = Field(default_factory=list)
+    resources: list[str] = Field(default_factory=list)
+
+
+class SeatPersona(BaseModel):
+    personality: str = ""
+    speech_style: str = ""
+    decision_tendency: str = ""
+    honesty: float = Field(default=0.5, ge=0.0, le=1.0)
+
+
+class PortfolioPower(BaseModel):
+    power: str
+    limits: str = ""
+
+
+class SeatFile(BaseModel):
+    id: str
+    name: str
+    venue: str
+    public: SeatPublic = Field(default_factory=SeatPublic)
+    private: SeatPrivate = Field(default_factory=SeatPrivate)
+    portfolio_powers: list[PortfolioPower] = Field(default_factory=list)
+    persona: SeatPersona = Field(default_factory=SeatPersona)
+
+    @field_validator("id")
+    @classmethod
+    def validate_seat_id(cls, v: str) -> str:
+        if not _SEAT_ID_RE.match(v):
+            raise ValueError(f"席位 id 须为 [a-z][a-z0-9_]*: {v}")
         return v
 
 
@@ -225,35 +331,13 @@ def create_scenario(body: ScenarioCreate) -> ScenarioDetail:
         author=body.author,
         created="",
         start_story_time=body.start_story_time,
-        end_conditions=[],
+        description="",
+        content="",
     )
     (root / "manifest.yaml").write_text(
         yaml.safe_dump(manifest.model_dump(), allow_unicode=True, sort_keys=False),
         encoding="utf-8",
     )
-    (root / "venues.yaml").write_text(
-        yaml.safe_dump(
-            {
-                "venues": [
-                    {
-                        "id": "main",
-                        "name": "主会场",
-                        "kind": "main",
-                        "timezone": "Asia/Shanghai",
-                        "decision_rule": {"pass_threshold": "majority", "veto_seats": []},
-                        "initial_agenda": "待定",
-                        "initial_phase": "ModeratedCaucus",
-                        "seats": [],
-                    }
-                ]
-            },
-            allow_unicode=True,
-            sort_keys=False,
-        ),
-        encoding="utf-8",
-    )
-    (root / "background.md").write_text(f"# {body.title}\n\n(待编写)\n", encoding="utf-8")
-    (root / "crisis_arcs.yaml").write_text("main_arc: []\nrandom_pool: []\n", encoding="utf-8")
     (root / "seats" / "placeholder.yaml").write_text(
         yaml.safe_dump(
             {
@@ -270,6 +354,36 @@ def create_scenario(body: ScenarioCreate) -> ScenarioDetail:
                     "honesty": 0.5,
                 },
             },
+            allow_unicode=True,
+            sort_keys=False,
+        ),
+        encoding="utf-8",
+    )
+    (root / "venues.yaml").write_text(
+        yaml.safe_dump(
+            {
+                "venues": [
+                    {
+                        "id": "main",
+                        "name": "主会场",
+                        "kind": "main",
+                        "timezone": "Asia/Shanghai",
+                        "decision_rule": {"pass_threshold": "majority", "veto_seats": []},
+                        "initial_agenda": "待定",
+                        "initial_phase": "ModeratedCaucus",
+                        "seats": [{"id": "placeholder", "name": "待定义"}],
+                    }
+                ]
+            },
+            allow_unicode=True,
+            sort_keys=False,
+        ),
+        encoding="utf-8",
+    )
+    (root / "background.md").write_text(f"# {body.title}\n\n(待编写)\n", encoding="utf-8")
+    (root / "crisis_arcs.yaml").write_text(
+        yaml.safe_dump(
+            {"main_arc": [], "random_pool": [], "end_conditions": []},
             allow_unicode=True,
             sort_keys=False,
         ),

@@ -388,7 +388,16 @@ export const designerApi = {
   subscribeEvents: (scenarioId: string, fn: EventListener) => getStore(scenarioId).subscribe(fn),
   getChat: async (scenarioId: string, chatId: string) => {
     await getStore(scenarioId).ensureLoaded();
-    return getStore(scenarioId).getChatRecords(chatId);
+    const records = getStore(scenarioId).getChatRecords(chatId);
+    let todo: string | null = null;
+    for (let i = records.length - 1; i >= 0; i--) {
+      const r = records[i];
+      if (r.type === "todo" && "text" in r && typeof r.text === "string") {
+        todo = r.text;
+        break;
+      }
+    }
+    return { records, todo };
   },
   createChat: async (scenarioId: string, title?: string) => {
     await getStore(scenarioId).ensureLoaded();

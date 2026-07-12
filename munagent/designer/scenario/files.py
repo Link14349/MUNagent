@@ -8,8 +8,11 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-from munagent.scenario.package import (
+from munagent.designer.scenario.package import (
+    CrisisArcsFile,
     Manifest,
+    SeatFile,
+    VenuesFile,
     _find_scenario,
     _load_yaml,
     _read_text,
@@ -96,6 +99,128 @@ def validate_package_issues(root: Path) -> list[ValidationIssue]:
         issues.append(ValidationIssue(level="warning", message="seats/ 目录为空", path="seats/"))
     if not (root / "crisis_arcs.yaml").is_file():
         issues.append(ValidationIssue(level="warning", message="缺少 crisis_arcs.yaml", path="crisis_arcs.yaml"))
+    else:
+        issues.extend(_validate_crisis_arcs_issues(root))
+    issues.extend(_validate_venues_and_seats_issues(root))
+    return issues
+
+
+def _validate_crisis_arcs_issues(root: Path) -> list[ValidationIssue]:
+    path = root / "crisis_arcs.yaml"
+    try:
+        data = _load_yaml(path) or {}
+        CrisisArcsFile.model_validate(data)
+    except ValueError as exc:
+        return [ValidationIssue(level="error", message=str(exc), path="crisis_arcs.yaml")]
+    return []
+
+
+def _validate_venues_and_seats_issues(root: Path) -> list[ValidationIssue]:
+    venues_path = root / "venues.yaml"
+    seats_dir = root / "seats"
+    if not venues_path.is_file() or not seats_dir.is_dir():
+        return []
+    issues: list[ValidationIssue] = []
+    try:
+        venues_data = VenuesFile.model_validate(_load_yaml(venues_path) or {})
+    except ValueError as exc:
+        return [ValidationIssue(level="error", message=str(exc), path="venues.yaml")]
+
+    seat_files: dict[str, SeatFile] = {}
+    for fp in sorted(seats_dir.glob("*.yaml")):
+        rel = f"seats/{fp.name}"
+        try:
+            seat = SeatFile.model_validate(_load_yaml(fp) or {})
+            seat_files[seat.id] = seat
+            if fp.stem != seat.id:
+                issues.append(
+                    ValidationIssue(
+                        level="error",
+                        message=f"{rel} 内 id={seat.id} 与文件名不一致",
+                        path=rel,
+                    )
+                )
+        except ValueError as exc:
+            issues.append(ValidationIssue(level="error", message=str(exc), path=rel))
+
+    venue_ids = {v.id for v in venues_data.venues}
+    for venue in venues_data.venues:
+        venue_seat_ids = [s.id for s in venue.seats]
+        if len(set(venue_seat_ids)) != len(venue_seat_ids):
+            issues.append(
+                ValidationIssue(
+                    level="error",
+                    message=f"会场 {venue.id} 的 seats 存在重复 id",
+                    path="venues.yaml",
+                )
+            )
+        for entry in venue.seats:
+            seat = seat_files.get(entry.id)
+            if seat is None:
+                issues.append(
+                    ValidationIssue(
+                        level="error",
+                        message=f"venues 列出席位 {entry.id}, 但缺少 seats/{entry.id}.yaml",
+                        path="venues.yaml",
+                    )
+                )
+                continue
+            if seat.name != entry.name:
+                issues.append(
+                    ValidationIssue(
+                        level="error",
+                        message=(
+                            f"席位 {entry.id}: venues.name「{entry.name}」"
+                            f"与 seats 文件 name「{seat.name}」不一致"
+                        ),
+                        path="venues.yaml",
+                    )
+                )
+            if seat.venue != venue.id:
+                issues.append(
+                    ValidationIssue(
+                        level="error",
+                        message=f"席位 {entry.id}: seats 文件 venue={seat.venue} 与会场 {venue.id} 不一致",
+                        path=f"seats/{entry.id}.yaml",
+                    )
+                )
+        if venue.presiding_seat and venue.presiding_seat not in venue_seat_ids:
+            issues.append(
+                ValidationIssue(
+                    level="warning",
+                    message=f"会场 {venue.id} presiding_seat={venue.presiding_seat} 不在 seats 列表中",
+                    path="venues.yaml",
+                )
+            )
+        for vid in venue.decision_rule.get("veto_seats") or []:
+            if vid not in venue_seat_ids:
+                issues.append(
+                    ValidationIssue(
+                        level="error",
+                        message=f"会场 {venue.id} veto_seats 含未知席位 {vid}",
+                        path="venues.yaml",
+                    )
+                )
+
+    for seat_id, seat in seat_files.items():
+        if seat.venue not in venue_ids:
+            issues.append(
+                ValidationIssue(
+                    level="error",
+                    message=f"席位 {seat_id} 的 venue={seat.venue} 不存在于 venues",
+                    path=f"seats/{seat_id}.yaml",
+                )
+            )
+            continue
+        venue = next(v for v in venues_data.venues if v.id == seat.venue)
+        if seat_id not in {s.id for s in venue.seats}:
+            issues.append(
+                ValidationIssue(
+                    level="error",
+                    message=f"seats/{seat_id}.yaml 存在但未列入会场 {seat.venue} 的 seats",
+                    path="venues.yaml",
+                )
+            )
     return issues
 
 
@@ -220,3 +345,42 @@ def scenario_design_meta(scenario_id: str) -> tuple[str, bool, list[FileNode], l
         except ValueError:
             pass
     return title, source == "builtin", build_file_tree(root), validate_package_issues(root)
+
+
+def read_bytes(scenario_id: str, path: str) -> bytes:
+    """读取场景包内二进制文件(如 PDF)."""
+    root, _ = _find_scenario(scenario_id)
+    rel = _normalize_rel(path)
+    target = _resolve_file(root, rel)
+    if not target.is_file():
+        raise FileNotFoundError(f"文件不存在: {rel}")
+    return target.read_bytes()
+
+
+def list_package_files(scenario_id: str, prefix: str = "") -> list[str]:
+    """列出场景包内可见文件(含二进制), 供 Agent list_files 使用."""
+    root, _ = _find_scenario(scenario_id)
+    prefix = prefix.strip().strip("/")
+    paths: list[str] = []
+    for path in sorted(root.rglob("*")):
+        if not path.is_file():
+            continue
+        rel = path.relative_to(root).as_posix()
+        if not _is_tree_visible(rel):
+            continue
+        if prefix and not (rel == prefix or rel.startswith(f"{prefix}/")):
+            continue
+        paths.append(rel)
+    return paths
+
+
+def put_bytes(scenario_id: str, path: str, data: bytes) -> None:
+    """写入二进制文件(如 references/raw/ 下的 PDF)."""
+    root, source = _find_scenario(scenario_id)
+    _assert_writable(source)
+    rel = _normalize_rel(path)
+    if not _is_tree_visible(rel):
+        raise ValueError(f"不允许写入: {rel}")
+    target = _resolve_file(root, rel)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(data)

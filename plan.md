@@ -30,7 +30,7 @@
 - [x] 设置页: providers/roles/tools 编辑(key 掩码只写不读) + 测试连接 (08§3-4, 09§2)
 - [x] 首页: 场景包库列表(内置示例 + 用户目录) + 新建设计/开始推演入口占位 (09§1)
 - [x] REST: `GET/POST /api/scenarios`, `GET/PUT/DELETE /api/scenarios/{id}`, `GET/PUT /api/config`, `POST /api/config/test` (09§2)
-- [x] `core/scenario.py`: 场景包加载 + pydantic 校验 + 保存(不含设计 Agent, 先支持手工/示例场景) (02§3)
+- [x] `designer/scenario/`: 场景包加载 + pydantic 校验 + 保存(不含设计 Agent, 先支持手工/示例场景) (02§3)
 - [x] 内置示例场景 `scenarios/cabinet-crisis/` 可被 API 列出并读取
 - [x] CLI: `munagent serve` 一键拉起后端 + 静态前端
 
@@ -42,5 +42,6 @@
 
 - [x] 全部前端页面设计,待用户验收
 - [x] 后端文件处理管理
-- [ ] 后端Agent工具实现
+- [x] 后端Agent工具实现
+- [ ] 后端Agent prompt设计管理
 - [ ] 后端Agent处理(待设计)
