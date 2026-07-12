@@ -141,6 +141,22 @@ async def test_fetch_page(tool_ctx: ToolContext, monkeypatch: pytest.MonkeyPatch
 
 
 @pytest.mark.asyncio
+async def test_fetch_page_gb2312_meta(tool_ctx: ToolContext, monkeypatch: pytest.MonkeyPatch) -> None:
+    html = (
+        "<html><head><meta http-equiv='content-type' content='text/html; charset=GB2312'>"
+        "</head><body><p>青年视界</p></body></html>"
+    ).encode("gb2312")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=html, headers={"content-type": "text/html"})
+
+    _patch_httpx_transport(monkeypatch, handler)
+    r = await execute_tool(tool_ctx, "fetch_page", {"url": "https://people.com.cn/article"})
+    assert r.ok
+    assert "青年视界" in r.data["text"]
+
+
+@pytest.mark.asyncio
 async def test_download_file(tool_ctx: ToolContext, monkeypatch: pytest.MonkeyPatch) -> None:
     payload = b"%PDF-1.4 fake"
 

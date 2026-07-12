@@ -15,6 +15,17 @@ from munagent.designer.scenario import files as file_svc
 from munagent.security.sanitize import sanitize_text
 
 _MAX_DOWNLOAD_BYTES = 50 * 1024 * 1024
+_CHARSET_META_RE = re.compile(
+    r"<meta[^>]+charset\s*=\s*[\"']?([^\"'>\s;]+)",
+    re.IGNORECASE,
+)
+_CHARSET_CT_RE = re.compile(r"charset=([^;\s]+)", re.IGNORECASE)
+_CHARSET_ALIASES = {
+    "gb2312": "gb18030",
+    "gbk": "gb18030",
+    "gb_2312": "gb18030",
+    "utf8": "utf-8",
+}
 
 
 class _TextExtractor(HTMLParser):
@@ -51,6 +62,38 @@ class DownloadFileArgs(BaseModel):
     path: str = Field(description="场景包内保存路径, 建议 references/raw/ 下")
 
 
+def _normalize_charset(name: str) -> str:
+    key = name.strip().strip("\"'").lower().replace("_", "")
+    if key in _CHARSET_ALIASES:
+        return _CHARSET_ALIASES[key]
+    return name.strip().strip("\"'").lower()
+
+
+def _detect_charset(content: bytes, content_type: str | None) -> str:
+    """从 Content-Type 或 HTML meta 推断编码; 老中文站常见 GB2312/GBK."""
+    if content_type:
+        m = _CHARSET_CT_RE.search(content_type)
+        if m:
+            return _normalize_charset(m.group(1))
+    head = content[:8192].decode("ascii", errors="ignore")
+    m = _CHARSET_META_RE.search(head)
+    if m:
+        return _normalize_charset(m.group(1))
+    try:
+        content.decode("utf-8")
+        return "utf-8"
+    except UnicodeDecodeError:
+        return "gb18030"
+
+
+def _decode_response_text(content: bytes, content_type: str | None) -> str:
+    charset = _detect_charset(content, content_type)
+    try:
+        return content.decode(charset)
+    except (UnicodeDecodeError, LookupError):
+        return content.decode("utf-8", errors="replace")
+
+
 def _html_to_text(html: str) -> str:
     parser = _TextExtractor()
     parser.feed(html)
@@ -75,7 +118,7 @@ async def fetch_page(ctx: ToolContext, args: FetchPageArgs) -> ToolResult:
         async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
             resp = await client.get(url, headers={"User-Agent": "MUNagent-Designer/0.1"})
             resp.raise_for_status()
-            raw = resp.text
+            raw = _decode_response_text(resp.content, resp.headers.get("content-type"))
     except httpx.HTTPError as exc:
         raise ToolExecutionError(sanitize_text(f"抓取失败: {exc}")) from exc
     text = _html_to_text(raw) if "<html" in raw.lower() else raw
