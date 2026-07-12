@@ -43,5 +43,6 @@
 - [x] 全部前端页面设计,待用户验收
 - [x] 后端文件处理管理
 - [x] 后端Agent工具实现
-- [ ] 后端Agent prompt设计管理
+- [x] 后端Agent prompt设计管理
+- [x] 补全Agent类
 - [ ] 后端Agent处理(待设计)

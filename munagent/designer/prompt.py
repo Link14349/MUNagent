@@ -1,5 +1,7 @@
 # Prompt的拼接按照不同工作段来管理, 然后再进行拼接
 
+from munagent.designer.scenario import files as file_svc
+
 # System Prompt
 # 全局提示段(静态, 可被 prompt 缓存; 一切随场景/对话变化的内容由 loop 动态注入, 不得写进本段)
 G = """\
@@ -76,6 +78,10 @@ trigger/condition 是**条件表达式字符串**(整体用引号括起), 语法
 被引用事件尚未触发时 `>`/`>=`/`=` 恒 False, `<`/`<=` 恒 True;
 - 文字判断 `text '<陈述句>'`: 由 DM 对照局势判断真伪, 必须写可判定的陈述句;
 - 组合: `not` / `and` / `or` / `()`, 优先级 not > and > or;
+- **短路求值**: 连续 and 从左到右求值, 遇第一个 False 立即返回 False; 连续 or 从左到右求值, 遇第一个 True 立即返回 True; 被短路跳过的项不求值——text 谓词被短路就省掉一次 LLM 判定;
+- **成本优化纪律**(写 condition 时必须遵守): 能用时间判定表达的条件就不要用 text(时间比较是零成本程序求值, text 每评估一次烧一次 LLM 调用); \
+时间与 text 混用时把时间比较放在 text **之前**, 并让排在前面的时间条件充当"闸门"——在大多数回合直接否决整个表达式(如 `time >= 某事件 + 3h and text '…'`, 闸门未开时 text 根本不会被评估), \
+使 text 判定只在到达时间窗口后的少数回合发生, 最大限度减少文本判定频率以节省算力与 token;
 - 分工纪律: **trigger 只放时间条件**(每回合都要程序求值, 必须便宜), **text 语义条件放 condition**(trigger 命中后才评估); 两者省略视为恒真;
 - 结构表达: 线性链 = 后一事件 `time >= 前事件 + 时长`; 分支 = 同一时间窗口的两个事件用同一句 text 陈述一正一 `not`(保证互斥); 收敛 = 用绝对时间或 or 引用多个前驱; \
 不需要"其他"兜底分支——都不满足就什么都不触发, DM 可即兴.
@@ -122,7 +128,56 @@ story_design.md 是给主席团的**叙事透镜**——若干条剧情参考线
 # 历史会话摘要段
 H = ""
 
-## 中间是message记录
+# 现场上下文段(动态, 每次 loop 由 build_L 生成; 静态占位符 L 恒为空)
+L = ""
+
+## 中间是 message 记录
 
 # User prompt
-U = ""  # 用户说的话
+
+
+def _read_text_file(scenario_id: str, path: str) -> str | None:
+    """读取场景内文本文件全文; 不存在或不可读返回 None."""
+    try:
+        return file_svc.get_file(scenario_id, path).content
+    except (FileNotFoundError, ValueError):
+        return None
+
+
+def build_L(scenario_id: str, *, context_file: str | None = None) -> str:
+    """L 段: 随场景变化的 system 注入(文件清单 + manifest/venues 全文 + 当前文件)."""
+    lines = ["# 当前场景包上下文", "", f"场景 ID: {scenario_id}", ""]
+    paths = sorted(file_svc.list_package_files(scenario_id))
+    lines.append("## 文件清单")
+    if paths:
+        lines.extend(f"- {p}" for p in paths)
+    else:
+        lines.append("(空场景, 尚无内容文件)")
+    lines.append("")
+
+    manifest_raw = _read_text_file(scenario_id, "manifest.yaml")
+    lines.append("## manifest.yaml")
+    if manifest_raw is not None:
+        lines.append(manifest_raw.rstrip())
+    else:
+        lines.append("(尚未创建 manifest.yaml)")
+    lines.append("")
+
+    venues_raw = _read_text_file(scenario_id, "venues.yaml")
+    lines.append("## venues.yaml")
+    if venues_raw is not None:
+        lines.append(venues_raw.rstrip())
+    else:
+        lines.append("(尚未创建 venues.yaml)")
+    lines.append("")
+
+    if context_file:
+        lines.append("## 用户附带的当前文件")
+        lines.append(f"📎 {context_file}")
+        lines.append("用户说「这个」「当前文件」时指代该路径.")
+        lines.append("")
+    return "\n".join(lines)
+
+
+# 兼容旧名
+build_dynamic_context = build_L

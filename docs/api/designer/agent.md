@@ -1,3 +1,23 @@
 # 设计 Agent loop (`designer/agent.py`)
 
-占位, 尚无公开接口(空壳模块). 实现时对应 [design/designer/03-agent-interaction.md](../../../design/designer/03-agent-interaction.md) §7 的 loop 设计: 原生 function calling + 流式三通道(reasoning_content/content/tool_calls), 终止条件为响应无 tool_calls, 单轮工具调用上限 30 次.
+对应 [design/designer/03-agent-interaction.md](../../../design/designer/03-agent-interaction.md) §7.
+
+## 公开类型
+
+| 符号 | 说明 |
+|---|---|
+| `Agent` | 绑定 `scenario_id` + `chat_id`; 维护 `LLMClient` 与 `messages` |
+| `LoopResult` | `done` / `aborted` / `failed` |
+| `AgentEventSink` | 可选回调: `on_think_delta` / `on_text_delta` / `on_record_appended` |
+
+## Agent 主要方法
+
+| 方法 | 说明 |
+|---|---|
+| `async loop(user_prompt, max_steps=30) -> LoopResult` | 主循环: 流式 LLM + function calling, 工具上限 30, 单工具超时 600s |
+| `add_message(msg, chat_record=?)` | 同步更新 `messages` 与 JSONL(有别名 `addMessage`) |
+| `get_chat_messages() -> list[ChatMessage]` | system 段(G + 动态上下文) + JSONL 历史(有别名 `getChatMessages`) |
+
+动态上下文(L 段)见 `designer/prompt.py` 的 `build_L`: 文件清单 + `manifest.yaml`/`venues.yaml` 全文 + 📎当前文件; 拼接顺序 G → H → L → 对话历史.
+
+约束: `reasoning_content` 只推事件不落盘; tool_call JSONL 只存终态摘要; `write_file` 成功时由 loop 生成 `file_edit` unified diff.
