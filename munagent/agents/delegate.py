@@ -43,8 +43,8 @@ class DelegateTurnAction(BaseModel):
     text: str = ""
     inner_thought: str = ""
     directive: DirectiveDraft | None = None
-    motion_type: str = ""  # 切磋商/表决指令/appeal申诉
-    motion_target: str = ""  # 表决对象(指令id) 或切磋商目标
+    motion_type: str | None = ""  # LLM 可能返回 null, 引擎用 `or ""` 处理
+    motion_target: str | None = ""
     next_move: NextMove | None = None  # Unmod 末轮用
 
 
@@ -56,7 +56,7 @@ class DelegateVoteAction(BaseModel):
 # 主持类任务 schema(与 ChairAgent 同名任务一致, 但带 inner_thought)
 class PresidingNextSpeaker(BaseModel):
     seat: str
-    reason: str = ""
+    announcement: str = ""  # 主持者当众说的话(如"请外交部长先谈谈看法")
     inner_thought: str = ""
 
 
@@ -90,13 +90,27 @@ def honesty_description(h: float) -> str:
     return HONESTY_MAP[-1][1]
 
 
-G_GLOBAL = """你正在参加一场模拟联合国历史危机推演. 以下是会议通用规则:
-- 发言应简明扼要, 体现角色立场.
-- 可选行动: speech(发言)、motion(动议)、write_directive(写指令)、pass(跳过).
-- 动议类型: caucus_switch(切磋商形式)、vote_directive(表决指令)、appeal(申诉主持裁决).
-- 指令类型: personal(个人指令)、crisis_note(危机笔记)、directive(联合指令)、communique(公报).
-- 在```json代码块中按 schema 输出, 包含 action、text、inner_thought 字段.
-- inner_thought 是你的内心盘算, 其他角色看不到, 供你自己保持连贯.
+G_GLOBAL = """你正在参加一场模拟联合国历史委员会危机联动推演. 以下是会议通用规则:
+
+## 你的可选行动
+- speech: 在会场发言, 表达立场或回应他人.
+- motion: 提出动议, 请求主持者裁决.
+- write_directive: 撰写并提交指令.
+- pass: 跳过本回合.
+
+## 动议类型
+- caucus_switch: 动议切换磋商形式(主持核心磋商⇄非正式磋商). motion_target留空.
+- vote_directive: 动议表决某联合指令. motion_target填指令标题.
+- appeal: 申诉主持者的裁决(当你的动议被驳回且你认为不公时使用). 由戏外主席终裁, motion_target填被驳回的动议内容.
+
+## 指令类型
+- personal: 个人指令, 凭你的权力清单行动, 不需投票, 私下递交.
+- crisis_note: 危机笔记, 给幕后或其他角色的私信, 不需投票. recipient填收件人席位id.
+- directive: 联合指令, 会场集体行动, 需投票通过后生效. co_sponsors填联署席位.
+- communique: 公报/声明, 对外官方表态, 需投票通过.
+
+## 输出格式
+在```json代码块中按 schema 输出. inner_thought是你的内心盘算, 其他角色看不到, 供你自己保持前后连贯.
 """
 
 
@@ -104,7 +118,7 @@ class DelegateAgent(BaseAgent):
     """代表 Agent: 扮演某席位, 在点名时行动; 任主持席时兼做程序性主持."""
 
     def __init__(self, llm: LLMClient, seat: SeatSpec, background_summary: str) -> None:
-        super().__init__(llm, schema_model=DelegateTurnAction, max_tokens=512)
+        super().__init__(llm, schema_model=DelegateTurnAction, max_tokens=8192)
         self.seat = seat
         self.background_summary = background_summary
 
@@ -123,12 +137,12 @@ class DelegateAgent(BaseAgent):
             f"<背景>{self.background_summary}</背景>"
         )
 
-    def _build_ctx(self, task: TaskSpec, l3: str, l4: str) -> AgentContext:
+    def _build_ctx(self, task: TaskSpec, l3: str, l4: str, l2_summary: str = "") -> AgentContext:
         return self.build_context(
             task,
             g=G_GLOBAL,
             l1=self.build_l1(),
-            l2="(摘要尚未实现)",
+            l2=l2_summary or "(暂无摘要)",
             l3=l3,
             l4=l4,
         )
@@ -142,6 +156,7 @@ class DelegateAgent(BaseAgent):
         phase: str,
         story_time: str,
         is_presiding: bool = False,
+        l2_summary: str = "",
     ) -> AgentContext:
         l3 = "\n".join(render(e) for e in visible_events[-20:]) or "(无近期事件)"
         presiding_hint = (
@@ -155,11 +170,23 @@ class DelegateAgent(BaseAgent):
             f"现在轮到你({self.seat.name})行动.{presiding_hint}\n"
             f"以既定人格做出对你的目标最有利的选择.\n"
             f"在```json中按以下schema输出:\n"
-            '{"action": "speech|motion|write_directive|pass", "text": "发言内容", '
-            '"inner_thought": "内心盘算", "motion_type": "caucus_switch|vote_directive|appeal", '
-            '"motion_target": "目标", "directive": {"kind":"personal","title":"","body":"","uses_powers":[]}}'
+            '{\n'
+            '  "action": "speech|motion|write_directive|pass",\n'
+            '  "text": "发言内容(speech时填)",\n'
+            '  "inner_thought": "内心盘算",\n'
+            '  "motion_type": "caucus_switch|vote_directive|appeal(motion时填)",\n'
+            '  "motion_target": "动议目标",\n'
+            '  "directive": {\n'
+            '    "kind": "personal|crisis_note|directive|communique",\n'
+            '    "title": "标题",\n'
+            '    "body": "正文(强调可执行步骤)",\n'
+            '    "uses_powers": ["权力清单中的权力"],\n'
+            '    "recipient": "收件人席位id(crisis_note时填)",\n'
+            '    "co_sponsors": ["联署席位id(directive时填)"]\n'
+            '  }\n'
+            '}'
         )
-        return self._build_ctx(task, l3, l4)
+        return self._build_ctx(task, l3, l4, l2_summary)
 
     def build_vote_context(
         self,
@@ -189,24 +216,31 @@ class DelegateAgent(BaseAgent):
         all_seat_ids: list[str],
     ) -> PresidingNextSpeaker:
         l3 = "\n".join(render(e) for e in visible_events[-15:]) or "(无近期事件)"
+        is_first_round = len(spoken_seats) == 0
+        first_hint = (
+            "\n这是开场第一轮, 你作为主持者可以先点自己发言, 也可以点别人先表态."
+            if is_first_round
+            else ""
+        )
         l4 = (
             f"当前阶段: {phase}\n故事时间: {story_time}\n"
             f"你是本会场主持者({self.seat.name}). "
             f"会场席位: {', '.join(all_seat_ids)}\n"
             f"本轮已发言: {', '.join(spoken_seats) or '无'}\n"
-            f"以你的立场选择下一位发言者(可以偏心). 在```json中输出: "
-            '{"seat": "席位id", "reason": "理由", "inner_thought": "你的盘算"}'
+            f"以你的立场选择下一位发言者(可以偏心).{first_hint}\n"
+            f"announcement 是你当众说的话(如'请XX发言'或'我想先听听XX的看法'). "
+            f"在```json中输出: "
+            '{"seat": "席位id", "announcement": "你当众说的话", "inner_thought": "你的盘算"}'
         )
         ctx = self._build_ctx(task, l3, l4)
-        self._schema_model = PresidingNextSpeaker
-        result = await self.act(task, ctx)
+        result = await self.act(task, ctx, schema_model=PresidingNextSpeaker)
         if isinstance(result, PresidingNextSpeaker):
             return result
         # fallback: 保底轮询
         for sid in all_seat_ids:
             if sid not in spoken_seats:
-                return PresidingNextSpeaker(seat=sid, reason="保底轮询")
-        return PresidingNextSpeaker(seat=all_seat_ids[0], reason="重新轮询")
+                return PresidingNextSpeaker(seat=sid, announcement=f"请{sid}发言。")
+        return PresidingNextSpeaker(seat=all_seat_ids[0], announcement="请继续。")
 
     async def presiding_motion_ruling(
         self,
@@ -224,8 +258,7 @@ class DelegateAgent(BaseAgent):
             '{"ruling": "accept|reject", "reason": "理由", "inner_thought": "你的盘算"}'
         )
         ctx = self._build_ctx(task, l3, l4)
-        self._schema_model = PresidingMotionRuling
-        result = await self.act(task, ctx)
+        result = await self.act(task, ctx, schema_model=PresidingMotionRuling)
         if isinstance(result, PresidingMotionRuling):
             return result
         return PresidingMotionRuling(ruling="reject", reason="fallback")
@@ -246,8 +279,7 @@ class DelegateAgent(BaseAgent):
             '"announcement": "宣布内容", "inner_thought": "你的盘算"}'
         )
         ctx = self._build_ctx(task, l3, l4)
-        self._schema_model = PresidingCaucusSwitch
-        result = await self.act(task, ctx)
+        result = await self.act(task, ctx, schema_model=PresidingCaucusSwitch)
         if isinstance(result, PresidingCaucusSwitch):
             return result
         return PresidingCaucusSwitch(action="keep")

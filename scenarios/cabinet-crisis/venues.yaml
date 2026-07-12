@@ -3,6 +3,7 @@ venues:
     name: 内阁会议室
     kind: main
     timezone: Asia/Shanghai
+    presiding_seat: premier
     decision_rule:
       pass_threshold: majority
       veto_seats: []

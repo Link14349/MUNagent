@@ -82,10 +82,10 @@ def test_invalid_tz_raises(tmp_path: Path) -> None:
         load_scenario(tmp_path)
 
 
-def test_presiding_seat_optional() -> None:
-    """未设 presiding_seat 时为 None(行为不变)."""
+def test_presiding_seat_is_premier() -> None:
+    """内阁危机场景设了 presiding_seat: premier."""
     sc = load_scenario(SCENARIO_DIR)
-    assert sc.venues[0].presiding_seat is None
+    assert sc.venues[0].presiding_seat == "premier"
 
 
 def test_presiding_seat_loaded(tmp_path: Path) -> None:

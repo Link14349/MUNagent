@@ -108,6 +108,10 @@ class Engine:
         seat_specs = self.scenario.seats_of(venue_spec.id)
         seat_ids = [s.id for s in seat_specs]
 
+        # G 段预热(见 11§6)
+        if self.config.engine.cache_warmup:
+            await self._warmup_g_segment(llm)
+
         sm = VenueStateMachine(
             venue_id=venue_spec.id,
             seat_ids=seat_ids,
@@ -126,6 +130,13 @@ class Engine:
         }
         chair = ChairAgent(llm, venue_spec.id, seat_ids)
         dm = DMAgent(llm, self.master_seed)
+        from munagent.agents.recorder import RecorderAgent, estimate_tokens
+        recorder = RecorderAgent(llm)
+
+        # 纪元机制: 每视角追踪摘要(L2)和 L3 累积量
+        epoch_threshold = self.config.engine.epoch_l3_max_tokens
+        summaries: dict[str, str] = {}  # viewer -> 当前 L2 摘要
+        l3_accum: dict[str, list[Event]] = {}  # viewer -> 本纪元 L3 事件
 
         all_events: list[Event] = []
         step = 0
@@ -152,7 +163,7 @@ class Engine:
         while step < self.max_steps and sm.phase != "Adjourned":
             step += 1
             if sm.phase == "ModeratedCaucus":
-                committed = await self._run_mod_step(bus, sm, delegates, chair, dm, venue_spec, seat_ids)
+                committed = await self._run_mod_step(bus, sm, delegates, chair, dm, venue_spec, seat_ids, summaries)
             elif sm.phase == "UnmoderatedCaucus":
                 committed = await self._run_unmod_phase(bus, sm, delegates, chair, venue_spec, seat_ids)
             elif sm.phase == "Voting":
@@ -161,6 +172,11 @@ class Engine:
                 break
 
             all_events.extend(committed)
+
+            # 纪元检查: 各视角 L3 累积超阈值则触发摘要
+            await self._check_epochs(
+                bus, sm, recorder, summaries, l3_accum, committed, seat_ids, epoch_threshold
+            )
 
             # 预算检查
             if sm.phase == "ModeratedCaucus" and sm.budget_exceeded:
@@ -195,7 +211,11 @@ class Engine:
         chair: ChairAgent,
         seat_ids: list[str],
     ) -> str:
-        """路由 next_speaker: 有主持席→DelegateAgent, 无→ChairAgent."""
+        """路由 next_speaker: 有主持席→DelegateAgent, 无→ChairAgent.
+
+        主持席(代表)点名时产生 venue 可见的 speech 事件(大家听到主持者说话);
+        中立主席点名不产生事件(游戏层操作).
+        """
         presider_id = self._get_presider_id(sm)
         visible = await bus.query("chair", venue=sm.venue_id)
         task = TaskSpec(
@@ -211,6 +231,33 @@ class Engine:
                 task, visible, sm.phase, sm.story_time, sm.spoken_this_phase, seat_ids
             )
             target = result.seat
+
+            # 主持席点名是戏内行为, 产生 venue 可见的 speech 事件
+            announcement = result.announcement or f"请{target}发言。"
+            speech_ev = bus.stage(
+                Event(
+                    session_id=self.session_id,
+                    story_time=sm.story_time,
+                    type="speech",
+                    actor=f"seat:{presider_id}",
+                    venue_id=sm.venue_id,
+                    scope="venue",
+                    payload={"text": announcement},
+                ),
+                venue_seats=seat_ids,
+            )
+            if result.inner_thought:
+                bus.stage(
+                    Event(
+                        session_id=self.session_id,
+                        story_time=sm.story_time,
+                        type="speech_thought",
+                        actor=f"seat:{presider_id}",
+                        venue_id=sm.venue_id,
+                        scope="self",
+                        payload={"thought": result.inner_thought, "ref_seq": speech_ev.seq},
+                    ),
+                )
         else:
             result = await chair.next_speaker(
                 task, visible, sm.phase, sm.story_time, sm.spoken_this_phase
@@ -238,6 +285,7 @@ class Engine:
         dm: DMAgent,
         venue_spec: VenueSpec,
         seat_ids: list[str],
+        summaries: dict[str, str] | None = None,
     ) -> list[Event]:
         """一个 ModCaucus 最小步: 点名→代表行动→时钟推进."""
         # 1. 主持者点名
@@ -257,7 +305,8 @@ class Engine:
             seat_id=target_seat,
         )
         ctx = delegate.build_turn_context(
-            turn_task, delegate_visible, sm.phase, sm.story_time, is_presiding
+            turn_task, delegate_visible, sm.phase, sm.story_time, is_presiding,
+            l2_summary=(summaries or {}).get(f"seat:{target_seat}", ""),
         )
         turn_result = await delegate.act(turn_task, ctx)
 
@@ -269,6 +318,19 @@ class Engine:
         elif turn_result.action == "write_directive" and turn_result.directive:
             await self._handle_write_directive(bus, sm, dm, turn_result, target_seat, sm.mod_speech_count, seat_ids)
         elif turn_result.action == "pass":
+            # pass 也产生 venue 可见事件, 让用户看到"XX 选择跳过"
+            bus.stage(
+                Event(
+                    session_id=self.session_id,
+                    story_time=sm.story_time,
+                    type="speech",
+                    actor=f"seat:{target_seat}",
+                    venue_id=sm.venue_id,
+                    scope="venue",
+                    payload={"text": f"(选择跳过)"},
+                ),
+                venue_seats=seat_ids,
+            )
             sm.record_no_speech()
 
         # 4. 时钟推进
@@ -559,8 +621,7 @@ class Engine:
             )
             directive_id = sm.active_vote_directive_id or ""
             ctx = delegate.build_vote_context(vote_task, visible, directive_id, sm.story_time)
-            self._schema_model_override(delegate, DelegateVoteAction)
-            result = await delegate.act(vote_task, ctx)
+            result = await delegate.act(vote_task, ctx, schema_model=DelegateVoteAction)
 
             choice = result.choice if isinstance(result, DelegateVoteAction) else "abstain"
             sm.record_vote(voter, choice)
@@ -633,9 +694,6 @@ class Engine:
         committed = await bus.commit_step()
         self._emit_committed(committed)
         return committed
-
-    def _schema_model_override(self, agent: DelegateAgent, model: type) -> None:
-        agent._schema_model = model
 
     # --- UnmodCaucus ---
 
@@ -863,3 +921,89 @@ class Engine:
                 payload={"text": broadcast_text, "source_directive_ids": [directive_id]},
             ),
         )
+
+    # --- 纪元机制 ---
+
+    async def _check_epochs(
+        self,
+        bus: EventBus,
+        sm: VenueStateMachine,
+        recorder: Any,
+        summaries: dict[str, str],
+        l3_accum: dict[str, list[Event]],
+        new_committed: list[Event],
+        seat_ids: list[str],
+        threshold: int,
+    ) -> None:
+        """检查各视角 L3 是否超阈值, 超了则触发摘要. 见 11§3."""
+        from munagent.agents.recorder import estimate_tokens
+
+        viewers = [f"seat:{sid}" for sid in seat_ids] + ["chair", "dm"]
+        for viewer in viewers:
+            # 累积本视角可见的新事件
+            for e in new_committed:
+                if e.is_visible_to(viewer):
+                    l3_accum.setdefault(viewer, []).append(e)
+
+            accum = l3_accum.get(viewer, [])
+            if not accum:
+                continue
+
+            l3_text = "\n".join(render(e) for e in accum)
+            if estimate_tokens(l3_text) < threshold:
+                continue
+
+            # 触发纪元切换: 书记压缩
+            level = "private" if viewer.startswith("seat:") else "dm-only"
+            if viewer == "chair":
+                level = "venue"
+            old_summary = summaries.get(viewer, "")
+            task = TaskSpec(
+                role="recorder",
+                task="summarize",
+                phase=sm.phase,
+                venue_id=sm.venue_id,
+            )
+            new_summary = await recorder.summarize(task, old_summary, accum, level)
+            summaries[viewer] = new_summary
+
+            # 产生 summary_written 事件
+            bus.stage(
+                Event(
+                    session_id=self.session_id,
+                    story_time=sm.story_time,
+                    type="summary_written",
+                    actor="recorder",
+                    venue_id=sm.venue_id,
+                    scope="dm-only",
+                    payload={
+                        "level": level,
+                        "text": new_summary,
+                        "viewer": viewer,
+                    },
+                ),
+            )
+            await bus.commit_step()
+            self._emit_committed(await bus.query("god", since_seq=len(new_committed) + 1, limit=1))
+
+            # L3 清空, 开始新纪元
+            l3_accum[viewer] = []
+
+    async def _warmup_g_segment(self, llm: LLMClient) -> None:
+        """G 段预热: 会话启动时发一次廉价请求建立缓存. 见 11§6."""
+        from munagent.agents.delegate import G_GLOBAL
+        from munagent.llm.client import ChatMessage, ChatRequest
+
+        request = ChatRequest(
+            role="delegate",
+            task="warmup",
+            messages=[
+                ChatMessage(role="system", content=G_GLOBAL),
+                ChatMessage(role="user", content="理解了. 回复ok."),
+            ],
+            max_tokens=5,
+        )
+        try:
+            await llm.chat(request)
+        except Exception:
+            pass  # 预热失败不影响推演

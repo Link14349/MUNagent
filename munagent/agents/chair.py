@@ -66,7 +66,6 @@ class ChairAgent(BaseAgent):
         story_time: str,
         spoken_seats: list[str],
     ) -> NextSpeakerAction:
-        self._schema_model = NextSpeakerAction
         l3 = "\n".join(render(e) for e in visible_events[-15:]) or "(无近期事件)"
         l4 = (
             f"当前阶段: {phase}\n故事时间: {story_time}\n"
@@ -78,7 +77,7 @@ class ChairAgent(BaseAgent):
         ctx = self.build_context(
             task, g=G_CHAIR, l1="你是会议主席.", l2="", l3=l3, l4=l4
         )
-        result = await self.act(task, ctx)
+        result = await self.act(task, ctx, schema_model=NextSpeakerAction)
         if isinstance(result, NextSpeakerAction):
             return result
         for sid in self.seat_ids:
@@ -94,7 +93,6 @@ class ChairAgent(BaseAgent):
         story_time: str,
     ) -> MotionRulingAction:
         """动议裁决(无主持席的会场). 见 05§3.2."""
-        self._schema_model = MotionRulingAction
         l3 = "\n".join(render(e) for e in visible_events[-10:]) or "(无近期事件)"
         l4 = (
             f"故事时间: {story_time}\n"
@@ -105,7 +103,7 @@ class ChairAgent(BaseAgent):
         ctx = self.build_context(
             task, g=G_CHAIR, l1="你是戏外中立会议主席.", l2="", l3=l3, l4=l4
         )
-        result = await self.act(task, ctx)
+        result = await self.act(task, ctx, schema_model=MotionRulingAction)
         if isinstance(result, MotionRulingAction):
             return result
         return MotionRulingAction(ruling="accept", reason="fallback")
@@ -119,7 +117,6 @@ class ChairAgent(BaseAgent):
         speech_count: int,
         max_speeches: int,
     ) -> PhaseDecisionAction:
-        self._schema_model = PhaseDecisionAction
         l3 = "\n".join(render(e) for e in visible_events[-15:]) or "(无近期事件)"
         l4 = (
             f"当前阶段: {phase}\n故事时间: {story_time}\n"
@@ -131,7 +128,7 @@ class ChairAgent(BaseAgent):
         ctx = self.build_context(
             task, g=G_CHAIR, l1="你是会议主席.", l2="", l3=l3, l4=l4
         )
-        result = await self.act(task, ctx)
+        result = await self.act(task, ctx, schema_model=PhaseDecisionAction)
         if isinstance(result, PhaseDecisionAction):
             return result
         return PhaseDecisionAction(action="keep")
@@ -142,7 +139,6 @@ class ChairAgent(BaseAgent):
         adjudication_text: str,
         venue_ids: list[str],
     ) -> BroadcastDecisionAction:
-        self._schema_model = BroadcastDecisionAction
         l4 = (
             f"DM 判定结果叙述:\n{adjudication_text}\n"
             f"决定如何向各会场({', '.join(venue_ids)})播报. "
@@ -152,7 +148,7 @@ class ChairAgent(BaseAgent):
         ctx = self.build_context(
             task, g=G_CHAIR, l1="你是会议主席.", l2="", l3="", l4=l4
         )
-        result = await self.act(task, ctx)
+        result = await self.act(task, ctx, schema_model=BroadcastDecisionAction)
         if isinstance(result, BroadcastDecisionAction):
             return result
         return BroadcastDecisionAction(
@@ -168,7 +164,6 @@ class ChairAgent(BaseAgent):
         story_time: str,
     ) -> AppealRulingAction:
         """申诉终裁: 中立行使. 见 04§3, 05§3.2."""
-        self._schema_model = AppealRulingAction
         l3 = "\n".join(render(e) for e in visible_events[-10:]) or "(无近期事件)"
         l4 = (
             f"故事时间: {story_time}\n"
@@ -181,7 +176,7 @@ class ChairAgent(BaseAgent):
         ctx = self.build_context(
             task, g=G_CHAIR, l1="你是戏外中立会议主席.", l2="", l3=l3, l4=l4
         )
-        result = await self.act(task, ctx)
+        result = await self.act(task, ctx, schema_model=AppealRulingAction)
         if isinstance(result, AppealRulingAction):
             return result
         return AppealRulingAction(ruling="sustain", reason="fallback: 维持原裁决")

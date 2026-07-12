@@ -93,15 +93,25 @@ class BaseAgent:
         self._max_attempts = max_attempts
         self._max_tokens = max_tokens
 
-    async def act(self, task: TaskSpec, context: AgentContext) -> Any:
-        """执行一次 Agent 循环: 组装 prompt → 调 LLM → 解析 → 修复重试 → fallback."""
+    async def act(
+        self,
+        task: TaskSpec,
+        context: AgentContext,
+        *,
+        schema_model: type[BaseModel] | None = None,
+    ) -> Any:
+        """执行一次 Agent 循环: 组装 prompt → 调 LLM → 解析 → 修复重试 → fallback.
+
+        schema_model 参数临时覆盖 self._schema_model, 不修改实例属性.
+        """
+        effective_schema = schema_model or self._schema_model
         messages = context.to_messages()
         last_err: str | None = None
+        last_raw: str = ""
 
         for attempt in range(self._max_attempts):
             prompt_messages = list(messages)
             if last_err:
-                # 修复提示回填
                 prompt_messages.append(
                     ChatMessage(
                         role="user",
@@ -118,19 +128,45 @@ class BaseAgent:
                 max_tokens=self._max_tokens,
             )
             raw = await self._llm.chat(request)
-            parsed, err = parse_json_block(raw, self._schema_model)
+            last_raw = raw
+            parsed, err = parse_json_block(raw, effective_schema)
             if parsed is not None:
                 return parsed
             last_err = err
 
-        return self.fallback(task)
+        return self.fallback(task, schema_model=effective_schema, last_err=last_err, last_raw=last_raw)
 
-    def fallback(self, task: TaskSpec) -> Any:
+    def fallback(
+        self,
+        task: TaskSpec,
+        *,
+        schema_model: type[BaseModel] | None = None,
+        last_err: str | None = None,
+        last_raw: str = "",
+    ) -> Any:
         """兜底, 按角色定义. 见 05§1 fallback 表."""
-        # 默认: 返回 pass
-        if self._schema_model is not None:
+        import sys
+
+        effective_schema = schema_model or self._schema_model
+        schema_info = ""
+        if effective_schema is not None:
+            schema_info = str(effective_schema.model_json_schema())
+        print(
+            f"[警告] Agent fallback: role={task.role} task={task.task}\n"
+            f"  期望schema: {schema_info}\n"
+            f"  错误: {last_err}\n"
+            f"  LLM 原始输出:\n{last_raw}",
+            file=sys.stderr,
+        )
+        if effective_schema is not None:
+            # 尝试用 schema 的默认值构造一个合法对象
             try:
-                return self._schema_model.model_validate({"action": "pass"})
+                return effective_schema.model_validate({"action": "pass"})
+            except Exception:
+                pass
+            # 如果 schema 没有 action 字段, 尝试空构造
+            try:
+                return effective_schema.model_validate({})
             except Exception:
                 pass
         return {"action": "pass"}
