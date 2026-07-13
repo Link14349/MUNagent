@@ -107,8 +107,8 @@ watch(
   flex-direction: column;
   height: 100%;
   background: var(--panel-bg);
-  border: 1px solid var(--border);
-  border-radius: 8px;
+  border: none;
+  border-radius: 0;
   overflow: hidden;
 }
 .empty {

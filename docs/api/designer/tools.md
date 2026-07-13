@@ -10,7 +10,7 @@
 |---|---|
 | `ToolContext` | `scenario_id` + `AppConfig` + 可选 `chat_id` / `turn`(todo 工具用) |
 | `ToolResult` | `ok` / `summary`(≤200字, 写入 chat tool_call) / `data` |
-| `TOOL_NAMES` | 13 个工具名元组 |
+| `TOOL_NAMES` | 14 个工具名元组 |
 | `execute_tool(ctx, name, arguments) -> ToolResult` | 统一执行; 业务错误不抛异常 |
 | `openai_tool_definitions() -> list[dict]` | OpenAI 兼容 `tools` 数组 |
 
@@ -23,6 +23,7 @@
 | `write_file` | `files.py` | 全量覆盖写入; 返回 validation |
 | `append_file` | `files.py` | 文末追加 `content`; 不存在则创建; `data.new_content` 供 file_edit diff |
 | `insert_file` | `files.py` | 按 `anchor` 整行匹配插入; `position`: after/before/end |
+| `delete_file` | `files.py` | 删除文本文件; 不可删 manifest/venues/background; 返回 validation |
 | `search_wikipedia` | `wikipedia.py` | 全文落盘 `references/wikipedia/{lang}_{slug}.md`; 返回摘要 + 外链 PDF; **检索首选** |
 | `web_search` | `search.py` | `tools.search` provider: tavily/serper/bocha; 配合 `fetch_page` |
 | `search_web_pdf` | `search_pdf.py` | 自动 `filetype:pdf` 搜 PDF 直链; 可选 `site`; 需 `tools.search` |

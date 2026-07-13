@@ -12,11 +12,13 @@ from munagent.designer.tools.base import ToolContext, ToolExecutionError, ToolRe
 from munagent.designer.tools.fetch import DownloadFileArgs, FetchPageArgs, download_file, fetch_page
 from munagent.designer.tools.files import (
     AppendFileArgs,
+    DeleteFileArgs,
     InsertFileArgs,
     ListFilesArgs,
     ReadFileArgs,
     WriteFileArgs,
     append_file,
+    delete_file,
     insert_file,
     list_files,
     read_file,
@@ -71,6 +73,13 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
         insert_file,
     ),
     ToolSpec(
+        "delete_file",
+        "删除场景包内文本文件. 不可删 manifest.yaml / venues.yaml / background.md. "
+        "删席位须先从 venues.yaml 移除对应条目(含 presiding_seat / veto_seats 联动), 再删 seats/<id>.yaml.",
+        DeleteFileArgs,
+        delete_file,
+    ),
+    ToolSpec(
         "search_wikipedia",
         "资料检索首选: Wikipedia API 搜条目, 全文写入 references/wikipedia/*.md, 并返回摘要/可选正文 + 外链 PDF 列表.",
         SearchWikipediaArgs,
@@ -115,7 +124,7 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
     ToolSpec(
         "edit_todo",
         "全量替换当前对话计划清单(一行一项, 非空行以 [ ] 或 [x] 开头). "
-        "每完成 write_file / append_file / insert_file 等计划项后须立即调用, 把对应行改为 [x] .",
+        "每完成 write_file / append_file / insert_file / delete_file 等计划项后须立即调用, 把对应行改为 [x] .",
         EditTodoArgs,
         edit_todo,
     ),

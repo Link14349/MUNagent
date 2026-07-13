@@ -36,6 +36,7 @@ export interface DesignerStore {
   activeFilePath: string | null;
   previewPath: string | null;
   contextFile: string | null;
+  composerDraft: string;
   validation: ValidationIssue[];
   history: HistorySnapshot[];
   totalTokens: number;
@@ -50,6 +51,7 @@ export interface DesignerStore {
   closeTab: (path: string) => void;
   setPreview: (path: string | null) => void;
   refreshFiles: () => Promise<void>;
+  deleteFile: (path: string) => Promise<void>;
   revertEdit: (seq: number) => Promise<void>;
   loadHistory: () => Promise<void>;
   saveSnapshot: (note?: string) => Promise<void>;
@@ -82,6 +84,7 @@ export function useDesigner(scenarioId: string): DesignerStore {
   const activeFilePath = ref<string | null>(null);
   const previewPath = ref<string | null>(null);
   const contextFile = ref<string | null>(null);
+  const composerDraft = ref("");
   const validation = ref<ValidationIssue[]>([]);
   const history = ref<HistorySnapshot[]>([]);
   const totalTokens = ref(0);
@@ -136,6 +139,12 @@ export function useDesigner(scenarioId: string): DesignerStore {
     },
     set contextFile(v: string | null) {
       contextFile.value = v;
+    },
+    get composerDraft() {
+      return composerDraft.value;
+    },
+    set composerDraft(v: string) {
+      composerDraft.value = v;
     },
     get validation() {
       return validation.value;
@@ -270,6 +279,18 @@ export function useDesigner(scenarioId: string): DesignerStore {
           /* file removed */
         }
       }
+    },
+
+    async deleteFile(path) {
+      validation.value = await designerApi.deleteFile(scenarioId, path);
+      store.closeTab(path);
+      if (contextFile.value === path) {
+        contextFile.value = activeFilePath.value;
+      }
+      if (previewPath.value === path) {
+        previewPath.value = null;
+      }
+      await store.refreshFiles();
     },
 
     async revertEdit(seq) {

@@ -48,6 +48,7 @@ def test_openai_tool_definitions_count() -> None:
         "write_file",
         "append_file",
         "insert_file",
+        "delete_file",
         "web_search",
         "search_web_pdf",
         "search_wikipedia",
@@ -145,6 +146,32 @@ async def test_list_read_write_files(tool_ctx: ToolContext) -> None:
     lst = await execute_tool(tool_ctx, "list_files", {"path": ""})
     assert lst.ok
     assert "notes.md" in lst.data["paths"]
+
+
+@pytest.mark.asyncio
+async def test_delete_file(tool_ctx: ToolContext) -> None:
+    await execute_tool(tool_ctx, "write_file", {"path": "notes.md", "content": "# 待删\n"})
+    r = await execute_tool(tool_ctx, "delete_file", {"path": "notes.md"})
+    assert r.ok
+    assert r.data is not None
+    assert r.data["op"] == "delete"
+    assert r.data["new_content"] == ""
+    with pytest.raises(FileNotFoundError):
+        file_svc.get_file(tool_ctx.scenario_id, "notes.md")
+
+
+@pytest.mark.asyncio
+async def test_delete_file_core_rejected(tool_ctx: ToolContext) -> None:
+    r = await execute_tool(tool_ctx, "delete_file", {"path": "venues.yaml"})
+    assert not r.ok
+    assert "不可删除" in (r.data or {}).get("error", "")
+
+
+@pytest.mark.asyncio
+async def test_delete_file_not_found(tool_ctx: ToolContext) -> None:
+    r = await execute_tool(tool_ctx, "delete_file", {"path": "missing.md"})
+    assert not r.ok
+    assert "不存在" in (r.data or {}).get("error", "")
 
 
 @pytest.mark.asyncio

@@ -42,6 +42,10 @@ class InsertFileArgs(BaseModel):
     )
 
 
+class DeleteFileArgs(BaseModel):
+    path: str = Field(description="场景包内相对路径")
+
+
 def merge_append(old: str, content: str) -> str:
     """在文末拼接 content; 文件为空时等价于 write."""
     piece = content.lstrip("\n")
@@ -166,3 +170,34 @@ async def insert_file(ctx: ToolContext, args: InsertFileArgs) -> ToolResult:
         result.data["anchor"] = args.anchor
         result.data["position"] = args.position
     return result
+
+
+async def delete_file(ctx: ToolContext, args: DeleteFileArgs) -> ToolResult:
+    try:
+        file_svc.get_file(ctx.scenario_id, args.path)
+    except FileNotFoundError as exc:
+        raise ToolExecutionError(str(exc)) from exc
+    except ValueError as exc:
+        raise ToolExecutionError(str(exc)) from exc
+    try:
+        result = file_svc.delete_file(ctx.scenario_id, args.path)
+    except FileNotFoundError as exc:
+        raise ToolExecutionError(str(exc)) from exc
+    except PermissionError as exc:
+        raise ToolExecutionError(str(exc)) from exc
+    except ValueError as exc:
+        raise ToolExecutionError(str(exc)) from exc
+    err_count = sum(1 for v in result.validation if v.level == "error")
+    summary = f"delete {args.path}"
+    if err_count:
+        summary += f", 校验 {err_count} 处 error"
+    return ToolResult(
+        ok=True,
+        summary=clip_summary(summary),
+        data={
+            "path": args.path,
+            "op": "delete",
+            "new_content": "",
+            "validation": [v.model_dump() for v in result.validation],
+        },
+    )

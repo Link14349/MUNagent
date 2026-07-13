@@ -2,7 +2,7 @@
 
 > 面向**使用设计 Agent 的人**与**维护 prompt 的开发者**. 代码接口地图见 [docs/api/designer/tools.md](../api/designer/tools.md).
 >
-> 当前共 **13** 个工具. 验证脚本: `scripts/verify_designer_tools.py`(全链), `scripts/verify_search_tools.py`(检索专项).
+> 当前共 **14** 个工具. 验证脚本: `scripts/verify_designer_tools.py`(全链), `scripts/verify_search_tools.py`(检索专项).
 
 ## 配置前提
 
@@ -126,6 +126,24 @@ search_web_pdf("Suez Crisis 1956 declassified")
 | `end` | 等同 `append_file` |
 
 锚点未找到或不唯一时返回错误, 需 `read_file` 后复制 exact 标题行.
+
+#### `delete_file`
+
+删除场景包内文本文件; 返回结构校验 `issues`. **不可删** `manifest.yaml` / `venues.yaml` / `background.md`.
+
+删席位须两步联动:
+
+1. `write_file` 改 `venues.yaml`, 从对应会场 `seats` 列表移除 `{id, name}`, 并检查 `presiding_seat` / `veto_seats`
+2. `delete_file` 删 `seats/<seat_id>.yaml`
+
+```json
+{"path": "seats/removed_delegate.yaml"}
+{"path": "references/wikipedia/en_Obsolete_Topic.md"}
+```
+
+| 可删 | 不可删 |
+|------|--------|
+| `seats/*.yaml`, `crisis_arcs.yaml`, `story_design.md`, `stats.yaml`, `references/` 下文本 | `manifest.yaml`, `venues.yaml`, `background.md` |
 
 ---
 

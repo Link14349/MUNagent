@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from "vue";
+import { computed, nextTick, onMounted, ref, watch } from "vue";
 import type { ChatRecord } from "../../types/designer";
 import { injectDesigner } from "../../composables/useDesigner";
 import { mergeToolCallsForDisplay, recordStableKey } from "../../utils/mergeToolCalls";
@@ -18,7 +18,12 @@ const emit = defineEmits<{
 }>();
 
 const d = injectDesigner();
-const input = ref("");
+const input = computed({
+  get: () => d.composerDraft,
+  set: (v: string) => {
+    d.composerDraft = v;
+  },
+});
 const sendError = ref("");
 const inputEl = ref<HTMLTextAreaElement | null>(null);
 const streamRef = ref<HTMLElement | null>(null);
@@ -46,12 +51,12 @@ const emptyGuide =
   "描述你想做的历史场景, Agent 可检索资料、生成与修改场景文件, 并协助一致性检查。";
 
 async function send() {
-  const text = input.value.trim();
+  const text = d.composerDraft.trim();
   if (!text || d.activeTask || d.readonly) return;
   sendError.value = "";
   try {
     await d.sendMessage(text);
-    input.value = "";
+    d.composerDraft = "";
     resetInputHeight();
     stickToBottom.value = true;
     scrollToBottom(true);
@@ -61,7 +66,7 @@ async function send() {
 }
 
 function fillChip(text: string) {
-  input.value = text;
+  d.composerDraft = text;
   nextTick(() => {
     autoResize();
     inputEl.value?.focus();
@@ -88,7 +93,7 @@ function onKeydown(e: KeyboardEvent) {
   }
 }
 
-const canSend = computed(() => !!input.value.trim() && !d.readonly && !d.activeTask);
+const canSend = computed(() => !!d.composerDraft.trim() && !d.readonly && !d.activeTask);
 
 function onPreview(path: string) {
   if (d.mode === "chat") {
@@ -112,17 +117,34 @@ function onStreamScroll() {
 
 function scrollToBottom(force = false) {
   if (!force && !stickToBottom.value) return;
-  nextTick(() => {
+  const run = () => {
     const el = streamRef.value;
     if (!el) return;
     el.scrollTop = el.scrollHeight;
+  };
+  nextTick(() => {
+    run();
+    requestAnimationFrame(run);
   });
 }
+
+onMounted(() => {
+  stickToBottom.value = true;
+  scrollToBottom(true);
+  nextTick(() => autoResize());
+});
 
 watch(() => d.records.length, () => scrollToBottom());
 watch(() => d.streamingText, () => scrollToBottom());
 watch(
   () => d.activeChatId,
+  () => {
+    stickToBottom.value = true;
+    scrollToBottom(true);
+  }
+);
+watch(
+  () => d.mode,
   () => {
     stickToBottom.value = true;
     scrollToBottom(true);

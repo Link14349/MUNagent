@@ -65,36 +65,28 @@ function onResizeDblClick() {
 <template>
   <aside :class="['designer-sidebar', side, { collapsed, resizing }]">
     <template v-if="!collapsed">
-      <button
-        v-if="side === 'right'"
-        type="button"
-        class="edge-toggle"
-        :title="`折叠${label}`"
-        @click="emit('update:collapsed', true)"
-      >
-        ▶
-      </button>
       <div class="sidebar-body">
         <slot />
       </div>
-      <button
-        v-if="side === 'left'"
-        type="button"
-        class="edge-toggle"
-        :title="`折叠${label}`"
-        @click="emit('update:collapsed', true)"
-      >
-        ◀
-      </button>
-      <div
-        class="resize-handle"
-        role="separator"
-        aria-orientation="vertical"
-        :aria-label="`调整${label}宽度`"
-        :title="`拖动调整宽度, 双击恢复默认 (${defaultWidth}px)`"
-        @pointerdown="onResizePointerDown"
-        @dblclick="onResizeDblClick"
-      />
+      <div class="sidebar-edge">
+        <button
+          type="button"
+          class="edge-toggle"
+          :title="`折叠${label}`"
+          @click="emit('update:collapsed', true)"
+        >
+          {{ side === "left" ? "◀" : "▶" }}
+        </button>
+        <div
+          class="resize-handle"
+          role="separator"
+          aria-orientation="vertical"
+          :aria-label="`调整${label}宽度`"
+          :title="`拖动调整宽度, 双击恢复默认 (${defaultWidth}px)`"
+          @pointerdown="onResizePointerDown"
+          @dblclick="onResizeDblClick"
+        />
+      </div>
     </template>
     <button
       v-else
@@ -118,16 +110,10 @@ function onResizeDblClick() {
   background: var(--panel-bg);
 }
 .designer-sidebar.left {
-  border-right: 1px solid var(--border);
+  border-right: none;
 }
 .designer-sidebar.right {
-  border-left: 1px solid var(--border);
-}
-.designer-sidebar.left .resize-handle {
-  order: 10;
-}
-.designer-sidebar.right .resize-handle {
-  order: -10;
+  border-left: none;
 }
 .sidebar-body {
   flex: 1;
@@ -138,25 +124,32 @@ function onResizeDblClick() {
   display: flex;
   flex-direction: column;
 }
+.sidebar-edge {
+  display: flex;
+  flex-shrink: 0;
+  align-self: stretch;
+  background: var(--panel-bg);
+}
+.designer-sidebar.left .sidebar-edge {
+  border-left: 1px solid var(--border);
+}
+.designer-sidebar.right .sidebar-edge {
+  border-right: 1px solid var(--border);
+  order: -1;
+}
 .edge-toggle {
   flex-shrink: 0;
-  width: 22px;
-  align-self: stretch;
+  width: 12px;
   border: none;
-  background: var(--panel-bg);
+  background: transparent;
   color: var(--text-muted);
   cursor: pointer;
   padding: 0;
-  font-size: 0.65rem;
+  font-size: 0.55rem;
+  line-height: 1;
   display: flex;
   align-items: center;
   justify-content: center;
-}
-.designer-sidebar.left .edge-toggle {
-  border-left: 1px solid var(--border);
-}
-.designer-sidebar.right .edge-toggle {
-  border-right: 1px solid var(--border);
 }
 .edge-toggle:hover {
   background: var(--hover);
@@ -164,22 +157,21 @@ function onResizeDblClick() {
 }
 .resize-handle {
   flex-shrink: 0;
-  width: 5px;
+  width: 3px;
   align-self: stretch;
   cursor: col-resize;
   touch-action: none;
   position: relative;
-  z-index: 2;
 }
 .resize-handle::after {
   content: "";
   position: absolute;
-  inset: 0 -3px;
+  inset: 0 -2px;
 }
 .resize-handle:hover,
 .designer-sidebar.resizing .resize-handle {
   background: var(--accent);
-  opacity: 0.45;
+  opacity: 0.35;
 }
 .collapsed-rail {
   width: 100%;
@@ -192,6 +184,12 @@ function onResizeDblClick() {
   align-items: center;
   padding-top: 0.85rem;
   color: var(--text-muted);
+}
+.designer-sidebar.left.collapsed {
+  border-right: 1px solid var(--border);
+}
+.designer-sidebar.right.collapsed {
+  border-left: 1px solid var(--border);
 }
 .collapsed-rail:hover {
   background: var(--hover);

@@ -31,7 +31,7 @@ LLM_ROLE = "designer"
 MAX_TOOL_CALLS_PER_TASK = 50
 MAX_PSEUDO_TOOL_NUDGES = 3
 TOOL_TIMEOUT_S = 600.0  # 单次工具执行上限 10 分钟
-_FILE_MUTATION_TOOLS = frozenset({"write_file", "append_file", "insert_file"})
+_FILE_MUTATION_TOOLS = frozenset({"write_file", "append_file", "insert_file", "delete_file"})
 # write_file 的 content 嵌在 tool arguments JSON 里; thinking + 长正文易触顶默认 4096 输出上限
 DESIGNER_MAX_TOKENS = 65_536
 DESIGNER_MAX_TOKENS_RETRY = 65_536
@@ -532,6 +532,9 @@ def _args_summary(call: ToolCallDelta) -> str:
         anchor = args.get("anchor") or "?"
         anchor_short = anchor if len(str(anchor)) <= 40 else str(anchor)[:39] + "…"
         return clip_summary(f"{path} {pos} {anchor_short!r} (+{n} 字符)")
+
+    if call.name == "delete_file":
+        return clip_summary(str(args.get("path") or "?"))
 
     if call.name == "edit_todo":
         todo = args.get("todo")

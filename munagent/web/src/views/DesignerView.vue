@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { RouterLink, useRoute, useRouter } from "vue-router";
-import { designerApi } from "../api/designerApi";
 import { provideDesigner } from "../composables/useDesigner";
 import { SIDEBAR_DEFAULTS, useSidebarWidths } from "../composables/useSidebarWidths";
 import FileTree from "../components/designer/FileTree.vue";
@@ -12,6 +11,7 @@ import ChatListPane from "../components/designer/ChatListPane.vue";
 import ValidationChip from "../components/designer/ValidationChip.vue";
 import HistoryDrawer from "../components/designer/HistoryDrawer.vue";
 import DesignerSidebar from "../components/designer/DesignerSidebar.vue";
+import ExportDialog from "../components/designer/ExportDialog.vue";
 
 const route = useRoute();
 const router = useRouter();
@@ -19,6 +19,7 @@ const scenarioId = computed(() => route.params.id as string);
 const d = provideDesigner(scenarioId.value);
 
 const historyOpen = ref(false);
+const exportOpen = ref(false);
 const leftCollapsed = ref(false);
 const rightCollapsed = ref(false);
 
@@ -103,30 +104,6 @@ function onValidationJump(path: string) {
   void d.openFile(path);
 }
 
-async function exportZip() {
-  const warn = d.validation.some((v) => v.level === "error");
-  if (warn && !confirm("校验仍有错误, 仍要导出?")) return;
-  const includeRaw = confirm("是否包含 references/raw/ 原始文件?\n确定=包含, 取消=不包含");
-  try {
-    await designerApi.exportZip(scenarioId.value, includeRaw);
-  } catch (e) {
-    alert(e instanceof Error ? e.message : String(e));
-  }
-}
-
-async function createFile() {
-  const path = prompt("新建文件路径 (如 notes.md 或 seats/new.yaml)");
-  if (!path?.trim()) return;
-  const content = path.endsWith(".md") ? "# 新文件\n\n" : "";
-  try {
-    await designerApi.putFile(scenarioId.value, path.trim(), content);
-    await d.refreshFiles();
-    await d.openFile(path.trim());
-  } catch (e) {
-    alert(e instanceof Error ? e.message : String(e));
-  }
-}
-
 async function duplicate() {
   const newId = prompt("副本 ID (a-z0-9-)", `${scenarioId.value}-copy`);
   if (!newId?.trim()) return;
@@ -163,7 +140,7 @@ function formatTokens(n: number) {
       </div>
       <div class="right">
         <button type="button" @click="historyOpen = true">🕘 历史</button>
-        <button type="button" class="export" :class="{ warn: d.validation.some((v) => v.level === 'error') }" @click="exportZip">
+        <button type="button" class="export" :class="{ warn: d.validation.some((v) => v.level === 'error') }" @click="exportOpen = true">
           导出
         </button>
       </div>
@@ -186,7 +163,6 @@ function formatTokens(n: number) {
           :nodes="d.fileTree"
           :selected="d.activeFilePath"
           @select="onTreeSelect"
-          @create-file="createFile"
         />
       </DesignerSidebar>
 
@@ -264,6 +240,12 @@ function formatTokens(n: number) {
     </footer>
 
     <HistoryDrawer :open="historyOpen" @close="historyOpen = false" />
+    <ExportDialog
+      :open="exportOpen"
+      :scenario-id="scenarioId"
+      :has-errors="d.validation.some((v) => v.level === 'error')"
+      @close="exportOpen = false"
+    />
   </div>
 </template>
 
@@ -350,7 +332,7 @@ function formatTokens(n: number) {
 }
 .center-pane {
   min-height: 0;
-  padding: 0.5rem;
+  padding: 0;
   overflow: hidden;
 }
 .chat-main {

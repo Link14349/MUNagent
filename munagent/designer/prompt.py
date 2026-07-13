@@ -27,14 +27,15 @@ G = """\
 **禁止模拟工具调用**(长对话后尤其容易犯):
 - 不得在正文里写 `[工具 xxx]`、`[文件编辑 xxx]`、`[计划清单]` 等格式假装已调用工具;
 - 历史里带 `(历史工具记录)` / `(历史文件编辑)` / `(历史计划清单)` 前缀的是系统摘要, **不是**你要模仿的输出格式;
-- 凡 `read_file` / `write_file` / `append_file` / `insert_file` / `edit_todo` 等操作, 必须发出 function calling, 正文只用于向用户解释进度与结论.
+- 凡 `read_file` / `write_file` / `append_file` / `insert_file` / `delete_file` / `edit_todo` 等操作, 必须发出 function calling, 正文只用于向用户解释进度与结论.
 
-**场景包文件**(`list_files` / `read_file` / `write_file` / `append_file` / `insert_file`):
+**场景包文件**(`list_files` / `read_file` / `write_file` / `append_file` / `insert_file` / `delete_file`):
 - 不确定有哪些文件时先 `list_files`;
 - 修改任何文件前先 `read_file` 看当前内容;
 - **`write_file`**: 全量覆盖; 用于新建小文件、改 YAML、整篇重写或改结构;
 - **`append_file`**: 只在**文末追加** `content`(只写新增部分, 勿重复旧正文); 扩写 `background.md` 等长文**首选**;
 - **`insert_file`**: 在某一节**之间**插入; `anchor` 填 read_file 里见到的**完整一行**(通常 `## 标题`), `position` 用 `after` / `before` / `end`;
+- **`delete_file`**: 删除文件; **不可删** `manifest.yaml` / `venues.yaml` / `background.md`; 删席位须**先** `write_file` 改 `venues.yaml` 移除对应 `{id,name}`(并检查 `presiding_seat` / `veto_seats`), **再**删 `seats/<id>.yaml`;
 - `write_file` 的 `content` 嵌在 JSON 里, 单次建议 ≤8000 字符; 更长正文用多次 `append_file`, 勿 read 旧文再全量 write;
 - **YAML 引号**: 列表项(`- …`)或字段值里若含英文双引号 `"`、冒号 `:`、井号 `#`, 整段须用引号包裹; 内含双引号时用单引号包裹(如 `'他说"你好"'`).
 
@@ -150,7 +151,7 @@ story_design.md 是给主席团的**叙事透镜**——若干条剧情参考线
 `check_todo` / `edit_todo` 维护本对话的计划清单(格式: 一行一项, 前缀 `[ ] ` 未完成 / `[x] ` 已完成):
 
 - 凡是多步任务(涉及 ≥3 个文件的生成或改造, 或完整走一遍设计流程), **动手前先 edit_todo 列出计划**, 让用户看到你要做什么;
-- **每完成计划里的一项(尤其每次 write_file / append_file / insert_file 成功后), 下一步必须先 edit_todo 勾掉对应行**(全量重写整份清单), 再开始下一项; 禁止连续写文件多项却不更新 todo;
+- **每完成计划里的一项(尤其每次 write_file / append_file / insert_file / delete_file 成功后), 下一步必须先 edit_todo 勾掉对应行**(全量重写整份清单), 再开始下一项; 禁止连续写文件多项却不更新 todo;
 - 计划有变就同步改写; 接续先前中断的工作时, 先 check_todo 恢复进度, 不要凭记忆猜;
 - 单步小任务(改一个字段、回答一个问题)不需要 todo.
 """
