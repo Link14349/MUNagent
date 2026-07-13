@@ -9,7 +9,8 @@ export type ChatRecordType =
   | "tool_call"
   | "file_edit"
   | "system"
-  | "usage";
+  | "usage"
+  | "todo";
 
 export interface ChatMeta {
   id: string;
@@ -73,6 +74,11 @@ export interface UsageRecord extends ChatRecordBase {
   tool_calls: number;
 }
 
+export interface TodoRecord extends ChatRecordBase {
+  type: "todo";
+  text: string;
+}
+
 export type ChatRecord =
   | ChatMetaRecord
   | UserMessageRecord
@@ -80,7 +86,8 @@ export type ChatRecord =
   | ToolCallRecord
   | FileEditRecord
   | SystemRecord
-  | UsageRecord;
+  | UsageRecord
+  | TodoRecord;
 
 export interface ValidationIssue {
   level: "error" | "warning";
@@ -127,8 +134,17 @@ export interface HistoryDiffEntry {
   diff?: string;
 }
 
+export interface RevertConflict {
+  detail: string;
+  path: string;
+  current_content: string;
+  expected_content: string;
+  original_content: string;
+}
+
 export type DesignerEvent =
   | { seq: number; type: "task_started"; chat_id: string; task_id: string; turn: number }
+  | { seq: number; type: "think_delta"; chat_id: string; delta: string }
   | { seq: number; type: "text_delta"; chat_id: string; delta: string }
   | { seq: number; type: "record_appended"; chat_id: string; record: ChatRecord }
   | {

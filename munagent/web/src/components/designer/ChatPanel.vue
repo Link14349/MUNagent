@@ -17,6 +17,7 @@ const emit = defineEmits<{
 
 const d = injectDesigner();
 const input = ref("");
+const sendError = ref("");
 const inputEl = ref<HTMLTextAreaElement | null>(null);
 const streamRef = ref<HTMLElement | null>(null);
 const focused = ref(false);
@@ -57,10 +58,15 @@ const emptyGuide =
 async function send() {
   const text = input.value.trim();
   if (!text || d.activeTask || d.readonly) return;
-  input.value = "";
-  resetInputHeight();
-  await d.sendMessage(text);
-  scrollBottom();
+  sendError.value = "";
+  try {
+    await d.sendMessage(text);
+    input.value = "";
+    resetInputHeight();
+    scrollBottom();
+  } catch (e) {
+    sendError.value = e instanceof Error ? e.message : "发送失败";
+  }
 }
 
 function fillChip(text: string) {
@@ -142,6 +148,7 @@ watch(() => d.streamingText, scrollBottom);
         <button type="button" @click="d.abortTask()">中止</button>
       </div>
       <template v-else>
+        <p v-if="sendError" class="send-error">{{ sendError }}</p>
         <div v-if="d.mode === 'edit' && d.contextFile" class="ctx">
           <span class="ctx-tag">{{ d.contextFile }}</span>
           <button type="button" class="x" title="取消附带" @click="d.contextFile = null">×</button>
@@ -262,6 +269,12 @@ watch(() => d.streamingText, scrollBottom);
   flex-shrink: 0;
   padding: 0.5rem 0.85rem 0.85rem;
   background: var(--bg);
+}
+.send-error {
+  margin: 0 0 0.45rem;
+  font-size: 0.82rem;
+  color: #b42318;
+  line-height: 1.4;
 }
 .ctx {
   display: flex;

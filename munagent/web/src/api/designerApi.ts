@@ -1,7 +1,8 @@
 /**
- * 设计器 API — 文件/历史/chats 走真实后端; Agent/SSE 待接入.
+ * 设计器 API — 文件/历史/chats/Agent 任务走真实后端.
  */
 
+import { createSseClient } from "../composables/useSse";
 import type {
   ChatMeta,
   ChatRecord,
@@ -10,6 +11,7 @@ import type {
   FileNode,
   HistoryDiffEntry,
   HistorySnapshot,
+  RevertConflict,
   ValidationIssue,
 } from "../types/designer";
 import type { ScenarioSummary } from "../api";
@@ -23,7 +25,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: res.statusText }));
-    throw new Error(err.detail || res.statusText);
+    throw new Error(typeof err.detail === "string" ? err.detail : JSON.stringify(err.detail));
   }
   if (res.status === 204) return undefined as T;
   const ct = res.headers.get("content-type") || "";
@@ -57,8 +59,9 @@ export const designerApi = {
     };
   },
 
-  subscribeEvents: (_scenarioId: string, _fn: EventListener) => {
-    return () => {};
+  subscribeEvents: (scenarioId: string, fn: EventListener) => {
+    const client = createSseClient(`/api/scenarios/${scenarioId}/design/events`, fn);
+    return () => client.close();
   },
 
   getChat: async (scenarioId: string, chatId: string) => {
@@ -88,11 +91,34 @@ export const designerApi = {
       method: "DELETE",
     }),
 
-  sendMessage: async (_scenarioId: string, _chatId: string, _text: string, _contextFile?: string) => {
-    throw new Error("设计 Agent 尚未接入");
+  sendMessage: async (
+    scenarioId: string,
+    chatId: string,
+    text: string,
+    contextFile?: string
+  ) => {
+    const res = await fetch(`/api/scenarios/${scenarioId}/chats/${chatId}/messages`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        text,
+        context_file: contextFile ?? null,
+      }),
+    });
+    if (res.status === 409) {
+      const err = await res.json().catch(() => ({ detail: "另一对话正在生成" }));
+      throw new Error(typeof err.detail === "string" ? err.detail : "另一对话正在生成");
+    }
+    if (res.status !== 202) {
+      const err = await res.json().catch(() => ({ detail: res.statusText }));
+      throw new Error(typeof err.detail === "string" ? err.detail : res.statusText);
+    }
+    return res.json() as Promise<{ task_id: string }>;
   },
 
-  abort: (_scenarioId: string) => {},
+  abort: (scenarioId: string) => {
+    void fetch(`/api/scenarios/${scenarioId}/design/abort`, { method: "POST" });
+  },
 
   getFile: (scenarioId: string, path: string) =>
     request<{ path: string; content: string }>(
@@ -119,8 +145,22 @@ export const designerApi = {
       { method: "POST", body: JSON.stringify({ new_path: newPath }) }
     ),
 
-  revert: async () => {
-    throw new Error("撤销依赖设计 Agent, 尚未接入");
+  revert: async (scenarioId: string, chatId: string, seq: number) => {
+    const res = await fetch(
+      `/api/scenarios/${scenarioId}/chats/${chatId}/revert/${seq}`,
+      { method: "POST" }
+    );
+    if (res.status === 409) {
+      const body = await res.json().catch(() => ({}));
+      const detail = (body.detail ?? {}) as RevertConflict;
+      const err = new Error(detail.detail || "内容已漂移") as Error & { conflict?: RevertConflict };
+      err.conflict = detail;
+      throw err;
+    }
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: res.statusText }));
+      throw new Error(typeof err.detail === "string" ? err.detail : res.statusText);
+    }
   },
 
   listHistory: (scenarioId: string) =>

@@ -2,7 +2,7 @@
 import { computed, ref, watch } from "vue";
 import { marked } from "marked";
 import { injectDesigner } from "../../composables/useDesigner";
-import { designerApi } from "../../api/designerMock";
+import { designerApi } from "../../api/designerApi";
 
 const d = injectDesigner();
 const content = ref("");

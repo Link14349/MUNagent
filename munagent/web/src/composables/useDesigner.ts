@@ -192,7 +192,10 @@ export function useDesigner(scenarioId: string): DesignerStore {
     },
 
     async sendMessage(text) {
-      if (!activeChatId.value || activeTask.value) return;
+      if (!activeChatId.value) {
+        throw new Error("对话尚未就绪, 请刷新页面后重试");
+      }
+      if (activeTask.value) return;
       activeTask.value = true;
       streamingText.value = "";
       try {
@@ -327,12 +330,15 @@ export function useDesigner(scenarioId: string): DesignerStore {
         totalTokens.value += ev.record.input_tokens + ev.record.output_tokens;
       }
     }
-    if (ev.type === "task_finished" && ev.chat_id === activeChatId.value) {
+    if (ev.type === "task_finished") {
       activeTask.value = false;
-      streamingText.value = "";
-      designerApi.getDesign(scenarioId).then((s) => {
-        chats.value = s.chats;
-      });
+      if (ev.chat_id === activeChatId.value) {
+        streamingText.value = "";
+        designerApi.getDesign(scenarioId).then((s) => {
+          chats.value = s.chats;
+        });
+        void store.refreshFiles();
+      }
     }
     if (ev.type === "task_started") activeTask.value = true;
     if (ev.type === "files_changed") void store.refreshFiles();

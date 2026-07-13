@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Query
-from fastapi.responses import Response
+import json
 
+from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi.responses import Response, StreamingResponse
+
+from munagent.designer.revert import RevertDriftError, revert_file_edit
 from munagent.designer.scenario import chats as chat_svc
 from munagent.designer.scenario import package as scenario_svc
 from munagent.designer.scenario import files as file_svc
@@ -18,7 +21,11 @@ from munagent.server.design_schemas import (
     ChatRenameRequest,
     DesignerState,
     PutFileBody,
+    RevertConflictBody,
+    SendMessageRequest,
+    SendMessageResponse,
 )
+from munagent.server.design_task import design_tasks
 
 router = APIRouter(prefix="/api/scenarios/{scenario_id}")
 
@@ -43,7 +50,7 @@ def get_design_state(scenario_id: str) -> DesignerState:
         return DesignerState(
             title=title,
             readonly=readonly,
-            active_task=None,
+            active_task=design_tasks.get_active_task(scenario_id),
             chats=chats,
             validation=validation,
             file_tree=file_tree,
@@ -137,7 +144,11 @@ def history_diff(scenario_id: str, snap_id: str) -> list:
 @router.post("/history/{snap_id}/restore")
 def restore_history(scenario_id: str, snap_id: str) -> dict:
     try:
-        result = history_svc.restore_snapshot(scenario_id, snap_id, active_task=False)
+        result = history_svc.restore_snapshot(
+            scenario_id,
+            snap_id,
+            active_task=design_tasks.has_active_task(scenario_id),
+        )
         return {"validation": result.validation}
     except Exception as exc:
         raise _http_from_exc(exc) from exc
@@ -192,3 +203,93 @@ def delete_chat(scenario_id: str, chat_id: str) -> dict:
         return {"status": "deleted"}
     except Exception as exc:
         raise _http_from_exc(exc) from exc
+
+
+@router.get("/design/events")
+async def design_events(
+    scenario_id: str,
+    request: Request,
+    after: int | None = Query(None, ge=0),
+) -> StreamingResponse:
+    try:
+        _find_scenario_for_sse(scenario_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    last_event_id = request.headers.get("last-event-id")
+    if after is None and last_event_id:
+        try:
+            after = int(last_event_id)
+        except ValueError:
+            after = None
+
+    async def stream():
+        async for event in design_tasks.subscribe(scenario_id, after):
+            if event.get("type") == "heartbeat":
+                yield ": heartbeat\n\n"
+                continue
+            payload = json.dumps(event, ensure_ascii=False)
+            seq = event.get("seq")
+            yield f"id: {seq}\nevent: message\ndata: {payload}\n\n"
+
+    return StreamingResponse(stream(), media_type="text/event-stream")
+
+
+@router.post("/design/abort")
+def abort_design_task(scenario_id: str) -> dict:
+    design_tasks.abort(scenario_id)
+    return {"status": "aborting"}
+
+
+@router.post("/chats/{chat_id}/messages", status_code=202, response_model=SendMessageResponse)
+async def send_chat_message(scenario_id: str, chat_id: str, body: SendMessageRequest) -> SendMessageResponse:
+    try:
+        task_id = await design_tasks.launch_message_task(
+            scenario_id,
+            chat_id,
+            body.text.strip(),
+            context_file=body.context_file,
+        )
+        return SendMessageResponse(task_id=task_id)
+    except Exception as exc:
+        raise _http_from_exc(exc) from exc
+
+
+@router.post("/chats/{chat_id}/revert/{seq}")
+def revert_chat_edit(scenario_id: str, chat_id: str, seq: int) -> dict:
+    if design_tasks.has_active_task(scenario_id):
+        raise HTTPException(status_code=409, detail="有 Agent 任务在运行, 请先中止")
+    try:
+        record = revert_file_edit(scenario_id, chat_id, seq)
+        design_tasks.emit(scenario_id, {"type": "record_appended", "chat_id": chat_id, "record": record})
+        path = _file_edit_path(scenario_id, chat_id, seq)
+        if path:
+            design_tasks.emit(scenario_id, {"type": "files_changed", "paths": [path]})
+        return {"record": record}
+    except RevertDriftError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail=RevertConflictBody(
+                detail=exc.message,
+                path=exc.path,
+                current_content=exc.current_content,
+                expected_content=exc.expected_content,
+                original_content=exc.original_content,
+            ).model_dump(),
+        ) from exc
+    except Exception as exc:
+        raise _http_from_exc(exc) from exc
+
+
+def _find_scenario_for_sse(scenario_id: str) -> None:
+    from munagent.designer.scenario.package import _find_scenario
+
+    _find_scenario(scenario_id)
+
+
+def _file_edit_path(scenario_id: str, chat_id: str, seq: int) -> str | None:
+    for row in chat_svc.get_chat_records(scenario_id, chat_id):
+        if row.get("seq") == seq and row.get("type") == "file_edit":
+            path = row.get("path")
+            return path if isinstance(path, str) else None
+    return None

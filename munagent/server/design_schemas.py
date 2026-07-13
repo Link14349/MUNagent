@@ -44,6 +44,23 @@ class ChatDetailResponse(BaseModel):
     todo: str | None = None
 
 
+class SendMessageRequest(BaseModel):
+    text: str = Field(min_length=1)
+    context_file: str | None = None
+
+
+class SendMessageResponse(BaseModel):
+    task_id: str
+
+
+class RevertConflictBody(BaseModel):
+    detail: str
+    path: str
+    current_content: str
+    expected_content: str
+    original_content: str
+
+
 class ScenarioSummaryEnriched(BaseModel):
     id: str
     title: str
