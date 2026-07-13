@@ -2,7 +2,9 @@
 import { computed, nextTick, ref, watch } from "vue";
 import type { ChatRecord } from "../../types/designer";
 import { injectDesigner } from "../../composables/useDesigner";
+import { mergeToolCallsForDisplay, recordStableKey } from "../../utils/mergeToolCalls";
 import ChatMessage from "./ChatMessage.vue";
+import MarkdownBody from "./MarkdownBody.vue";
 import TodoPlanBar from "./TodoPlanBar.vue";
 
 const props = defineProps<{
@@ -21,27 +23,15 @@ const sendError = ref("");
 const inputEl = ref<HTMLTextAreaElement | null>(null);
 const streamRef = ref<HTMLElement | null>(null);
 const focused = ref(false);
+/** 用户未主动上滑时, 流式/新消息才自动滚到底 */
+const stickToBottom = ref(true);
+const SCROLL_STICK_PX = 64;
 
 const displayRecords = computed(() => {
-  const items: Array<ChatRecord | { type: "stream"; text: string }> = [];
-  let toolRun = 0;
-  for (const r of d.records) {
-    if (r.type === "meta") continue;
-    if (r.type === "tool_call") {
-      toolRun++;
-      items.push(r);
-      continue;
-    }
-    if (toolRun >= 3) {
-      const last = items[items.length - 1];
-      if (last && last.type === "tool_call") {
-        /* keep individual for now; aggregate UI optional */
-      }
-    }
-    toolRun = 0;
-    items.push(r);
-  }
-  return items;
+  const merged = mergeToolCallsForDisplay(
+    d.records.filter((r) => r.type !== "meta")
+  );
+  return merged;
 });
 
 const chips = computed(() => {
@@ -63,7 +53,8 @@ async function send() {
     await d.sendMessage(text);
     input.value = "";
     resetInputHeight();
-    scrollBottom();
+    stickToBottom.value = true;
+    scrollToBottom(true);
   } catch (e) {
     sendError.value = e instanceof Error ? e.message : "发送失败";
   }
@@ -109,14 +100,34 @@ function onPreview(path: string) {
   }
 }
 
-function scrollBottom() {
+function isNearBottom(el: HTMLElement) {
+  return el.scrollHeight - el.scrollTop - el.clientHeight <= SCROLL_STICK_PX;
+}
+
+function onStreamScroll() {
+  const el = streamRef.value;
+  if (!el) return;
+  stickToBottom.value = isNearBottom(el);
+}
+
+function scrollToBottom(force = false) {
+  if (!force && !stickToBottom.value) return;
   nextTick(() => {
-    streamRef.value?.scrollTo({ top: streamRef.value.scrollHeight });
+    const el = streamRef.value;
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
   });
 }
 
-watch(() => d.records.length, scrollBottom);
-watch(() => d.streamingText, scrollBottom);
+watch(() => d.records.length, () => scrollToBottom());
+watch(() => d.streamingText, () => scrollToBottom());
+watch(
+  () => d.activeChatId,
+  () => {
+    stickToBottom.value = true;
+    scrollToBottom(true);
+  }
+);
 </script>
 
 <template>
@@ -128,9 +139,9 @@ watch(() => d.streamingText, scrollBottom);
       <button type="button" class="link" :disabled="d.readonly" @click="d.newChat()">+ 新对话</button>
     </header>
 
-    <div ref="streamRef" class="stream">
+    <div ref="streamRef" class="stream" @scroll="onStreamScroll">
       <p v-if="!displayRecords.length && !d.streamingText" class="guide">{{ emptyGuide }}</p>
-      <template v-for="(rec, idx) in displayRecords" :key="idx">
+      <template v-for="(rec, idx) in displayRecords" :key="recordStableKey(rec, idx)">
         <ChatMessage
           v-if="rec.type !== 'stream'"
           :record="rec"
@@ -138,7 +149,9 @@ watch(() => d.streamingText, scrollBottom);
           @revert="d.revertEdit"
         />
       </template>
-      <div v-if="d.streamingText" class="bubble agent streaming">{{ d.streamingText }}</div>
+      <div v-if="d.streamingText" class="bubble agent streaming">
+        <MarkdownBody :source="d.streamingText" />
+      </div>
     </div>
 
     <footer class="composer-wrap">

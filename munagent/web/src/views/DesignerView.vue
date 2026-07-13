@@ -171,6 +171,7 @@ function formatTokens(n: number) {
         @update:collapsed="leftCollapsed = $event"
       >
         <FileTree
+          :scenario-id="scenarioId"
           :nodes="d.fileTree"
           :selected="d.activeFilePath"
           @select="onTreeSelect"
@@ -216,12 +217,18 @@ function formatTokens(n: number) {
         @update:collapsed="rightCollapsed = $event"
       >
         <div class="preview-stack">
-          <div class="tree-half">
-            <FileTree compact :nodes="d.fileTree" :selected="d.previewPath" @select="onTreeSelect" />
-          </div>
-          <div class="preview-half">
-            <PreviewPane @open-in-edit="() => d.previewPath && onOpenInEdit(d.previewPath)" />
-          </div>
+          <FileTree
+            v-show="!d.previewPath"
+            :scenario-id="scenarioId"
+            compact
+            :nodes="d.fileTree"
+            @select="onTreeSelect"
+          />
+          <PreviewPane
+            v-show="!!d.previewPath"
+            @open-in-edit="() => d.previewPath && onOpenInEdit(d.previewPath)"
+            @back="d.setPreview(null)"
+          />
         </div>
       </DesignerSidebar>
     </div>
@@ -331,14 +338,10 @@ function formatTokens(n: number) {
   flex-direction: column;
   height: 100%;
   min-height: 0;
-  gap: 0.5rem;
-  padding: 0.5rem 0.5rem 0.5rem 0;
+  padding: 0.35rem 0.35rem 0.35rem 0;
 }
-.tree-half {
-  flex: 0 0 40%;
-  min-height: 0;
-}
-.preview-half {
+.preview-stack :deep(.tree),
+.preview-stack :deep(.preview) {
   flex: 1;
   min-height: 0;
 }

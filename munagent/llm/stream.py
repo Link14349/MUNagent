@@ -47,6 +47,7 @@ class UsageDelta(BaseModel):
     completion_tokens: int = 0
     cache_hit_tokens: int = 0
     cache_miss_tokens: int = 0
+    finish_reason: str | None = None
 
 
 StreamDelta = ThinkDelta | TextDelta | ToolCallDelta | UsageDelta
@@ -62,12 +63,17 @@ class ChunkParser:
     def __init__(self) -> None:
         self._tool_calls: dict[int, dict[str, str]] = {}
         self.usage_raw: dict[str, Any] | None = None
+        self.finish_reason: str | None = None
 
     def feed(self, chunk: dict[str, Any]) -> list[StreamDelta]:
         deltas: list[StreamDelta] = []
         if chunk.get("usage"):
             self.usage_raw = chunk["usage"]
         choices = chunk.get("choices") or []
+        if choices:
+            fr = choices[0].get("finish_reason")
+            if fr:
+                self.finish_reason = str(fr)
         if not choices:
             return deltas
         delta = choices[0].get("delta") or {}
@@ -106,6 +112,7 @@ class ChunkParser:
                     completion_tokens=int(self.usage_raw.get("completion_tokens") or 0),
                     cache_hit_tokens=hit,
                     cache_miss_tokens=miss,
+                    finish_reason=self.finish_reason,
                 )
             )
         return deltas

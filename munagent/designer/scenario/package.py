@@ -196,8 +196,12 @@ class DuplicateScenarioRequest(BaseModel):
 
 
 def _load_yaml(path: Path) -> Any:
-    with path.open(encoding="utf-8") as f:
-        return yaml.safe_load(f)
+    try:
+        with path.open(encoding="utf-8") as f:
+            return yaml.safe_load(f)
+    except yaml.YAMLError as exc:
+        rel = path.name if path.parent.name == "seats" else path.as_posix()
+        raise ValueError(f"YAML 语法错误: {rel}: {exc}") from exc
 
 
 def _read_text(path: Path) -> str:

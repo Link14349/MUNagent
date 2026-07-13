@@ -18,6 +18,52 @@ from munagent.security.sanitize import sanitize_exception, sanitize_text
 
 MessageRole = Literal["system", "user", "assistant", "tool"]
 
+_EMPTY_TOOL_ARGS = "{}"
+
+
+def is_valid_tool_arguments(raw: str | None) -> bool:
+    """OpenAI function calling 要求 arguments 为合法 JSON 字符串."""
+    text = (raw or "").strip()
+    if not text:
+        return True
+    try:
+        json.loads(text)
+    except json.JSONDecodeError:
+        return False
+    return True
+
+
+def sanitize_tool_arguments(raw: str | None) -> str:
+    """回喂 API 前规范化 arguments; 非法则降为 `{}` 避免整轮 400."""
+    text = (raw or "").strip()
+    if not text:
+        return _EMPTY_TOOL_ARGS
+    if is_valid_tool_arguments(text):
+        return text
+    return _EMPTY_TOOL_ARGS
+
+
+def parse_tool_arguments(raw: str | None) -> tuple[dict[str, Any], str | None]:
+    """解析工具 arguments; 非法时返回空 dict 与错误说明(供 tool 回喂)."""
+    text = (raw or "").strip()
+    if not text:
+        return {}, None
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError as exc:
+        preview = text[:80] + ("…" if len(text) > 80 else "")
+        err = f"arguments JSON 无效 ({exc.msg}, pos {exc.pos}): {preview!r}"
+        if exc.msg == "Unterminated string starting at":
+            err += (
+                " — 常见原因: content 过长, 模型在 function calling 的 arguments 字符串中途被截断"
+                "(completion max_tokens 或 thinking 占满输出预算). "
+                "请 read_file 现有正文后分 2-3 次 write_file, 每次 content 建议 ≤3000 字符."
+            )
+        return {}, err
+    if not isinstance(parsed, dict):
+        return {}, f"arguments 须为 JSON 对象, 实际为 {type(parsed).__name__}"
+    return parsed, None
+
 
 class ChatMessage(BaseModel):
     role: MessageRole
@@ -33,7 +79,10 @@ class ChatMessage(BaseModel):
                 {
                     "id": c.id,
                     "type": "function",
-                    "function": {"name": c.name, "arguments": c.arguments},
+                    "function": {
+                        "name": c.name,
+                        "arguments": sanitize_tool_arguments(c.arguments),
+                    },
                 }
                 for c in self.tool_calls
             ]
@@ -132,6 +181,12 @@ class LLMClient:
                 return content
             except (httpx.HTTPStatusError, httpx.TimeoutException, httpx.TransportError) as exc:
                 last_exc = exc
+                if isinstance(exc, httpx.HTTPStatusError) and exc.response is not None:
+                    body = exc.response.text[:500]
+                    if body.strip():
+                        last_exc = RuntimeError(
+                            f"{exc}; response: {sanitize_text(body)}"
+                        )
                 if attempt + 1 >= self._max_retries:
                     break
                 await asyncio.sleep(2**attempt)
@@ -222,6 +277,12 @@ class LLMClient:
                 if yielded:
                     raise RuntimeError(sanitize_text(sanitize_exception(exc))) from exc
                 last_exc = exc
+                if isinstance(exc, httpx.HTTPStatusError) and exc.response is not None:
+                    body = exc.response.text[:500]
+                    if body.strip():
+                        last_exc = RuntimeError(
+                            f"{exc}; response: {sanitize_text(body)}"
+                        )
                 if attempt + 1 >= self._max_retries:
                     break
                 await asyncio.sleep(2**attempt)

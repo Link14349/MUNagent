@@ -1,9 +1,11 @@
 <script setup lang="ts">
-import { ref, watch } from "vue";
+import { computed, watch } from "vue";
 import type { FileNode } from "../../types/designer";
+import { useFileTreeExpand } from "../../composables/useFileTreeExpand";
 import FileTreeNode from "./FileTreeNode.vue";
 
 const props = defineProps<{
+  scenarioId: string;
   nodes: FileNode[];
   selected?: string | null;
   compact?: boolean;
@@ -15,29 +17,10 @@ const emit = defineEmits<{
   createFile: [];
 }>();
 
-/** 记录折叠的目录 path; 默认全部展开 */
-const collapsed = ref(new Set<string>());
+const { collapsed, toggleDir, isExpanded, revealPath } = useFileTreeExpand(props.scenarioId);
 
-function toggleDir(path: string) {
-  const next = new Set(collapsed.value);
-  if (next.has(path)) next.delete(path);
-  else next.add(path);
-  collapsed.value = next;
-}
-
-function isExpanded(path: string) {
-  return !collapsed.value.has(path);
-}
-
-function revealPath(path: string) {
-  const parts = path.split("/");
-  if (parts.length <= 1) return;
-  const next = new Set(collapsed.value);
-  for (let i = 1; i < parts.length; i++) {
-    next.delete(parts.slice(0, i).join("/"));
-  }
-  collapsed.value = next;
-}
+/** 订阅 composable 内的 collapsed, 否则折叠状态变化不会触发重渲染 */
+const collapsedKey = computed(() => [...collapsed.value].sort().join("\0"));
 
 watch(
   () => props.selected,
@@ -54,7 +37,7 @@ watch(
       <span>文件</span>
       <button type="button" class="link" @click="emit('createFile')">+ 新建</button>
     </div>
-    <ul class="root">
+    <ul class="root" :data-collapsed-key="collapsedKey">
       <FileTreeNode
         v-for="node in nodes"
         :key="node.path"

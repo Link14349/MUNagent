@@ -2,14 +2,15 @@ import { ref, shallowRef, type InjectionKey, inject, provide } from "vue";
 import type {
   ChatMeta,
   ChatRecord,
+  DesignerEvent,
   DesignerMode,
   FileNode,
   HistorySnapshot,
   ValidationIssue,
 } from "../types/designer";
-import type { DesignerEvent } from "../types/designer";
 import { designerApi } from "../api/designerApi";
 import { eventsAfterSeq } from "../utils/sseSeq";
+import { mergeToolCallsForDisplay } from "../utils/mergeToolCalls";
 
 export interface OpenFileTab {
   path: string;
@@ -180,7 +181,7 @@ export function useDesigner(scenarioId: string): DesignerStore {
     async selectChat(id) {
       activeChatId.value = id;
       const detail = await designerApi.getChat(scenarioId, id);
-      records.value = detail.records;
+      records.value = mergeToolCallsForDisplay(detail.records);
       currentTodo.value = detail.todo;
       streamingText.value = "";
     },
@@ -321,7 +322,11 @@ export function useDesigner(scenarioId: string): DesignerStore {
       streamingText.value += ev.delta;
     }
     if (ev.type === "record_appended" && ev.chat_id === activeChatId.value) {
-      records.value = [...records.value, ev.record];
+      const next =
+        ev.record.type === "tool_call"
+          ? mergeToolCallsForDisplay([...records.value, ev.record])
+          : [...records.value, ev.record];
+      records.value = next;
       if (ev.record.type === "agent_text") streamingText.value = "";
       if (ev.record.type === "todo" && "text" in ev.record && typeof ev.record.text === "string") {
         currentTodo.value = ev.record.text;

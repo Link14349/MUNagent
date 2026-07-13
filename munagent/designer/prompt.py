@@ -1,5 +1,6 @@
 # Prompt的拼接按照不同工作段来管理, 然后再进行拼接
 
+from munagent.designer.scenario import chats as chat_svc
 from munagent.designer.scenario import files as file_svc
 
 # System Prompt
@@ -23,10 +24,17 @@ G = """\
 
 你通过 function calling 操作场景包——读写、检索、下载都必须调工具, **不要在对话里假装已经修改了文件**.
 
+**禁止模拟工具调用**(长对话后尤其容易犯):
+- 不得在正文里写 `[工具 xxx]`、`[文件编辑 xxx]`、`[计划清单]` 等格式假装已调用工具;
+- 历史里带 `(历史工具记录)` / `(历史文件编辑)` / `(历史计划清单)` 前缀的是系统摘要, **不是**你要模仿的输出格式;
+- 凡 `read_file` / `write_file` / `edit_todo` 等操作, 必须发出 function calling, 正文只用于向用户解释进度与结论.
+
 **场景包文件**(`list_files` / `read_file` / `write_file`):
 - 不确定有哪些文件时先 `list_files`;
 - 修改任何文件前先 `read_file` 看当前内容;
 - 写入用 `write_file`, 是全量覆盖(不是 diff), 每次提交完整文件正文.
+- **长文件写入**: `content` 嵌在 tool arguments 的 JSON 字符串里, 单次建议 **≤3000 字符**; 更长时先 `read_file`, 再分 2-3 次 `write_file`(每次=现有正文+新章节). 一次生成超长正文常因输出 token 截断导致 JSON 无效.
+- **YAML 引号**: 列表项(`- …`)或字段值里若含英文双引号 `"`、冒号 `:`、井号 `#`, 整段须用引号包裹; 内含双引号时用单引号包裹(如 `'他说"你好"'`).
 
 **资料检索**(按此顺序, 参数见各工具 schema):
 1. `search_wikipedia` — 建背景, 全文自动写入 `references/wikipedia/`, 从返回的 `pdf_urls` 找文献; **不要**对维基用 `fetch_page`;
@@ -38,7 +46,7 @@ G = """\
 
 **计划清单**(`check_todo` / `edit_todo`): 多步任务先立计划, 详见下文「todo 纪律」.
 
-单任务工具调用累计 ≤30 次; 失败时读错误信息换思路, 勿对同一调用空转重试.
+单任务工具调用累计 ≤50 次; 失败时读错误信息换思路, 勿对同一调用空转重试.
 
 # 模联历史委(危机联动)的运行逻辑
 
@@ -140,8 +148,8 @@ story_design.md 是给主席团的**叙事透镜**——若干条剧情参考线
 `check_todo` / `edit_todo` 维护本对话的计划清单(格式: 一行一项, 前缀 `[ ] ` 未完成 / `[x] ` 已完成):
 
 - 凡是多步任务(涉及 ≥3 个文件的生成或改造, 或完整走一遍设计流程), **动手前先 edit_todo 列出计划**, 让用户看到你要做什么;
-- 每完成一项立即 edit_todo 勾掉它(全量重写整份清单), 计划有变就同步改写;
-- 接续先前中断的工作时, 先 check_todo 恢复进度, 不要凭记忆猜;
+- **每完成计划里的一项(尤其每次 write_file 成功后), 下一步必须先 edit_todo 勾掉对应行**(全量重写整份清单), 再开始下一项; 禁止连续 write_file 多项却不更新 todo;
+- 计划有变就同步改写; 接续先前中断的工作时, 先 check_todo 恢复进度, 不要凭记忆猜;
 - 单步小任务(改一个字段、回答一个问题)不需要 todo.
 """
 
@@ -164,8 +172,13 @@ def _read_text_file(scenario_id: str, path: str) -> str | None:
         return None
 
 
-def build_L(scenario_id: str, *, context_file: str | None = None) -> str:
-    """L 段: 随场景变化的 system 注入(文件清单 + manifest/venues 全文 + 当前文件)."""
+def build_L(
+    scenario_id: str,
+    *,
+    context_file: str | None = None,
+    chat_id: str | None = None,
+) -> str:
+    """L 段: 随场景变化的 system 注入(文件清单 + manifest/venues 全文 + 当前文件 + todo)."""
     lines = ["# 当前场景包上下文", "", f"场景 ID: {scenario_id}", ""]
     paths = sorted(file_svc.list_package_files(scenario_id))
     lines.append("## 文件清单")
@@ -196,6 +209,21 @@ def build_L(scenario_id: str, *, context_file: str | None = None) -> str:
         lines.append(f"📎 {context_file}")
         lines.append("用户说「这个」「当前文件」时指代该路径.")
         lines.append("")
+
+    if chat_id:
+        try:
+            records = chat_svc.get_chat_records(scenario_id, chat_id)
+            todo = chat_svc.derive_todo(records)
+        except FileNotFoundError:
+            todo = None
+        if todo:
+            done = todo.count("[x] ")
+            total = sum(1 for ln in todo.splitlines() if ln.strip())
+            lines.append("## 当前计划清单")
+            lines.append(f"进度 {done}/{total}; 完成一项后须 edit_todo 勾掉对应行:")
+            lines.append(todo.rstrip())
+            lines.append("")
+
     return "\n".join(lines)
 
 

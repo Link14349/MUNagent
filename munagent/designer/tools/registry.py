@@ -91,7 +91,8 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
     ),
     ToolSpec(
         "edit_todo",
-        "全量替换当前对话计划清单(一行一项, 非空行以 [ ] 或 [x] 开头); 写入 chats 记录.",
+        "全量替换当前对话计划清单(一行一项, 非空行以 [ ] 或 [x] 开头). "
+        "每完成 write_file 等计划项后须立即调用, 把对应行改为 [x] .",
         EditTodoArgs,
         edit_todo,
     ),

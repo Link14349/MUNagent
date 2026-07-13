@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
-import type { ChatRecord, ToolCallRecord } from "../../types/designer";
+import type { ChatRecord } from "../../types/designer";
 import { diffLineStats, parseUnifiedDiff } from "../../utils/diff";
+import { formatToolArgs } from "../../utils/formatToolArgs";
 import { injectDesigner } from "../../composables/useDesigner";
+import MarkdownBody from "./MarkdownBody.vue";
 
 const props = defineProps<{ record: ChatRecord; expandedTools?: boolean }>();
 
@@ -28,24 +30,33 @@ const diffLines = computed(() => {
   return parseUnifiedDiff(props.record.diff);
 });
 
-function toolIcon(t: ToolCallRecord) {
-  if (t.status === "running") return "⏳";
-  if (t.status === "error") return "✗";
-  return "✓";
-}
+const toolArgsDisplay = computed(() => {
+  if (props.record.type !== "tool_call") return "";
+  return formatToolArgs(props.record);
+});
+
 </script>
 
 <template>
   <div v-if="record.type === 'user_message'" class="bubble user">{{ record.text }}</div>
 
   <div v-else-if="record.type === 'agent_text'" class="bubble agent">
-    <div class="md">{{ record.text }}</div>
+    <MarkdownBody :source="record.text" />
   </div>
 
-  <div v-else-if="isTool && record.type === 'tool_call'" class="tool-card" @click="showTool = !showTool">
-    <span>{{ toolIcon(record) }}</span>
+  <div
+    v-else-if="isTool && record.type === 'tool_call'"
+    class="tool-card"
+    :class="record.status"
+    @click="showTool = !showTool"
+  >
+    <span class="tool-icon" :class="record.status" aria-hidden="true">
+      <span v-if="record.status === 'running'" class="spinner" />
+      <span v-else-if="record.status === 'error'">✗</span>
+      <span v-else>✓</span>
+    </span>
     <span class="name">{{ record.tool }}</span>
-    <span class="args">{{ record.args_summary }}</span>
+    <span class="args">{{ toolArgsDisplay }}</span>
     <pre v-if="showTool && record.result_summary" class="result">{{ record.result_summary }}</pre>
   </div>
 
@@ -78,12 +89,12 @@ function toolIcon(t: ToolCallRecord) {
   border-radius: 10px;
   font-size: 0.9rem;
   line-height: 1.5;
-  white-space: pre-wrap;
 }
 .user {
   margin-left: auto;
   background: var(--accent-soft);
   color: var(--text);
+  white-space: pre-wrap;
 }
 .agent {
   background: var(--panel-bg);
@@ -98,12 +109,55 @@ function toolIcon(t: ToolCallRecord) {
   background: var(--panel-bg);
   cursor: pointer;
 }
+.tool-card {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.15rem 0.35rem;
+}
+.tool-card.running {
+  opacity: 0.92;
+}
+.tool-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1rem;
+  height: 1rem;
+  flex-shrink: 0;
+  transition: color 0.15s ease;
+}
+.tool-icon.ok {
+  color: #055d20;
+}
+.tool-icon.error {
+  color: #9a031e;
+}
+.spinner {
+  width: 0.72rem;
+  height: 0.72rem;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent, #666);
+  border-radius: 50%;
+  animation: tool-spin 0.7s linear infinite;
+}
+@keyframes tool-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
 .tool-card .name {
   font-weight: 600;
   margin: 0 0.35rem;
+  flex-shrink: 0;
 }
 .args {
   color: var(--text-muted);
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .result {
   margin: 0.35rem 0 0;

@@ -214,7 +214,7 @@ MediaWiki API 搜条目; **全文自动写入** `references/wikipedia/{lang}_{sl
 | 5 | 写 background | `write_file` background.md |
 | 6 | 席位 / 弧线 / manifest | `write_file` + `read_file` 联动 |
 
-多步时先 `edit_todo` 列计划, 做完一项就 `edit_todo` 勾掉.
+多步时先 `edit_todo` 列计划; **每完成 write_file 须立即 `edit_todo` 勾掉对应行**. L 段每步注入最新 todo 全文.
 
 ---
 
@@ -222,7 +222,7 @@ MediaWiki API 搜条目; **全文自动写入** `references/wikipedia/{lang}_{sl
 
 | 项 | 说明 |
 |----|------|
-| 工具调用上限 | 每任务 ≤ 30 次 |
+| 工具调用上限 | 每任务 ≤ 50 次 |
 | 路径 | 不得写 `references/` 以外二进制; 不得 `..` 逃逸 |
 | `tool_call` 摘要 | ≤200 字; 大正文在文件里, 用 `read_file` |
 | PDF 403 | 换搜索结果中下一条 URL |

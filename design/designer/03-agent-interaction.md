@@ -126,7 +126,7 @@ src/
 
 ```
 messages = [system(角色与纪律), 上下文(文件清单+manifest 摘要+📎当前文件), …对话历史, user 消息]
-重复(工具调用累计 ≤30 次):
+重复(工具调用累计 ≤50 次):
     流式调用 chat/completions(tools=工具定义, stream=True)
     逐增量分发: reasoning_content → think_delta / content → text_delta / tool_calls → 按 index 拼参数
     若无 tool_calls: 本段 content 落盘为 agent_text, 任务结束(即"最终回复")
@@ -134,7 +134,7 @@ messages = [system(角色与纪律), 上下文(文件清单+manifest 摘要+📎
           messages 追加 assistant(content+tool_calls) 与各 tool 结果, 进入下一步
 ```
 
-- **终止条件 = 响应无 tool_calls**; 工具调用累计超 30 次则任务以 `failed` 结束并落 system 记录;
+- **终止条件 = 响应无 tool_calls**; 工具调用累计超 50 次则任务以 `failed` 结束并落 system 记录;
 - **回喂纪律**: assistant 消息只回喂 `content` + `tool_calls`, `reasoning_content` 一律不回喂(协议要求, 塞回去会报错);
 - `write_file` 是全量内容写入; chats/ 里 file_edit 记录的 unified diff 由后端对比新旧内容生成, 模型不需要产出 diff 格式;
 - 每步之间检查中止标志(abort 接口置位), 中止时已落盘的记录与编辑保留.
@@ -158,7 +158,7 @@ messages = [system(角色与纪律), 上下文(文件清单+manifest 摘要+📎
 ### 7.4 其余前端可见约定
 
 - agent 的工具面(9 个): `read_file / write_file / list_files / web_search / fetch_page / download_file / mineru_convert / check_todo / edit_todo`, 全部限制在本场景包目录内(路径逃逸后端拒绝); 前端工具卡图标按此枚举;
-- agent 每轮开场自动获得: 场景包文件清单 + manifest 摘要 + 当前文件(若有 📎)——用户不需要手动"给上下文"; **todo 不在此列**, 见下条;
+- agent 每轮开场自动获得: 场景包文件清单 + manifest 摘要 + 当前文件(若有 📎)——用户不需要手动"给上下文"; **todo 注入 L 段(动态上下文, 不影响 G 段缓存)**, 见下条;
 - **`check_todo` / `edit_todo`**(01§2.4 的数据层): `ToolContext` 除 `scenario_id + AppConfig` 外还需 `chat_id`(这两个工具是 chat 级, 不是场景级——loop 本来就知道当前跑在哪个 chat 上, 传入即可); `check_todo` 无参数, 返回当前 todo 全文(无则 `"(暂无 todo)"`); `edit_todo(todo: string)` 是**全量替换**: 先校验每个非空行以 `[ ] `/`[x] ` 开头(不合规返回业务错误字符串让模型自纠, 不抛异常), 校验通过后追加一条 `todo` 记录并推 `record_appended`, 工具返回值就是刚写入的全文(模型不需要紧接着再调一次 check_todo 确认);
-- **todo 不自动注入 system 上下文**: 高频变化的内容放进 system 前缀会打穿 prompt 缓存(每次 edit_todo 后前缀都变, 后续所有请求都無法命中缓存); agent 感知 todo 靠对话历史里的既往 `edit_todo` 调用、该工具的返回值、或主动 `check_todo`, 靠 system prompt 里的使用纪律引导("多步任务先 edit_todo 立计划, 每完成一项就更新"), 不是机制强制;
+- **todo 不进 G 静态段, 但每步刷新 L 段**: 最新 todo 全文写入动态 L 段(与文件清单同段, 每步 loop 重建), 避免多步任务内忘记勾项; 另在每次 `write_file` 成功且清单仍有未完成项时, loop 注入一条 ephemeral 系统提醒(不落盘); 纪律见 system prompt「todo 纪律」;
 - **thinking 纪律(设计器)**: 思维链实时推前端(think_delta)但**不落 chats/**——它不进模型上下文、不影响可复现性, 落盘只占体积; 刷新后思考块消失是预期. 注意这与推演侧纪律相反(代表 Agent 的思维链对其他席位保密), 两侧各自成立, 不要互相"统一".

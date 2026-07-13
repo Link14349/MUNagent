@@ -8,6 +8,7 @@ from typing import Any
 import httpx
 import pytest
 
+from munagent.llm.client import parse_tool_arguments, sanitize_tool_arguments
 from munagent.llm import (
     ChatMessage,
     LLMClient,
@@ -278,3 +279,30 @@ def test_chat_message_tool_payload() -> None:
     }
     plain = ChatMessage(role="user", content="hi")
     assert plain.to_payload() == {"role": "user", "content": "hi"}
+
+
+def test_sanitize_tool_arguments_replaces_invalid_json() -> None:
+    bad = '{"content": "# incomplete'
+    assert sanitize_tool_arguments(bad) == "{}"
+    payload = ChatMessage(
+        role="assistant",
+        content="",
+        tool_calls=[ToolCall(id="c1", name="write_file", arguments=bad)],
+    ).to_payload()
+    assert payload["tool_calls"][0]["function"]["arguments"] == "{}"
+
+
+def test_parse_tool_arguments_invalid() -> None:
+    args, err = parse_tool_arguments('{"path":')
+    assert args == {}
+    assert err is not None
+    assert "JSON 无效" in err
+
+
+def test_parse_tool_arguments_truncated_write_hint() -> None:
+    truncated = '{"path": "background.md", "content": "# ' + "x" * 200
+    args, err = parse_tool_arguments(truncated)
+    assert args == {}
+    assert err is not None
+    assert "Unterminated string" in err
+    assert "分 2-3 次 write_file" in err

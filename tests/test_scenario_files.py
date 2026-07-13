@@ -59,6 +59,25 @@ def test_create_chat(user_root: Path) -> None:
     assert chats[0].id == chat.id
 
 
+def test_invalid_seat_yaml_returns_issue_not_crash(user_root: Path) -> None:
+    seats = user_root / "seats"
+    seats.mkdir(exist_ok=True)
+    # Agent 常见错误: 列表项里只给片段加引号, 其余中文裸露导致 ParserError
+    (seats / "bad.yaml").write_text(
+        "id: bad\nname: Bad\nvenue: main\npublic:\n  title: x\n  faction: x\n  stance: x\n"
+        "private:\n  resources:\n    - \"波拿巴\"这个名字\n",
+        encoding="utf-8",
+    )
+    issues = file_svc.validate_package_issues(user_root)
+    assert any(
+        i.path == "seats/bad.yaml" and i.level == "error" and "YAML" in i.message
+        for i in issues
+    )
+    title, _, _, validation = file_svc.scenario_design_meta("edit-me")
+    assert title
+    assert any(i.path == "seats/bad.yaml" for i in validation)
+
+
 def test_venues_seats_consistency_builtin() -> None:
     from munagent.designer.scenario import package as scenario_svc
 

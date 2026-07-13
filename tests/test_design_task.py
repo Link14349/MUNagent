@@ -40,7 +40,7 @@ def reset_design_tasks(user_scenario: str) -> None:
     design_tasks._runtimes.clear()
 
 
-async def _fake_loop(self: Agent, user_prompt: str, *, max_steps: int = 30) -> LoopResult:
+async def _fake_loop(self: Agent, user_prompt: str, *, max_steps: int = 50) -> LoopResult:
     self.add_message(
         ChatMessage(role="user", content=user_prompt),
         chat_record={"type": "user_message", "text": user_prompt},

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import difflib
 import json
+import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import Enum
@@ -14,8 +15,9 @@ from munagent.config.models import AppConfig
 from munagent.designer import prompt as prompt_seg
 from munagent.designer.scenario import chats as chat_svc
 from munagent.designer.scenario import files as file_svc
-from munagent.designer.tools import ToolContext, execute_tool, openai_tool_definitions
-from munagent.llm import ChatMessage, LLMClient
+from munagent.designer.tools.base import SUMMARY_MAX_LEN, ToolContext, clip_summary
+from munagent.designer.tools.registry import execute_tool, openai_tool_definitions
+from munagent.llm import ChatMessage, LLMClient, parse_tool_arguments, sanitize_tool_arguments
 from munagent.llm.stream import (
     TextDelta,
     ThinkDelta,
@@ -26,8 +28,19 @@ from munagent.llm.stream import (
 from munagent.security.sanitize import sanitize_text
 
 LLM_ROLE = "designer"
-MAX_TOOL_CALLS_PER_TASK = 30
+MAX_TOOL_CALLS_PER_TASK = 50
+MAX_PSEUDO_TOOL_NUDGES = 3
 TOOL_TIMEOUT_S = 600.0  # 单次工具执行上限 10 分钟
+# write_file 的 content 嵌在 tool arguments JSON 里; thinking + 长正文易触顶默认 4096 输出上限
+DESIGNER_MAX_TOKENS = 16_384
+DESIGNER_MAX_TOKENS_RETRY = 32_768
+
+# 历史 replay 曾用 assistant+[工具 xxx] 格式, 长对话后模型会模仿; 检测用于拦截与清洗.
+_PSEUDO_TOOL_LINE_RE = re.compile(
+    r"^\s*\[(?:工具|文件编辑|计划清单)\b",
+    re.MULTILINE,
+)
+_PSEUDO_TOOL_INLINE_RE = re.compile(r"\[(?:工具|文件编辑)\s+\w+")
 
 
 class LoopResult(str, Enum):
@@ -74,6 +87,7 @@ class Agent:
     turn: int = field(default=0, init=False)
     _tool_calls_total: int = field(default=0, init=False)
     _usage_totals: UsageDelta | None = field(default=None, init=False)
+    _pseudo_tool_nudges: int = field(default=0, init=False)
 
     def __post_init__(self) -> None:
         if self.llm is None:
@@ -81,12 +95,13 @@ class Agent:
 
     # --- 对外主入口(用户框架中的 loop) ---
 
-    async def loop(self, user_prompt: str, *, max_steps: int = 30) -> LoopResult:
+    async def loop(self, user_prompt: str, *, max_steps: int = 50) -> LoopResult:
         """一次用户消息触发的 Agent 任务."""
         self.messages = self.get_chat_messages()
         self.turn = self._next_turn()
         self._tool_calls_total = 0
         self._usage_totals = None
+        self._pseudo_tool_nudges = 0
 
         self.add_message(
             ChatMessage(role="user", content=user_prompt),
@@ -108,6 +123,39 @@ class Agent:
                 self._usage_totals = usage
 
             if not tool_calls:
+                if content.strip() and looks_like_pseudo_tools(content):
+                    if self._pseudo_tool_nudges >= MAX_PSEUDO_TOOL_NUDGES:
+                        self._persist_chat_record(
+                            {
+                                "type": "system",
+                                "kind": "error",
+                                "text": "多次在正文中模拟工具调用而未使用 function calling, 任务中止",
+                            }
+                        )
+                        result = LoopResult.FAILED
+                        break
+                    self._pseudo_tool_nudges += 1
+                    self.messages.append(ChatMessage(role="assistant", content=content))
+                    self.messages.append(
+                        ChatMessage(
+                            role="user",
+                            content=(
+                                "(系统) 你刚才在正文里写了 `[工具 xxx]` / `[文件编辑 xxx]` 等格式, "
+                                "但没有发出 function calling, 这些文字不会执行任何操作. "
+                                "请立即通过 tools 真正调用; 若只是向用户说明进度, 用普通 Markdown, "
+                                "不要伪造工具行."
+                            ),
+                        )
+                    )
+                    self._persist_chat_record(
+                        {
+                            "type": "system",
+                            "kind": "error",
+                            "text": "拦截模拟工具调用, 要求改用 function calling",
+                        }
+                    )
+                    continue
+
                 if content.strip():
                     self.add_message(
                         ChatMessage(role="assistant", content=content),
@@ -119,7 +167,12 @@ class Agent:
                 role="assistant",
                 content=content or "",
                 tool_calls=[
-                    ToolCall(id=c.id, name=c.name, arguments=c.arguments) for c in tool_calls
+                    ToolCall(
+                        id=c.id,
+                        name=c.name,
+                        arguments=sanitize_tool_arguments(c.arguments),
+                    )
+                    for c in tool_calls
                 ],
             )
             self.messages.append(assistant)
@@ -185,7 +238,11 @@ class Agent:
         messages.append(
             ChatMessage(
                 role="system",
-                content=prompt_seg.build_L(self.scenario_id, context_file=self.context_file),
+                content=prompt_seg.build_L(
+                    self.scenario_id,
+                    context_file=self.context_file,
+                    chat_id=self.chat_id,
+                ),
             )
         )
 
@@ -234,8 +291,25 @@ class Agent:
     def _aborted(self) -> bool:
         return self.abort_check is not None and self.abort_check()
 
-    async def _llm_step(self) -> tuple[str, list[ToolCallDelta], UsageDelta | None] | None:
+    def _refresh_L_message(self) -> None:
+        """每步 LLM 调用前刷新 L 段(文件清单/todo 等), 避免多步任务内上下文过期."""
+        l_idx = 2 if prompt_seg.H.strip() else 1
+        if len(self.messages) <= l_idx or self.messages[l_idx].role != "system":
+            return
+        self.messages[l_idx] = ChatMessage(
+            role="system",
+            content=prompt_seg.build_L(
+                self.scenario_id,
+                context_file=self.context_file,
+                chat_id=self.chat_id,
+            ),
+        )
+
+    async def _llm_step(
+        self, *, max_tokens: int = DESIGNER_MAX_TOKENS
+    ) -> tuple[str, list[ToolCallDelta], UsageDelta | None] | None:
         """单步流式 LLM 调用, 聚合正文/工具/用量."""
+        self._refresh_L_message()
         assert self.llm is not None
         content_parts: list[str] = []
         tool_calls: list[ToolCallDelta] = []
@@ -245,6 +319,7 @@ class Agent:
                 LLM_ROLE,
                 self.messages,
                 tools=openai_tool_definitions(),
+                max_tokens=max_tokens,
                 thinking_enabled=True,
             ):
                 if isinstance(delta, ThinkDelta):
@@ -285,10 +360,29 @@ class Agent:
             chat_id=self.chat_id,
             turn=self.turn,
         )
-        try:
-            args = json.loads(call.arguments or "{}")
-        except json.JSONDecodeError:
-            args = {}
+        args, args_err = parse_tool_arguments(call.arguments)
+        if args_err is not None:
+            result_summary = sanitize_text(f"{call.name}: {args_err}")
+            self._persist_chat_record(
+                {
+                    "type": "tool_call",
+                    "tool": call.name,
+                    "args_summary": args_summary,
+                    "status": "error",
+                    "result_summary": clip_summary(result_summary),
+                }
+            )
+            self.messages.append(
+                ChatMessage(
+                    role="tool",
+                    content=json.dumps(
+                        {"summary": clip_summary(result_summary), "error": args_err},
+                        ensure_ascii=False,
+                    ),
+                    tool_call_id=call.id,
+                )
+            )
+            return
 
         old_content: str | None = None
         if call.name == "write_file" and isinstance(args.get("path"), str):
@@ -354,17 +448,98 @@ class Agent:
         self.messages.append(
             ChatMessage(role="tool", content=tool_payload, tool_call_id=call.id)
         )
+        _compact_tool_call_arguments(self.messages, call)
+
+        if call.name == "edit_todo" and result.ok:
+            for rec in reversed(chat_svc.get_chat_records(self.scenario_id, self.chat_id)):
+                if rec.get("type") == "todo":
+                    self.event_sink.on_record_appended(rec)
+                    break
+
+        if (
+            result.ok
+            and call.name == "write_file"
+            and _todo_has_pending(self.scenario_id, self.chat_id)
+        ):
+            self.messages.append(
+                ChatMessage(
+                    role="user",
+                    content=(
+                        "(系统) 计划清单仍有未完成项. "
+                        "若刚完成的 write_file 对应其中一行, 下一步须先 edit_todo 勾掉再继续."
+                    ),
+                )
+            )
+
+
+def _todo_has_pending(scenario_id: str, chat_id: str) -> bool:
+    """当前 chat 是否存在尚未全部勾选的 todo."""
+    try:
+        records = chat_svc.get_chat_records(scenario_id, chat_id)
+    except FileNotFoundError:
+        return False
+    todo = chat_svc.derive_todo(records)
+    if not todo:
+        return False
+    total = sum(1 for ln in todo.splitlines() if ln.strip())
+    return todo.count("[x] ") < total
+
+
+def _compact_tool_call_arguments(messages: list[ChatMessage], call: ToolCallDelta) -> None:
+    """工具已执行后缩略 assistant.tool_calls.arguments, 避免单轮多次 write 撑爆上下文."""
+    if call.name not in {"write_file", "edit_todo"}:
+        return
+    compact = _args_summary(call)
+    for msg in reversed(messages):
+        if msg.role != "assistant" or not msg.tool_calls:
+            continue
+        for tc in msg.tool_calls:
+            if tc.id == call.id:
+                tc.arguments = json.dumps({"_summary": compact}, ensure_ascii=False)
+                return
+        break
 
 
 def _args_summary(call: ToolCallDelta) -> str:
+    """工具参数单行摘要 — 大字段(如 write_file.content)不得落全文, 见 01-data-chats §2.2."""
     try:
         args = json.loads(call.arguments or "{}")
-        if isinstance(args, dict) and args:
-            return ", ".join(f"{k}={v!r}" for k, v in list(args.items())[:3])
     except json.JSONDecodeError:
-        pass
-    raw = (call.arguments or "").strip()
-    return raw[:120] + ("…" if len(raw) > 120 else "")
+        args = None
+
+    if not isinstance(args, dict) or not args:
+        raw = (call.arguments or "").strip()
+        return raw[:120] + ("…" if len(raw) > 120 else "")
+
+    if call.name == "write_file":
+        path = str(args.get("path") or "?")
+        content = args.get("content")
+        n = len(content) if isinstance(content, str) else 0
+        return clip_summary(f"{path} ({n} 字符)")
+
+    if call.name == "edit_todo":
+        todo = args.get("todo")
+        if isinstance(todo, str):
+            total = sum(1 for ln in todo.splitlines() if ln.strip())
+            done = todo.count("[x] ")
+            return clip_summary(f"计划 {done}/{total} 项")
+        return "edit_todo"
+
+    if call.name in {"read_file", "download_file", "mineru_convert"}:
+        path = args.get("path")
+        if isinstance(path, str) and path:
+            return clip_summary(f"path={path!r}")
+
+    parts: list[str] = []
+    for k, v in list(args.items())[:3]:
+        if isinstance(v, str) and len(v) > 80:
+            parts.append(f"{k}=({len(v)} 字符)")
+        else:
+            parts.append(f"{k}={v!r}")
+    text = ", ".join(parts)
+    if len(text) <= SUMMARY_MAX_LEN:
+        return text
+    return text[: SUMMARY_MAX_LEN - 1] + "…"
 
 
 def _unified_diff(old: str, new: str, path: str) -> str:
@@ -377,29 +552,54 @@ def _unified_diff(old: str, new: str, path: str) -> str:
     return "".join(lines)
 
 
+def looks_like_pseudo_tools(text: str) -> bool:
+    """正文是否像在模拟工具调用(而非 function calling)."""
+    if _PSEUDO_TOOL_LINE_RE.search(text):
+        return True
+    return bool(_PSEUDO_TOOL_INLINE_RE.search(text))
+
+
+def strip_pseudo_tool_lines(text: str) -> str:
+    kept = [ln for ln in text.splitlines() if not _PSEUDO_TOOL_LINE_RE.match(ln)]
+    return "\n".join(kept).strip()
+
+
 def _record_to_chat_messages(rec: dict[str, Any]) -> list[ChatMessage]:
-    """从 JSONL 记录重建 LLM 历史(工具只保留摘要, 见 01-data-chats §2.3)."""
+    """从 JSONL 记录重建 LLM 历史; 工具/编辑/todo 用 user 角色摘要, 避免模型模仿 [工具 xxx] 格式."""
     rtype = rec.get("type")
     if rtype == "user_message":
         return [ChatMessage(role="user", content=str(rec.get("text", "")))]
     if rtype == "agent_text":
-        return [ChatMessage(role="assistant", content=str(rec.get("text", "")))]
+        text = str(rec.get("text", ""))
+        if looks_like_pseudo_tools(text):
+            cleaned = strip_pseudo_tool_lines(text)
+            if len(cleaned) >= 80:
+                return [ChatMessage(role="assistant", content=cleaned)]
+            return [
+                ChatMessage(
+                    role="user",
+                    content="(历史回合) 上轮 Agent 在正文中模拟了工具调用(坏样本, 勿模仿). "
+                    "实际变更见后续 file_edit / 工具摘要记录.",
+                )
+            ]
+        return [ChatMessage(role="assistant", content=text)]
     if rtype == "tool_call" and rec.get("status") in {"ok", "error"}:
         tool = rec.get("tool") or "tool"
-        args = rec.get("args_summary") or ""
+        args = clip_summary(str(rec.get("args_summary") or ""))
         result = rec.get("result_summary") or ""
+        status = rec.get("status") or "ok"
         return [
             ChatMessage(
-                role="assistant",
-                content=f"[工具 {tool}] {args} → {result}",
+                role="user",
+                content=f"(历史工具记录 · {status}) {tool}({args}) → {result}",
             )
         ]
     if rtype == "file_edit":
         path = rec.get("path") or "?"
         op = rec.get("op") or "modify"
-        return [ChatMessage(role="assistant", content=f"[文件编辑 {op}] {path}")]
+        return [ChatMessage(role="user", content=f"(历史文件编辑) {op} {path}")]
     if rtype == "todo":
-        return [ChatMessage(role="assistant", content=f"[计划清单]\n{rec.get('text', '')}")]
+        return [ChatMessage(role="user", content=f"(历史计划清单)\n{rec.get('text', '')}")]
     if rtype == "system":
         return [ChatMessage(role="user", content=f"(系统) {rec.get('text', '')}")]
     return []
