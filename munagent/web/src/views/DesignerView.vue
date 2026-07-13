@@ -3,6 +3,7 @@ import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { RouterLink, useRoute, useRouter } from "vue-router";
 import { designerApi } from "../api/designerApi";
 import { provideDesigner } from "../composables/useDesigner";
+import { SIDEBAR_DEFAULTS, useSidebarWidths } from "../composables/useSidebarWidths";
 import FileTree from "../components/designer/FileTree.vue";
 import EditorPane from "../components/designer/EditorPane.vue";
 import PreviewPane from "../components/designer/PreviewPane.vue";
@@ -22,10 +23,7 @@ const leftCollapsed = ref(false);
 const rightCollapsed = ref(false);
 
 const COLLAPSED_W = 48;
-const EDIT_LEFT_W = 220;
-const EDIT_RIGHT_W = 380;
-const CHAT_LEFT_W = 240;
-const CHAT_RIGHT_W = 300;
+const { widths, setWidth, resetWidth } = useSidebarWidths(scenarioId);
 
 function paneKey(pane: "left" | "right") {
   return `designer-${scenarioId.value}-${pane}-collapsed`;
@@ -40,18 +38,27 @@ watch(leftCollapsed, (v) => localStorage.setItem(paneKey("left"), v ? "1" : "0")
 watch(rightCollapsed, (v) => localStorage.setItem(paneKey("right"), v ? "1" : "0"));
 
 const layoutStyle = computed(() => {
-  const leftW = leftCollapsed.value
-    ? COLLAPSED_W
-    : d.mode === "edit"
-      ? EDIT_LEFT_W
-      : CHAT_LEFT_W;
-  const rightW = rightCollapsed.value
-    ? COLLAPSED_W
-    : d.mode === "edit"
-      ? EDIT_RIGHT_W
-      : CHAT_RIGHT_W;
+  const mode = d.mode;
+  const leftW = leftCollapsed.value ? COLLAPSED_W : widths[mode].left;
+  const rightW = rightCollapsed.value ? COLLAPSED_W : widths[mode].right;
   return { gridTemplateColumns: `${leftW}px 1fr ${rightW}px` };
 });
+
+function onLeftWidth(w: number) {
+  setWidth(d.mode, "left", w);
+}
+
+function onRightWidth(w: number) {
+  setWidth(d.mode, "right", w);
+}
+
+function onLeftReset() {
+  resetWidth(d.mode, "left");
+}
+
+function onRightReset() {
+  resetWidth(d.mode, "right");
+}
 
 onMounted(async () => {
   loadPaneState();
@@ -168,7 +175,11 @@ function formatTokens(n: number) {
         icon="📁"
         label="文件树"
         :collapsed="leftCollapsed"
+        :width="widths.edit.left"
+        :default-width="SIDEBAR_DEFAULTS.edit.left"
         @update:collapsed="leftCollapsed = $event"
+        @update:width="onLeftWidth"
+        @reset-width="onLeftReset"
       >
         <FileTree
           :scenario-id="scenarioId"
@@ -188,7 +199,11 @@ function formatTokens(n: number) {
         icon="💬"
         label="对话"
         :collapsed="rightCollapsed"
+        :width="widths.edit.right"
+        :default-width="SIDEBAR_DEFAULTS.edit.right"
         @update:collapsed="rightCollapsed = $event"
+        @update:width="onRightWidth"
+        @reset-width="onRightReset"
       >
         <ChatPanel show-header @open-in-edit="onOpenInEdit" @preview-file="onPreviewFile" />
       </DesignerSidebar>
@@ -200,7 +215,11 @@ function formatTokens(n: number) {
         icon="📋"
         label="对话列表"
         :collapsed="leftCollapsed"
+        :width="widths.chat.left"
+        :default-width="SIDEBAR_DEFAULTS.chat.left"
         @update:collapsed="leftCollapsed = $event"
+        @update:width="onLeftWidth"
+        @reset-width="onLeftReset"
       >
         <ChatListPane />
       </DesignerSidebar>
@@ -214,7 +233,11 @@ function formatTokens(n: number) {
         icon="📄"
         label="预览"
         :collapsed="rightCollapsed"
+        :width="widths.chat.right"
+        :default-width="SIDEBAR_DEFAULTS.chat.right"
         @update:collapsed="rightCollapsed = $event"
+        @update:width="onRightWidth"
+        @reset-width="onRightReset"
       >
         <div class="preview-stack">
           <FileTree

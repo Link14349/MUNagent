@@ -161,3 +161,28 @@ def test_args_summary_edit_todo_omits_body() -> None:
     assert "任务" not in summary
     assert "计划" in summary
     assert "0/20" in summary
+
+
+def test_args_summary_append_and_insert() -> None:
+    append = ToolCallDelta(
+        id="c3",
+        name="append_file",
+        arguments=json.dumps({"path": "background.md", "content": "## 新章\n\n" + "x" * 400}),
+    )
+    assert "+407" in _args_summary(append)
+    insert = ToolCallDelta(
+        id="c4",
+        name="insert_file",
+        arguments=json.dumps(
+            {
+                "path": "background.md",
+                "anchor": "## 四、标题",
+                "position": "after",
+                "content": "段落\n",
+            }
+        ),
+    )
+    s = _args_summary(insert)
+    assert "after" in s
+    assert "## 四" in s
+    assert len(s) <= 200

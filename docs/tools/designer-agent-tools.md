@@ -2,7 +2,7 @@
 
 > 面向**使用设计 Agent 的人**与**维护 prompt 的开发者**. 代码接口地图见 [docs/api/designer/tools.md](../api/designer/tools.md).
 >
-> 当前共 **11** 个工具. 验证脚本: `scripts/verify_designer_tools.py`(全链), `scripts/verify_search_tools.py`(检索专项).
+> 当前共 **13** 个工具. 验证脚本: `scripts/verify_designer_tools.py`(全链), `scripts/verify_search_tools.py`(检索专项).
 
 ## 配置前提
 
@@ -92,11 +92,40 @@ search_web_pdf("Suez Crisis 1956 declassified")
 
 #### `write_file`
 
-全量覆盖写入; 返回结构校验 `issues`. 改 `venues.yaml` 后记得联动检查 `seats/`.
+全量覆盖写入; 返回结构校验 `issues`. 改 `venues.yaml`、整篇重写或改 YAML 结构时用.
 
 ```json
 {"path": "background.md", "content": "# 背景\n\n..."}
 ```
+
+#### `append_file`
+
+在文件**末尾**追加 `content`(只传新增段落, 勿重复旧正文). 文件不存在则创建. **扩写长文首选**.
+
+```json
+{"path": "background.md", "content": "\n## 七、欧洲联动\n\n1848年春天…"}
+```
+
+#### `insert_file`
+
+在锚点行之前/之后插入. `anchor` 须为 `read_file` 见到的**完整一行**(通常 `## 标题`).
+
+```json
+{
+  "path": "background.md",
+  "anchor": "## 四、执行委员会与5月4日",
+  "position": "after",
+  "content": "\n## 五、欧洲1848\n\n…"
+}
+```
+
+| `position` | 含义 |
+|------------|------|
+| `after` | 锚点行之后(默认) |
+| `before` | 锚点行之前 |
+| `end` | 等同 `append_file` |
+
+锚点未找到或不唯一时返回错误, 需 `read_file` 后复制 exact 标题行.
 
 ---
 

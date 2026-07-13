@@ -57,7 +57,8 @@ def parse_tool_arguments(raw: str | None) -> tuple[dict[str, Any], str | None]:
             err += (
                 " — 常见原因: content 过长, 模型在 function calling 的 arguments 字符串中途被截断"
                 "(completion max_tokens 或 thinking 占满输出预算). "
-                "请 read_file 现有正文后分 2-3 次 write_file, 每次 content 建议 ≤3000 字符."
+                "长文扩写请用 append_file / insert_file(只传新增段落); "
+                "必须全量 write 时分段或提高单次 content 上限."
             )
         return {}, err
     if not isinstance(parsed, dict):

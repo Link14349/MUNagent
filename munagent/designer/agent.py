@@ -31,9 +31,10 @@ LLM_ROLE = "designer"
 MAX_TOOL_CALLS_PER_TASK = 50
 MAX_PSEUDO_TOOL_NUDGES = 3
 TOOL_TIMEOUT_S = 600.0  # 单次工具执行上限 10 分钟
+_FILE_MUTATION_TOOLS = frozenset({"write_file", "append_file", "insert_file"})
 # write_file 的 content 嵌在 tool arguments JSON 里; thinking + 长正文易触顶默认 4096 输出上限
-DESIGNER_MAX_TOKENS = 16_384
-DESIGNER_MAX_TOKENS_RETRY = 32_768
+DESIGNER_MAX_TOKENS = 65_536
+DESIGNER_MAX_TOKENS_RETRY = 65_536
 
 # 历史 replay 曾用 assistant+[工具 xxx] 格式, 长对话后模型会模仿; 检测用于拦截与清洗.
 _PSEUDO_TOOL_LINE_RE = re.compile(
@@ -385,7 +386,7 @@ class Agent:
             return
 
         old_content: str | None = None
-        if call.name == "write_file" and isinstance(args.get("path"), str):
+        if call.name in _FILE_MUTATION_TOOLS and isinstance(args.get("path"), str):
             try:
                 old_content = file_svc.get_file(self.scenario_id, args["path"]).content
             except (FileNotFoundError, ValueError):
@@ -430,10 +431,10 @@ class Agent:
             }
         )
 
-        if result.ok and call.name == "write_file" and result.data:
+        if result.ok and call.name in _FILE_MUTATION_TOOLS and result.data:
             path = str(result.data.get("path", ""))
             op = str(result.data.get("op", "modify"))
-            new_content = str(args.get("content", ""))
+            new_content = str(result.data.get("new_content", args.get("content", "")))
             diff = _unified_diff(old_content or "", new_content, path)
             self._persist_chat_record(
                 {"type": "file_edit", "path": path, "op": op, "diff": diff}
@@ -458,7 +459,7 @@ class Agent:
 
         if (
             result.ok
-            and call.name == "write_file"
+            and call.name in _FILE_MUTATION_TOOLS
             and _todo_has_pending(self.scenario_id, self.chat_id)
         ):
             self.messages.append(
@@ -466,7 +467,7 @@ class Agent:
                     role="user",
                     content=(
                         "(系统) 计划清单仍有未完成项. "
-                        "若刚完成的 write_file 对应其中一行, 下一步须先 edit_todo 勾掉再继续."
+                        "若刚完成的文件写入对应其中一行, 下一步须先 edit_todo 勾掉再继续."
                     ),
                 )
             )
@@ -487,7 +488,7 @@ def _todo_has_pending(scenario_id: str, chat_id: str) -> bool:
 
 def _compact_tool_call_arguments(messages: list[ChatMessage], call: ToolCallDelta) -> None:
     """工具已执行后缩略 assistant.tool_calls.arguments, 避免单轮多次 write 撑爆上下文."""
-    if call.name not in {"write_file", "edit_todo"}:
+    if call.name not in {"write_file", "append_file", "insert_file", "edit_todo"}:
         return
     compact = _args_summary(call)
     for msg in reversed(messages):
@@ -516,6 +517,21 @@ def _args_summary(call: ToolCallDelta) -> str:
         content = args.get("content")
         n = len(content) if isinstance(content, str) else 0
         return clip_summary(f"{path} ({n} 字符)")
+
+    if call.name == "append_file":
+        path = str(args.get("path") or "?")
+        content = args.get("content")
+        n = len(content) if isinstance(content, str) else 0
+        return clip_summary(f"{path} (+{n} 字符)")
+
+    if call.name == "insert_file":
+        path = str(args.get("path") or "?")
+        content = args.get("content")
+        n = len(content) if isinstance(content, str) else 0
+        pos = args.get("position") or "after"
+        anchor = args.get("anchor") or "?"
+        anchor_short = anchor if len(str(anchor)) <= 40 else str(anchor)[:39] + "…"
+        return clip_summary(f"{path} {pos} {anchor_short!r} (+{n} 字符)")
 
     if call.name == "edit_todo":
         todo = args.get("todo")

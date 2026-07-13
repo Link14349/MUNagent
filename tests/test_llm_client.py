@@ -305,4 +305,4 @@ def test_parse_tool_arguments_truncated_write_hint() -> None:
     assert args == {}
     assert err is not None
     assert "Unterminated string" in err
-    assert "分 2-3 次 write_file" in err
+    assert "append_file" in err

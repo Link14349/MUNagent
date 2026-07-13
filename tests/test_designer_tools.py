@@ -12,6 +12,7 @@ from munagent.designer.tools import ToolContext, execute_tool, openai_tool_defin
 from munagent.designer.scenario import package as scenario_svc
 from munagent.designer.scenario import chats as chat_svc
 from munagent.designer.scenario import files as file_svc
+from munagent.designer.tools.files import insert_at_anchor, merge_append
 from munagent.designer.scenario.package import ScenarioCreate
 
 
@@ -45,6 +46,8 @@ def test_openai_tool_definitions_count() -> None:
         "list_files",
         "read_file",
         "write_file",
+        "append_file",
+        "insert_file",
         "web_search",
         "search_web_pdf",
         "search_wikipedia",
@@ -54,6 +57,81 @@ def test_openai_tool_definitions_count() -> None:
         "check_todo",
         "edit_todo",
     }
+
+
+def test_merge_append_empty_and_existing() -> None:
+    assert merge_append("", "## 一\n\n正文") == "## 一\n\n正文"
+    assert merge_append("# 旧\n", "## 新\n") == "# 旧\n\n## 新\n"
+
+
+def test_insert_at_anchor_after_before_end() -> None:
+    old = "## A\n\na\n\n## B\n\nb\n"
+    mid = "## X\n\nx\n"
+    after = insert_at_anchor(old, mid, "## A", "after")
+    assert after.index("## A") < after.index("## X") < after.index("## B")
+    before = insert_at_anchor(old, mid, "## B", "before")
+    assert before.index("## X") < before.index("## B")
+    assert insert_at_anchor(old, mid, "## A", "end") == merge_append(old, mid)
+
+
+def test_insert_at_anchor_errors() -> None:
+    import pytest
+
+    with pytest.raises(ValueError, match="锚点行未找到"):
+        insert_at_anchor("## A\n", "x", "## Z", "after")
+    dup = "## A\n\n## A\n"
+    with pytest.raises(ValueError, match="不唯一"):
+        insert_at_anchor(dup, "x", "## A", "after")
+    with pytest.raises(ValueError, match="文件为空"):
+        insert_at_anchor("", "x", "## A", "after")
+
+
+@pytest.mark.asyncio
+async def test_append_file_create_and_extend(tool_ctx: ToolContext) -> None:
+    r = await execute_tool(tool_ctx, "append_file", {"path": "notes.md", "content": "# 首段\n"})
+    assert r.ok
+    assert r.data is not None
+    assert r.data["op"] == "create"
+    assert r.data["added_chars"] == len("# 首段\n")
+    r2 = await execute_tool(tool_ctx, "append_file", {"path": "notes.md", "content": "## 二\n\n更多\n"})
+    assert r2.ok
+    got = file_svc.get_file(tool_ctx.scenario_id, "notes.md").content
+    assert "# 首段" in got and "## 二" in got
+    assert got.index("# 首段") < got.index("## 二")
+
+
+@pytest.mark.asyncio
+async def test_insert_file_after_anchor(tool_ctx: ToolContext) -> None:
+    await execute_tool(
+        tool_ctx,
+        "write_file",
+        {"path": "background.md", "content": "## 一\n\na\n\n## 三\n\nc\n"},
+    )
+    r = await execute_tool(
+        tool_ctx,
+        "insert_file",
+        {
+            "path": "background.md",
+            "anchor": "## 一",
+            "position": "after",
+            "content": "## 二\n\nb\n",
+        },
+    )
+    assert r.ok
+    text = file_svc.get_file(tool_ctx.scenario_id, "background.md").content
+    assert text.index("## 一") < text.index("## 二") < text.index("## 三")
+
+
+@pytest.mark.asyncio
+async def test_insert_file_anchor_not_found(tool_ctx: ToolContext) -> None:
+    await execute_tool(tool_ctx, "write_file", {"path": "a.md", "content": "# x\n"})
+    r = await execute_tool(
+        tool_ctx,
+        "insert_file",
+        {"path": "a.md", "anchor": "## 不存在", "content": "y\n"},
+    )
+    assert not r.ok
+    assert "锚点" in (r.data or {}).get("error", "")
 
 
 @pytest.mark.asyncio

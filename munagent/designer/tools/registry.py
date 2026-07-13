@@ -10,7 +10,18 @@ from pydantic import BaseModel, ValidationError
 
 from munagent.designer.tools.base import ToolContext, ToolExecutionError, ToolResult, clip_summary
 from munagent.designer.tools.fetch import DownloadFileArgs, FetchPageArgs, download_file, fetch_page
-from munagent.designer.tools.files import ListFilesArgs, ReadFileArgs, WriteFileArgs, list_files, read_file, write_file
+from munagent.designer.tools.files import (
+    AppendFileArgs,
+    InsertFileArgs,
+    ListFilesArgs,
+    ReadFileArgs,
+    WriteFileArgs,
+    append_file,
+    insert_file,
+    list_files,
+    read_file,
+    write_file,
+)
 from munagent.designer.tools.mineru import MineruConvertArgs, mineru_convert
 from munagent.designer.tools.search import WebSearchArgs, web_search
 from munagent.designer.tools.search_pdf import SearchWebPdfArgs, search_web_pdf
@@ -43,9 +54,21 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
     ),
     ToolSpec(
         "write_file",
-        "创建或覆盖场景包内文本文件; 返回校验 issues.",
+        "创建或覆盖场景包内文本文件(全量); 返回校验 issues. 改结构/改 YAML 时用.",
         WriteFileArgs,
         write_file,
+    ),
+    ToolSpec(
+        "append_file",
+        "在文本文件末尾追加 content(只传新增段落, 勿重复旧正文); 文件不存在则创建. 扩写 background.md 等长文首选.",
+        AppendFileArgs,
+        append_file,
+    ),
+    ToolSpec(
+        "insert_file",
+        "在锚点行之前/之后插入 content. anchor 须为 read_file 见到的完整一行(通常 ## 标题); position: after/before/end.",
+        InsertFileArgs,
+        insert_file,
     ),
     ToolSpec(
         "search_wikipedia",
@@ -92,7 +115,7 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
     ToolSpec(
         "edit_todo",
         "全量替换当前对话计划清单(一行一项, 非空行以 [ ] 或 [x] 开头). "
-        "每完成 write_file 等计划项后须立即调用, 把对应行改为 [x] .",
+        "每完成 write_file / append_file / insert_file 等计划项后须立即调用, 把对应行改为 [x] .",
         EditTodoArgs,
         edit_todo,
     ),
