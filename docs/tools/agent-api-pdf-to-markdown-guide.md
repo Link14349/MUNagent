@@ -1,6 +1,8 @@
 # Agent 调用 MinerU HTTP API 指南
 
-本文档面向**运行在本地电脑上的 Agent**，说明如何通过 HTTP 远程调用服务器上的 PDF → Markdown 转换服务。
+本文档面向**运行在本地电脑上的 Agent**，说明如何通过 HTTP 远程调用服务器上的文档 → Markdown 转换服务。
+
+网关兼容 MinerU HTTP API，并**额外支持直接上传 pdf / epub / mobi**；epub/mobi 会在转发到 MinerU 前由网关自动转为 PDF。
 
 ## 前提
 
@@ -13,14 +15,16 @@
 ## Agent 典型工作流
 
 ```
-用户给 Agent 一个 PDF
+用户给 Agent 一个 PDF / EPUB / MOBI
     ↓
-Agent 调用 HTTP API 上传 PDF
+Agent 调用 HTTP API 上传文件
     ↓
-服务器 GPU 转换为 Markdown
+服务器转换(epub/mobi 先转 PDF)为 Markdown
     ↓
 Agent 读取 md_content，基于文本回答用户
 ```
+
+**Agent 优先策略**: 检索资料时**优先找 PDF 直链**(档案站定向搜、`web_search` 查询含 `filetype:pdf`)；仅当站点无 PDF(如多数 FRUS 卷)时再下载 epub/mobi 走本服务。大部头 epub/mobi 转换约 **5–10 分钟**，请用异步 `/tasks`。
 
 Agent **不需要**在本地安装 MinerU 或 GPU，只需能发 HTTP 请求。
 

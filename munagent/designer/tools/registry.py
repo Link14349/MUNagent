@@ -13,6 +13,8 @@ from munagent.designer.tools.fetch import DownloadFileArgs, FetchPageArgs, downl
 from munagent.designer.tools.files import ListFilesArgs, ReadFileArgs, WriteFileArgs, list_files, read_file, write_file
 from munagent.designer.tools.mineru import MineruConvertArgs, mineru_convert
 from munagent.designer.tools.search import WebSearchArgs, web_search
+from munagent.designer.tools.search_pdf import SearchWebPdfArgs, search_web_pdf
+from munagent.designer.tools.wikipedia import SearchWikipediaArgs, search_wikipedia
 from munagent.designer.tools.todo import CheckTodoArgs, EditTodoArgs, check_todo, edit_todo
 
 ToolHandler = Callable[[ToolContext, BaseModel], Awaitable[ToolResult]]
@@ -46,10 +48,22 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
         write_file,
     ),
     ToolSpec(
+        "search_wikipedia",
+        "资料检索首选: Wikipedia API 搜条目, 全文写入 references/wikipedia/*.md, 并返回摘要/可选正文 + 外链 PDF 列表.",
+        SearchWikipediaArgs,
+        search_wikipedia,
+    ),
+    ToolSpec(
         "web_search",
-        "联网检索资料, 返回标题/链接/摘要列表. 需配置 tools.search.",
+        "泛网检索, 返回标题/链接/摘要. 维基之后找 HTML 页面或机构站线索, 配合 fetch_page. 需 tools.search.",
         WebSearchArgs,
         web_search,
+    ),
+    ToolSpec(
+        "search_web_pdf",
+        "维基与泛网仍缺文献时, 用 Google 语法 filetype:pdf 搜索 PDF 直链(默认不限 site). 需 tools.search.",
+        SearchWebPdfArgs,
+        search_web_pdf,
     ),
     ToolSpec(
         "fetch_page",
@@ -65,7 +79,7 @@ TOOL_SPECS: tuple[ToolSpec, ...] = (
     ),
     ToolSpec(
         "mineru_convert",
-        "将场景包内 PDF 转为 Markdown 写入 references/. 需 MinerU 服务.",
+        "将场景包内 pdf/epub/mobi 转为 Markdown 写入 references/. 优先用 PDF; 无 PDF 时可用 epub/mobi. 需 MinerU 服务.",
         MineruConvertArgs,
         mineru_convert,
     ),

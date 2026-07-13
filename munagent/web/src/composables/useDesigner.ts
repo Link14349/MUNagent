@@ -218,6 +218,12 @@ export function useDesigner(scenarioId: string): DesignerStore {
       if (!tab) {
         tab = { path, content, savedContent: content, dirty: false };
         openFiles.value.push(tab);
+      } else if (!tab.dirty) {
+        tab.content = content;
+        tab.savedContent = content;
+        tab.agentConflict = undefined;
+      } else if (content !== tab.savedContent) {
+        tab.agentConflict = content;
       }
       activeFilePath.value = path;
       contextFile.value = path;

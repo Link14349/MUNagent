@@ -1,4 +1,4 @@
-"""MinerU PDF→Markdown — 见 docs/tools/agent-api-pdf-to-markdown-guide.md."""
+"""MinerU 文档→Markdown — 见 docs/tools/agent-api-pdf-to-markdown-guide.md."""
 
 from __future__ import annotations
 
@@ -15,9 +15,15 @@ from munagent.security.sanitize import sanitize_text
 _POLL_INTERVAL_S = 3.0
 _ASYNC_TIMEOUT_S = 7200.0
 
+_SUPPORTED_SUFFIXES: dict[str, str] = {
+    ".pdf": "application/pdf",
+    ".epub": "application/epub+zip",
+    ".mobi": "application/x-mobipocket-ebook",
+}
+
 
 class MineruConvertArgs(BaseModel):
-    path: str = Field(description="场景包内 PDF 路径")
+    path: str = Field(description="场景包内文档路径(pdf/epub/mobi)")
     output_path: str | None = Field(default=None, description="输出 md 路径, 默认 references/<stem>.md")
 
 
@@ -28,13 +34,21 @@ def _mineru_base(config_url: str) -> str:
     return base
 
 
+def _mime_for_path(path: str) -> str:
+    suffix = Path(path).suffix.lower()
+    mime = _SUPPORTED_SUFFIXES.get(suffix)
+    if mime is None:
+        supported = ", ".join(sorted(_SUPPORTED_SUFFIXES))
+        raise ToolExecutionError(f"mineru_convert 仅支持 {supported}")
+    return mime
+
+
 async def mineru_convert(ctx: ToolContext, args: MineruConvertArgs) -> ToolResult:
     base = _mineru_base(ctx.config.tools.mineru.base_url)
     rel = args.path.strip().lstrip("/")
-    if not rel.lower().endswith(".pdf"):
-        raise ToolExecutionError("mineru_convert 仅支持 PDF")
+    mime = _mime_for_path(rel)
     try:
-        pdf_data = file_svc.read_bytes(ctx.scenario_id, rel)
+        doc_data = file_svc.read_bytes(ctx.scenario_id, rel)
     except FileNotFoundError as exc:
         raise ToolExecutionError(str(exc)) from exc
     except ValueError as exc:
@@ -48,7 +62,7 @@ async def mineru_convert(ctx: ToolContext, args: MineruConvertArgs) -> ToolResul
         raise ToolExecutionError(f"非法输出路径: {out_rel}")
 
     try:
-        md = await _convert_pdf(base, Path(rel).name, pdf_data)
+        md = await _convert_document(base, Path(rel).name, doc_data, mime=mime)
     except httpx.HTTPError as exc:
         raise ToolExecutionError(sanitize_text(f"MinerU 请求失败: {exc}")) from exc
     except TimeoutError as exc:
@@ -58,11 +72,11 @@ async def mineru_convert(ctx: ToolContext, args: MineruConvertArgs) -> ToolResul
     return ToolResult(
         ok=True,
         summary=clip_summary(f"转换 {rel} → {out_rel}, {len(md)} 字符"),
-        data={"source": rel, "output": out_rel, "chars": len(md)},
+        data={"source": rel, "output": out_rel, "chars": len(md), "format": Path(rel).suffix.lower().lstrip(".")},
     )
 
 
-async def _convert_pdf(base: str, filename: str, pdf_data: bytes) -> str:
+async def _convert_document(base: str, filename: str, data: bytes, *, mime: str) -> str:
     form = {
         "backend": "pipeline",
         "parse_method": "auto",
@@ -72,7 +86,7 @@ async def _convert_pdf(base: str, filename: str, pdf_data: bytes) -> str:
         "return_images": "false",
     }
     async with httpx.AsyncClient(timeout=60.0) as client:
-        files = {"files": (filename, pdf_data, "application/pdf")}
+        files = {"files": (filename, data, mime)}
         resp = await client.post(f"{base}/tasks", files=files, data=form)
         resp.raise_for_status()
         body = resp.json()

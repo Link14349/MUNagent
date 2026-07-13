@@ -21,7 +21,7 @@ async def web_search(ctx: ToolContext, args: WebSearchArgs) -> ToolResult:
     if not cfg.api_key:
         raise ToolExecutionError("未配置 tools.search.api_key")
     try:
-        items = await _dispatch_search(cfg.provider, cfg.api_key, args.query, args.max_results)
+        items = await dispatch_web_search(cfg.provider, cfg.api_key, args.query, args.max_results)
     except httpx.HTTPError as exc:
         raise ToolExecutionError(sanitize_text(f"搜索请求失败: {exc}")) from exc
     return ToolResult(
@@ -31,7 +31,7 @@ async def web_search(ctx: ToolContext, args: WebSearchArgs) -> ToolResult:
     )
 
 
-async def _dispatch_search(
+async def dispatch_web_search(
     provider: str, api_key: str, query: str, max_results: int
 ) -> list[dict[str, Any]]:
     if provider == "tavily":

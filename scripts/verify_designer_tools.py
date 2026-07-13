@@ -1,13 +1,12 @@
 #!/usr/bin/env python3
-"""设计 Agent 工具链一次性验证 — 真实联网, 结果复制到 ./out/.
+"""设计 Agent 工具链一次性验证 — 真实联网/MinerU, 结果复制到 ./out/.
 
 用法:
   python scripts/verify_designer_tools.py
 
 依赖 ~/.munagent/config.yaml:
   - tools.search.api_key (web_search)
-
-(PDF 下载 + MinerU 步骤已注释, 需要时自行取消注释)
+  - tools.mineru.base_url (mineru_convert; 未配置则 PDF 只下载不转换)
 """
 
 from __future__ import annotations
@@ -18,6 +17,7 @@ import sys
 from pathlib import Path
 
 from munagent.config import load_config, mask_api_key
+from munagent.config.models import AppConfig
 from munagent.designer.scenario import files as file_svc
 from munagent.designer.scenario import package as scenario_svc
 from munagent.designer.scenario.package import ScenarioCreate
@@ -26,9 +26,9 @@ from munagent.designer.tools import ToolContext, execute_tool
 REPO_ROOT = Path(__file__).resolve().parents[1]
 OUT_DIR = REPO_ROOT / "out"
 SCENARIO_ID = "tool-verify"
-# PDF_URL = "https://arxiv.org/pdf/2512.02104"
-# PDF_REL = "references/raw/2512.02104.pdf"
-# MD_REL = "references/2512.02104.md"
+PDF_URL = "https://arxiv.org/pdf/2512.02104"
+PDF_REL = "references/raw/2512.02104.pdf"
+MD_REL = "references/2512.02104.md"
 EDIT_REL = "background.md"
 FETCH_FALLBACK_URL = "https://bimun.org.cn/committees/jcc-2"
 
@@ -69,7 +69,7 @@ def _ensure_scenario() -> None:
 
 
 async def step_web_search(ctx: ToolContext) -> str:
-    _banner("1/3 web_search")
+    _banner("1/4 web_search")
     query = "模拟联合国 历史委员会 危机联动"
     result = await execute_tool(ctx, "web_search", {"query": query, "max_results": 3})
     _print_result("web_search", result)
@@ -88,7 +88,7 @@ async def step_web_search(ctx: ToolContext) -> str:
 
 
 async def step_fetch_page(ctx: ToolContext, url: str) -> None:
-    _banner("2/3 fetch_page")
+    _banner("2/4 fetch_page")
     print(f"抓取 URL: {url}")
     result = await execute_tool(ctx, "fetch_page", {"url": url, "max_chars": 4000})
     _print_result("fetch_page", result)
@@ -105,42 +105,43 @@ async def step_fetch_page(ctx: ToolContext, url: str) -> None:
         print("…(已截断)")
 
 
-# async def step_download_and_mineru(ctx: ToolContext, config) -> None:
-#     _banner("download_file + mineru_convert")
-#     dl = await execute_tool(
-#         ctx,
-#         "download_file",
-#         {"url": PDF_URL, "path": PDF_REL},
-#     )
-#     _print_result("download_file", dl)
-#     if not dl.ok:
-#         raise RuntimeError("download_file 失败")
-#
-#     _copy_scenario_file(SCENARIO_ID, PDF_REL, "2512.02104.pdf")
-#
-#     mineru_url = (config.tools.mineru.base_url or "").strip()
-#     if not mineru_url:
-#         print("\n[跳过] 未配置 tools.mineru.base_url, mineru_convert 未执行")
-#         print("       可在 ~/.munagent/config.yaml 设置后重跑")
-#         return
-#
-#     print(f"\nMinerU: {mineru_url}")
-#     conv = await execute_tool(ctx, "mineru_convert", {"path": PDF_REL})
-#     _print_result("mineru_convert", conv)
-#     if not conv.ok:
-#         raise RuntimeError("mineru_convert 失败")
-#
-#     _copy_scenario_file(SCENARIO_ID, MD_REL, "2512.02104.md")
-#     preview = file_svc.get_file(SCENARIO_ID, MD_REL).content[:800]
-#     print("\nMarkdown 预览(前 800 字符):")
-#     print("-" * 40)
-#     print(preview)
-#     if len(file_svc.get_file(SCENARIO_ID, MD_REL).content) > 800:
-#         print("…(已截断)")
+async def step_download_and_mineru(ctx: ToolContext, config: AppConfig) -> None:
+    _banner("3/4 download_file + mineru_convert")
+    print(f"PDF URL: {PDF_URL}")
+    dl = await execute_tool(
+        ctx,
+        "download_file",
+        {"url": PDF_URL, "path": PDF_REL},
+    )
+    _print_result("download_file", dl)
+    if not dl.ok:
+        raise RuntimeError("download_file 失败")
+
+    _copy_scenario_file(SCENARIO_ID, PDF_REL, "2512.02104.pdf")
+
+    mineru_url = (config.tools.mineru.base_url or "").strip()
+    if not mineru_url:
+        print("\n[跳过] 未配置 tools.mineru.base_url, mineru_convert 未执行")
+        print("       可在 ~/.munagent/config.yaml 设置后重跑")
+        return
+
+    print(f"\nMinerU: {mineru_url}")
+    conv = await execute_tool(ctx, "mineru_convert", {"path": PDF_REL})
+    _print_result("mineru_convert", conv)
+    if not conv.ok:
+        raise RuntimeError("mineru_convert 失败")
+
+    _copy_scenario_file(SCENARIO_ID, MD_REL, "2512.02104.md")
+    preview = file_svc.get_file(SCENARIO_ID, MD_REL).content[:800]
+    print("\nMarkdown 预览(前 800 字符):")
+    print("-" * 40)
+    print(preview)
+    if len(file_svc.get_file(SCENARIO_ID, MD_REL).content) > 800:
+        print("…(已截断)")
 
 
 async def step_read_write_read(ctx: ToolContext) -> None:
-    _banner("3/3 read_file → write_file → read_file")
+    _banner("4/4 read_file → write_file → read_file")
     initial = "# 工具验证\n\n初始内容: hello designer tools.\n"
     w0 = await execute_tool(
         ctx,
@@ -187,6 +188,7 @@ async def main() -> int:
         print("错误: 未配置 tools.search.api_key (~/.munagent/config.yaml)", file=sys.stderr)
         return 1
     print(f"search.provider={config.tools.search.provider}  key={mask_api_key(search_key)}")
+    print(f"mineru.base_url={config.tools.mineru.base_url or '(未配置)'}")
     print(f"输出目录: {OUT_DIR.relative_to(REPO_ROOT)}/")
 
     _ensure_scenario()
@@ -195,7 +197,7 @@ async def main() -> int:
     try:
         fetch_url = await step_web_search(ctx)
         await step_fetch_page(ctx, fetch_url)
-        # await step_download_and_mineru(ctx, config)
+        await step_download_and_mineru(ctx, config)
         await step_read_write_read(ctx)
     except Exception as exc:
         print(f"\n验证失败: {exc}", file=sys.stderr)

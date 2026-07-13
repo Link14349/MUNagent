@@ -15,4 +15,4 @@
 | `deducer/agents/` | [deducer/agents.md](deducer/agents.md) |
 | `deducer/engine.py` | [deducer/engine.md](deducer/engine.md) |
 
-外部工具服务文档见 [docs/tools/](../tools/).
+外部工具服务文档见 [docs/tools/](../tools/). **设计 Agent 工具使用指南**: [designer-agent-tools.md](../tools/designer-agent-tools.md).

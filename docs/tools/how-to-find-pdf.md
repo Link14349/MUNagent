@@ -1,6 +1,17 @@
 准备模拟联合国（MUN）历史委员会（Historical Committee）或危机委（Crisis Committee）时，寻找**最真实、最权威的一手历史政治资料**至关重要。
 
-以下为你整理的这些网站完全免费，不仅提供极高权威性的外交与政治档案，且绝大多数都支持**直接一键下载 PDF**（部分需要注册免费账号或直接在线阅读/存为 PDF）：
+> **设计 Agent 工具(已实现)**: `search_web_pdf` — Google 语法 `filetype:pdf` 搜 PDF 直链; `search_wikipedia` — 维基 API 摘要/正文 + 外链 PDF. 衔接 `download_file` → `mineru_convert`. 档案站定向搜(`search_archive_pdf`)暂缓, 见 [search-archive-pdf.md](./search-archive-pdf.md).
+>
+> **Agent 检索优先级**: ① `search_wikipedia`(自动写入 `references/wikipedia/*.md` 并找外链 PDF); ② `web_search` & `fetch_page`; ③ `search_web_pdf`; ④ `download_file` & `mineru_convert`(含 epub/mobi).
+
+| 工具 `source_id` | 站点 | PDF 直链 | 无 PDF 时 |
+|------------------|------|----------|-----------|
+| `un_digitallibrary` | §1 UN Digital Library | 是(多数) | — |
+| `frus` | §1 FRUS | **仅部分卷**(103/551) | epub/mobi → mineru_convert |
+| `wilson_center` | §2 威尔逊中心 | 是 | — |
+| `avalon` | §2 阿瓦隆项目 | 否(HTML) | fetch_page |
+| `internet_archive` | §2 Internet Archive | 是 | — |
+| `hathitrust` | §2 HathiTrust | 困难 | 暂跳过 |
 
 ---
 
@@ -16,7 +27,7 @@
 
 * **网址/来源：** 美国国务院历史学家办公室 (Office of the Historian)
 * **最适合查找：** **冷战、一战、二战等重大历史政治危机。** 里面包含了当年美国总统、国务卿与世界各国首脑的秘密电报、会议备忘录和情报分析。
-* **下载体验：** 每一个历史时期和专题（如 1962 满洲里危机、古巴导弹危机等）都整理成了完整的电子书卷，点击进入后可以直接下载整本的 **PDF**。
+* **下载体验：** 每一个历史时期和专题整理成完整电子书卷. **仅约 103/551 卷提供 PDF**; 其余卷仅有 epub/mobi, 可下载后经 MinerU 网关转为 Markdown(实测整卷约 7 分钟).
 
 ---
 
@@ -41,11 +52,13 @@
 
 ## 💡 模联历史委的高效搜索技巧
 
-为了让你更快找到能直接下载 PDF 的资料，在 Google 搜索时请善用**高级搜索语法**：
+为了让你更快找到能直接下载 PDF 的资料，在 Google 搜索时请善用**高级搜索语法**（Agent 用 `search_web_pdf` 会自动追加 `filetype:pdf`）：
 
 > 举个例子：你想找 1956 年苏伊士运河危机的联合国的官方报告
-> 🔍 搜索：`Suez Crisis 1956 report filetype:pdf site:un.org`
-> *(注：`filetype:pdf` 强制只显示 PDF 文件，`site:un.org` 限制只在联合国官网搜索)*
+> 🔍 `search_web_pdf(query="Suez Crisis 1956 report")` 或手动: `Suez Crisis 1956 report filetype:pdf`
+> 🔍 若只要联合国: 加 `site:un.org`(工具参数 `site`)
+
+探针: `scripts/probe_archive_search/probe_google_filetype_pdf.py`
 
 如果是针对冷战时期的某次秘密会议：
 

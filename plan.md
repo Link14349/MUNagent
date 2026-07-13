@@ -45,4 +45,6 @@
 - [x] 后端Agent工具实现
 - [x] 后端Agent prompt设计管理
 - [x] 补全Agent类
+- [x] 资料检索工具 `search_web_pdf` + `search_wikipedia` (见 docs/api/designer/tools.md); 衔接 download_file → mineru_convert
+- [ ] 档案站 PDF 搜索工具 `search_archive_pdf`(暂缓): UN/FRUS 等 adapter, 见 [docs/tools/search-archive-pdf.md](docs/tools/search-archive-pdf.md)
 - [ ] 后端Agent处理(待设计)
