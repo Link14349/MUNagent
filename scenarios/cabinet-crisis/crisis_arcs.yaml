@@ -1,38 +1,38 @@
 main_arc:
   - id: border_skirmish
-    trigger: "time >= 2026-03-15T13:00:00+08:00"      # 绝对时间, 到点必发; 第一次外部冲击, 检验内阁反应速度
+    trigger: "time >= 2026-03-15T13:00:00+08:00"      # [环境压力] 开场布景: 纯时间到点, 第一次外部冲击
     content: |
       边境传来消息: 邻国军队在争议地区进行实弹演习, 双方边防部队发生对峙.
       外交界担忧局势可能升级为局部冲突.
     default_scope: global
 
   - id: parliament_window
-    trigger: "time >= border_skirmish + 2h"            # 线性链: 事发 2 小时后国内政治入场
+    trigger: "time >= border_skirmish + 2h"            # [环境压力] 开场线性链(仅布景): 国内政治入场
     content: |
       议会就边境对峙召开紧急质询, 反对党要求内阁公开表态是否强硬回应.
     default_scope: global
 
   - id: evening_news_frame
-    trigger: "time >= parliament_window + 3h"          # 18:00 前后: 对方舆论定调, 回旋空间收窄
+    trigger: "time >= parliament_window + 3h"          # [环境压力] 对方舆论定调, 回旋空间收窄
     content: |
       邻国官方晚间新闻就此次对峙定调, 舆论压力骤增, 内阁的回旋空间开始收窄.
     default_scope: global
 
-  - id: diplomatic_backchannel                         # 分支一(降级走向); ≈ story_design.md A线(外交解局线)
-    trigger: "time >= evening_news_frame + 1h and time < 2026-03-16T09:00:00+08:00"  # 外交窗口: 对方内阁定调前才有意义
+  - id: diplomatic_backchannel                         # [反应/后果] 分支一(A线); text 绑内阁是否推动降级
+    trigger: "time >= evening_news_frame + 1h and time < 2026-03-16T09:00:00+08:00"
     condition: "text '内阁已通过外交渠道推动降级或与邻国实质接触'"
     content: |
-      邻国通过秘密渠道释放缓和信号, 但国内鹰派对此强烈不满, 指责内阁软弱.
+      邻国通过秘密渠道释放缓和信号, 国内舆论对此反应分裂.
     default_scope: global
 
-  - id: escalation_night_patrol                        # 分支二: 同一陈述取反, 与分支一互斥; ≈ story_design.md C线(摩擦升级线)
-    trigger: "time >= evening_news_frame + 3h"          # 21:00 前后: 夜间走火高危时段
+  - id: escalation_night_patrol                        # [反应/后果] 分支二(C线): 同句取反, 与分支一互斥
+    trigger: "time >= evening_news_frame + 3h"
     condition: "not text '内阁已通过外交渠道推动降级或与邻国实质接触'"
     content: |
       夜间侦察对峙加剧, 前线指挥官请求扩大交火规则, 走火风险骤升.
     default_scope: global
 
-  - id: neighbor_cabinet_meeting                       # 收敛: 无论我方走哪条线, 对方内阁都会开会定调, 此前所有信号在此结算
+  - id: neighbor_cabinet_meeting                       # [环境压力] 收敛: 对方内阁定调, 此前信号在此结算
     trigger: "time >= 2026-03-16T09:00:00+08:00"
     content: |
       邻国召开内阁会议, 就此前一系列信号最终定调回应路线.

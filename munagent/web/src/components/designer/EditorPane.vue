@@ -36,15 +36,22 @@ function onEditorChange(value: string) {
 }
 
 function onKeydown(e: KeyboardEvent) {
-  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "s") {
+  if (!(e.metaKey || e.ctrlKey)) return;
+  const key = e.key.toLowerCase();
+  if (key === "s") {
     e.preventDefault();
     saveNow();
+    return;
+  }
+  if (key === "w" && d.activeFilePath) {
+    e.preventDefault();
+    d.closeTab(d.activeFilePath);
   }
 }
 
-onMounted(() => window.addEventListener("keydown", onKeydown));
+onMounted(() => window.addEventListener("keydown", onKeydown, true));
 onUnmounted(() => {
-  window.removeEventListener("keydown", onKeydown);
+  window.removeEventListener("keydown", onKeydown, true);
   if (saveTimer) clearTimeout(saveTimer);
 });
 

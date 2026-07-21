@@ -1,4 +1,4 @@
-"""设计器 chats/ JSONL 持久化(无 Agent 逻辑)."""
+"""设计器 .chats/ JSONL 持久化(无 Agent 逻辑)."""
 
 from __future__ import annotations
 
@@ -14,6 +14,7 @@ from pydantic import BaseModel
 from munagent.designer.scenario.package import _find_scenario
 
 _CHAT_ID_RE = re.compile(r"^\d{14}-[a-f0-9]{4}$")
+DEFAULT_CHAT_TITLE = "新对话"
 
 
 class ChatMeta(BaseModel):
@@ -25,7 +26,14 @@ class ChatMeta(BaseModel):
 
 
 def _chats_dir(root: Path) -> Path:
-    return root / "chats"
+    new = root / ".chats"
+    legacy = root / "chats"
+    if new.is_dir():
+        return new
+    if legacy.is_dir():
+        legacy.rename(new)
+        return new
+    return new
 
 
 def _now_iso() -> str:
@@ -91,7 +99,11 @@ def list_chats(scenario_id: str) -> list[ChatMeta]:
     return items
 
 
-def create_chat(scenario_id: str, title: str = "新对话") -> ChatMeta:
+def is_default_chat_title(title: str) -> bool:
+    return title.strip() == DEFAULT_CHAT_TITLE
+
+
+def create_chat(scenario_id: str, title: str = DEFAULT_CHAT_TITLE) -> ChatMeta:
     root, source = _find_scenario(scenario_id)
     _assert_writable(source)
     chat_id = _format_chat_id()

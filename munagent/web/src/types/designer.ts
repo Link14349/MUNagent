@@ -154,4 +154,5 @@ export type DesignerEvent =
       result: "done" | "aborted" | "failed";
       error: string | null;
     }
-  | { seq: number; type: "files_changed"; paths: string[] };
+  | { seq: number; type: "files_changed"; paths: string[] }
+  | { seq: number; type: "chat_renamed"; chat_id: string; title: string };

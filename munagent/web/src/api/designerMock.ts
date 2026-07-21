@@ -64,7 +64,7 @@ class MockScenarioStore {
 
   fileTree(): FileNode[] {
     const paths = Object.keys(this.files)
-      .filter((p) => !p.startsWith("chats/") && !p.startsWith(".history/"))
+      .filter((p) => !p.startsWith(".chats/") && !p.startsWith(".history/"))
       .sort();
     return buildTree(paths);
   }
@@ -298,7 +298,7 @@ class MockScenarioStore {
   getHistoryDiff(snapId: string): HistoryDiffEntry[] {
     void snapId;
     return Object.keys(this.files)
-      .filter((p) => !p.startsWith("chats/"))
+      .filter((p) => !p.startsWith(".chats/"))
       .slice(0, 3)
       .map((path) => ({
         path,

@@ -20,7 +20,7 @@ from munagent.designer.scenario.package import (
 )
 
 _TEXT_SUFFIXES = {".yaml", ".yml", ".md", ".txt"}
-_HIDDEN_PREFIXES = ("chats/", ".history/")
+_HIDDEN_PREFIXES = (".chats/", ".history/")
 
 
 class ValidationIssue(BaseModel):

@@ -6,7 +6,7 @@
 
 ```
 ┌ 头部(编辑模式形态): 当前对话标题 ▾ | [+ 新对话]      ┐
-│ 消息流(chats/<id>.jsonl 记录的直接渲染, 见 §2)      │
+│ 消息流(.chats/<id>.jsonl 记录的直接渲染, 见 §2)      │
 │ …                                                │
 │ ┌ 生成中: agent 正在工作… (工具 4 次) [中止] ┐      │ ← 任务运行时替换输入框
 │ 快捷 chips(§4)                                    │
@@ -54,6 +54,7 @@ type DesignerEvent =
   | { seq; type: "text_delta";    chat_id; delta: string }        // agent_text 的流式增量
   | { seq; type: "record_appended"; chat_id; record: ChatRecord } // 除增量外, 每条落盘记录原样推一份
   | { seq; type: "task_finished"; chat_id; result: "done" | "aborted" | "failed"; error: string | null }
+  | { seq; type: "chat_renamed"; chat_id; title: string }         // 首轮结束后自动概括标题
   | { seq; type: "files_changed"; paths: string[] }               // 触发文件树/编辑器/校验 chip 刷新
 ```
 
@@ -136,7 +137,7 @@ messages = [system(角色与纪律), 上下文(文件清单+manifest 摘要+📎
 
 - **终止条件 = 响应无 tool_calls**; 工具调用累计超 50 次则任务以 `failed` 结束并落 system 记录;
 - **回喂纪律**: assistant 消息只回喂 `content` + `tool_calls`, `reasoning_content` 一律不回喂(协议要求, 塞回去会报错);
-- `write_file` 是全量内容写入; chats/ 里 file_edit 记录的 unified diff 由后端对比新旧内容生成, 模型不需要产出 diff 格式;
+- `write_file` 是全量内容写入; .chats/ 里 file_edit 记录的 unified diff 由后端对比新旧内容生成, 模型不需要产出 diff 格式;
 - 每步之间检查中止标志(abort 接口置位), 中止时已落盘的记录与编辑保留.
 
 ### 7.2 流式三通道 → SSE 事件映射
@@ -161,4 +162,4 @@ messages = [system(角色与纪律), 上下文(文件清单+manifest 摘要+📎
 - agent 每轮开场自动获得: 场景包文件清单 + manifest 摘要 + 当前文件(若有 📎)——用户不需要手动"给上下文"; **todo 注入 L 段(动态上下文, 不影响 G 段缓存)**, 见下条;
 - **`check_todo` / `edit_todo`**(01§2.4 的数据层): `ToolContext` 除 `scenario_id + AppConfig` 外还需 `chat_id`(这两个工具是 chat 级, 不是场景级——loop 本来就知道当前跑在哪个 chat 上, 传入即可); `check_todo` 无参数, 返回当前 todo 全文(无则 `"(暂无 todo)"`); `edit_todo(todo: string)` 是**全量替换**: 先校验每个非空行以 `[ ] `/`[x] ` 开头(不合规返回业务错误字符串让模型自纠, 不抛异常), 校验通过后追加一条 `todo` 记录并推 `record_appended`, 工具返回值就是刚写入的全文(模型不需要紧接着再调一次 check_todo 确认);
 - **todo 不进 G 静态段, 但每步刷新 L 段**: 最新 todo 全文写入动态 L 段(与文件清单同段, 每步 loop 重建), 避免多步任务内忘记勾项; 另在每次 `write_file` 成功且清单仍有未完成项时, loop 注入一条 ephemeral 系统提醒(不落盘); 纪律见 system prompt「todo 纪律」;
-- **thinking 纪律(设计器)**: 思维链实时推前端(think_delta)但**不落 chats/**——它不进模型上下文、不影响可复现性, 落盘只占体积; 刷新后思考块消失是预期. 注意这与推演侧纪律相反(代表 Agent 的思维链对其他席位保密), 两侧各自成立, 不要互相"统一".
+- **thinking 纪律(设计器)**: 思维链实时推前端(think_delta)但**不落 .chats/**——它不进模型上下文、不影响可复现性, 落盘只占体积; 刷新后思考块消失是预期. 注意这与推演侧纪律相反(代表 Agent 的思维链对其他席位保密), 两侧各自成立, 不要互相"统一".

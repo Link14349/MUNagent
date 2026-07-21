@@ -1,7 +1,16 @@
 <script setup lang="ts">
+import { ref } from "vue";
+import type { ChatMeta } from "../../types/designer";
 import { injectDesigner } from "../../composables/useDesigner";
+import ChatContextMenu from "./ChatContextMenu.vue";
+import RenameChatDialog from "./RenameChatDialog.vue";
+import DeleteChatDialog from "./DeleteChatDialog.vue";
 
 const d = injectDesigner();
+
+const menu = ref<{ x: number; y: number; chat: ChatMeta } | null>(null);
+const renameTarget = ref<ChatMeta | null>(null);
+const deleteTarget = ref<ChatMeta | null>(null);
 
 function relTime(iso: string) {
   const diff = Date.now() - new Date(iso).getTime();
@@ -13,10 +22,25 @@ function relTime(iso: string) {
   return `${Math.floor(h / 24)} 天前`;
 }
 
-async function rename(id: string, title: string) {
-  const next = prompt("重命名对话", title);
-  if (!next?.trim()) return;
-  await d.renameChat(id, next.trim());
+function openMenu(e: MouseEvent, chat: ChatMeta) {
+  if (d.readonly) return;
+  menu.value = { x: e.clientX, y: e.clientY, chat };
+}
+
+function closeMenu() {
+  menu.value = null;
+}
+
+function openRename() {
+  if (!menu.value) return;
+  renameTarget.value = menu.value.chat;
+  closeMenu();
+}
+
+function openDelete() {
+  if (!menu.value) return;
+  deleteTarget.value = menu.value.chat;
+  closeMenu();
 }
 </script>
 
@@ -32,12 +56,37 @@ async function rename(id: string, title: string) {
         :key="c.id"
         :class="{ active: c.id === d.activeChatId }"
         @click="d.selectChat(c.id)"
-        @contextmenu.prevent="rename(c.id, c.title)"
+        @contextmenu.prevent="openMenu($event, c)"
       >
         <div class="title">{{ c.title }}</div>
         <div class="meta">{{ relTime(c.updated_at) }} · {{ c.turns }} 轮</div>
       </li>
     </ul>
+
+    <ChatContextMenu
+      v-if="menu"
+      :x="menu.x"
+      :y="menu.y"
+      @close="closeMenu"
+      @rename="openRename"
+      @delete="openDelete"
+    />
+
+    <RenameChatDialog
+      v-if="renameTarget"
+      :open="!!renameTarget"
+      :chat-id="renameTarget.id"
+      :initial-title="renameTarget.title"
+      @close="renameTarget = null"
+    />
+
+    <DeleteChatDialog
+      v-if="deleteTarget"
+      :open="!!deleteTarget"
+      :chat-id="deleteTarget.id"
+      :chat-title="deleteTarget.title"
+      @close="deleteTarget = null"
+    />
   </div>
 </template>
 

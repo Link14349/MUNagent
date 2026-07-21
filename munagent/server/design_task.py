@@ -12,7 +12,9 @@ from typing import Any
 from uuid import uuid4
 
 from munagent.config import load_config
+from munagent.config.models import AppConfig
 from munagent.designer.agent import Agent, LoopResult
+from munagent.designer.chat_title import maybe_autotitle_after_first_turn
 from munagent.designer.scenario import chats as chat_svc
 from munagent.designer.scenario import files as file_svc
 from munagent.designer.scenario import history as history_svc
@@ -213,6 +215,28 @@ class DesignTaskService:
                 },
             )
             self.emit(scenario_id, {"type": "files_changed", "paths": []})
+            if turn == 1:
+                asyncio.create_task(
+                    self._maybe_autotitle_chat(scenario_id, chat_id, config)
+                )
+
+
+    async def _maybe_autotitle_chat(
+        self,
+        scenario_id: str,
+        chat_id: str,
+        config: AppConfig,
+    ) -> None:
+        try:
+            meta = await maybe_autotitle_after_first_turn(scenario_id, chat_id, config)
+        except Exception:
+            return
+        if meta is None:
+            return
+        self.emit(
+            scenario_id,
+            {"type": "chat_renamed", "chat_id": chat_id, "title": meta.title},
+        )
 
 
 class _TaskEventSink:

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from "vue";
+import { nextTick, onMounted, ref, watch } from "vue";
 import { RouterLink, useRouter } from "vue-router";
 import { api, type ScenarioSummary } from "../api";
 import { designerApi } from "../api/designerApi";
@@ -9,6 +9,8 @@ interface ScenarioRow extends ScenarioSummary {
   last_chat_at?: string | null;
 }
 
+const SCENARIO_ID_RE = /^[a-z0-9-]+$/;
+
 const router = useRouter();
 const scenarios = ref<ScenarioRow[]>([]);
 const loading = ref(true);
@@ -16,10 +18,13 @@ const error = ref("");
 const showCreate = ref(false);
 const newId = ref("");
 const newTitle = ref("");
+const createError = ref("");
 const creating = ref(false);
+const createIdRef = ref<HTMLInputElement | null>(null);
 const dupSource = ref<ScenarioRow | null>(null);
 const dupId = ref("");
 const dupTitle = ref("");
+const dupError = ref("");
 
 async function load() {
   loading.value = true;
@@ -34,15 +39,52 @@ async function load() {
   }
 }
 
+function validateScenarioId(id: string): string | null {
+  if (!id) return "请填写场景 ID";
+  if (!SCENARIO_ID_RE.test(id)) return "ID 只能包含小写字母、数字和连字符 (a-z0-9-)";
+  return null;
+}
+
+function onEnterSubmit(e: KeyboardEvent, submit: () => void | Promise<void>) {
+  if (e.isComposing || e.key !== "Enter" || e.shiftKey) return;
+  e.preventDefault();
+  void submit();
+}
+
+function openCreate() {
+  newId.value = "";
+  newTitle.value = "";
+  createError.value = "";
+  showCreate.value = true;
+}
+
+watch(showCreate, async (open) => {
+  if (!open) return;
+  await nextTick();
+  createIdRef.value?.focus();
+});
+
 async function createDesign() {
-  if (!newId.value.trim() || !newTitle.value.trim()) return;
+  if (creating.value) return;
+  const id = newId.value.trim();
+  const title = newTitle.value.trim();
+  const idErr = validateScenarioId(id);
+  if (idErr) {
+    createError.value = idErr;
+    return;
+  }
+  if (!title) {
+    createError.value = "请填写标题";
+    return;
+  }
+  createError.value = "";
   creating.value = true;
   try {
-    await api.createScenario({ id: newId.value.trim(), title: newTitle.value.trim() });
+    await api.createScenario({ id, title });
     showCreate.value = false;
-    await router.push(`/design/${newId.value.trim()}?mode=chat`);
+    await router.push(`/design/${id}?mode=chat`);
   } catch (e) {
-    error.value = e instanceof Error ? e.message : String(e);
+    createError.value = e instanceof Error ? e.message : String(e);
   } finally {
     creating.value = false;
   }
@@ -52,17 +94,30 @@ function openDuplicate(s: ScenarioRow) {
   dupSource.value = s;
   dupId.value = `${s.id}-copy`;
   dupTitle.value = `${s.title} (副本)`;
+  dupError.value = "";
 }
 
 async function confirmDuplicate() {
-  if (!dupSource.value || !dupId.value.trim()) return;
+  if (!dupSource.value || creating.value) return;
+  const id = dupId.value.trim();
+  const title = dupTitle.value.trim();
+  const idErr = validateScenarioId(id);
+  if (idErr) {
+    dupError.value = idErr;
+    return;
+  }
+  if (!title) {
+    dupError.value = "请填写标题";
+    return;
+  }
+  dupError.value = "";
   creating.value = true;
   try {
-    await designerApi.duplicate(dupSource.value.id, dupId.value.trim(), dupTitle.value.trim());
+    await designerApi.duplicate(dupSource.value.id, id, title);
     dupSource.value = null;
-    await router.push(`/design/${dupId.value.trim()}?mode=chat`);
+    await router.push(`/design/${id}?mode=chat`);
   } catch (e) {
-    error.value = e instanceof Error ? e.message : String(e);
+    dupError.value = e instanceof Error ? e.message : String(e);
   } finally {
     creating.value = false;
   }
@@ -86,8 +141,8 @@ onMounted(load);
     <p class="hint">选择场景进入设计工作台, 或用一句话主题让 Agent 协助生成场景包。</p>
 
     <div class="actions">
-      <button type="button" @click="showCreate = true">新建设计</button>
-      <button class="ghost" disabled title="P3+ 推演引擎">开始推演</button>
+      <button type="button" @click="openCreate">新建设计</button>
+      <button type="button" class="ghost" disabled title="P3+ 推演引擎">开始推演</button>
     </div>
 
     <p v-if="loading">加载中…</p>
@@ -112,17 +167,31 @@ onMounted(load);
     </ul>
 
     <div v-if="showCreate" class="modal" @click.self="showCreate = false">
-      <form class="dialog" @submit.prevent="createDesign">
+      <form class="dialog" novalidate @submit.prevent="createDesign">
         <h2>新建设计</h2>
         <label>
           ID (a-z0-9-)
-          <input v-model="newId" pattern="[a-z0-9-]+" required placeholder="france-1848" />
+          <input
+            ref="createIdRef"
+            v-model="newId"
+            placeholder="france-1848"
+            autocomplete="off"
+            :disabled="creating"
+            @keydown="onEnterSubmit($event, createDesign)"
+          />
         </label>
         <label>
           标题
-          <input v-model="newTitle" required placeholder="法国1848" />
+          <input
+            v-model="newTitle"
+            placeholder="法国1848"
+            autocomplete="off"
+            :disabled="creating"
+            @keydown="onEnterSubmit($event, createDesign)"
+          />
         </label>
         <p class="tip">创建后将进入对话模式, 用第一句话描述你想做的历史场景。</p>
+        <p v-if="createError" class="error">{{ createError }}</p>
         <div class="row">
           <button type="button" @click="showCreate = false">取消</button>
           <button type="submit" :disabled="creating">{{ creating ? "创建中…" : "创建并进入" }}</button>
@@ -131,17 +200,28 @@ onMounted(load);
     </div>
 
     <div v-if="dupSource" class="modal" @click.self="dupSource = null">
-      <form class="dialog" @submit.prevent="confirmDuplicate">
+      <form class="dialog" novalidate @submit.prevent="confirmDuplicate">
         <h2>另存为副本</h2>
         <p>基于内置场景「{{ dupSource.title }}」创建可编辑副本。</p>
         <label>
           新 ID
-          <input v-model="dupId" pattern="[a-z0-9-]+" required />
+          <input
+            v-model="dupId"
+            autocomplete="off"
+            :disabled="creating"
+            @keydown="onEnterSubmit($event, confirmDuplicate)"
+          />
         </label>
         <label>
           标题
-          <input v-model="dupTitle" required />
+          <input
+            v-model="dupTitle"
+            autocomplete="off"
+            :disabled="creating"
+            @keydown="onEnterSubmit($event, confirmDuplicate)"
+          />
         </label>
+        <p v-if="dupError" class="error">{{ dupError }}</p>
         <div class="row">
           <button type="button" @click="dupSource = null">取消</button>
           <button type="submit" :disabled="creating">创建副本</button>
@@ -245,6 +325,10 @@ onMounted(load);
   font-size: 0.82rem;
   color: var(--text-muted);
   margin: 0;
+}
+.dialog .error {
+  margin: 0;
+  font-size: 0.85rem;
 }
 .row {
   display: flex;

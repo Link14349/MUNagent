@@ -57,6 +57,31 @@ def test_create_chat(user_root: Path) -> None:
     chats = chat_svc.list_chats("edit-me")
     assert len(chats) == 1
     assert chats[0].id == chat.id
+    assert (user_root / ".chats" / f"{chat.id}.jsonl").is_file()
+
+
+def test_create_chat_migrates_legacy_chats_dir(user_root: Path) -> None:
+    legacy = user_root / "chats"
+    legacy.mkdir()
+    chat_id = "20250713120000-abcd"
+    (legacy / f"{chat_id}.jsonl").write_text(
+        '{"type":"meta","v":1,"id":"'
+        + chat_id
+        + '","title":"旧目录","created_at":"2025-07-13T12:00:00+08:00"}\n',
+        encoding="utf-8",
+    )
+    chats = chat_svc.list_chats("edit-me")
+    assert len(chats) == 1
+    assert chats[0].title == "旧目录"
+    assert (user_root / ".chats" / f"{chat_id}.jsonl").is_file()
+    assert not legacy.exists()
+
+
+def test_snapshot_uses_hidden_meta(user_root: Path) -> None:
+    snap = history_svc.create_snapshot("edit-me", kind="manual", note="测试")
+    meta_path = user_root / ".history" / snap.id / ".meta.yaml"
+    assert meta_path.is_file()
+    assert not (user_root / ".history" / snap.id / "meta.yaml").exists()
 
 
 def test_invalid_seat_yaml_returns_issue_not_crash(user_root: Path) -> None:

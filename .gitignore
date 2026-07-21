@@ -227,3 +227,5 @@ debug_prompts/
 out/
 munagent/web/node_modules/
 munagent/web/dist/
+
+.vscode/

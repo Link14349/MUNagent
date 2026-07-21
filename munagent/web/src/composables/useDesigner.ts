@@ -57,6 +57,7 @@ export interface DesignerStore {
   saveSnapshot: (note?: string) => Promise<void>;
   restoreHistory: (snapId: string) => Promise<void>;
   renameChat: (id: string, title: string) => Promise<void>;
+  deleteChat: (id: string) => Promise<void>;
   duplicateScenario: (newId: string, newTitle: string) => Promise<string>;
 }
 
@@ -329,6 +330,18 @@ export function useDesigner(scenarioId: string): DesignerStore {
       chats.value = state.chats;
     },
 
+    async deleteChat(id) {
+      await designerApi.deleteChat(scenarioId, id);
+      chats.value = chats.value.filter((c) => c.id !== id);
+      if (activeChatId.value !== id) return;
+      const next = chats.value[0];
+      if (next) {
+        await store.selectChat(next.id);
+      } else {
+        await store.newChat();
+      }
+    },
+
     async duplicateScenario(newId, newTitle) {
       return designerApi.duplicate(scenarioId, newId, newTitle);
     },
@@ -354,6 +367,14 @@ export function useDesigner(scenarioId: string): DesignerStore {
       }
       if (ev.record.type === "usage") {
         totalTokens.value += ev.record.input_tokens + ev.record.output_tokens;
+      }
+    }
+    if (ev.type === "chat_renamed") {
+      const idx = chats.value.findIndex((c) => c.id === ev.chat_id);
+      if (idx >= 0) {
+        chats.value = chats.value.map((c) =>
+          c.id === ev.chat_id ? { ...c, title: ev.title } : c
+        );
       }
     }
     if (ev.type === "task_finished") {

@@ -20,6 +20,8 @@ Provider 支持: `tavily` / `serper` / `bocha`.
 
 设计历史委/危机委场景时, 建议 Agent 按此优先级找资料:
 
+**检索语言**: 查哪国/哪地区, 就用该地主要语言或**英文**写 query; **不要默认中文搜**——除中国本土史等外, 中文结果常不全、质量低. 场景包正文仍中文, 仅检索用语外语.
+
 ```
 1. search_wikipedia   → 建背景 + 条目外链里的 PDF 线索(自动存 md)
 2. web_search         → 泛网搜页面/机构站线索
@@ -59,6 +61,7 @@ search_web_pdf("Suez Crisis 1956 declassified")
 **注意**
 
 - 维基全文用 `search_wikipedia`, **不要** `fetch_page` 抓维基 HTML.
+- 检索 query 用语言: 主题国/地区语种或英文; 中国史可用中文. 例: 1848 法国 → `lang="fr"` 或 `lang="en"`, 不用纯中文关键词起手.
 - `search_web_pdf` 默认**不限** `site:`; 需要某机构文件时传 `site: "un.org"` 等.
 - JSTOR / ResearchGate 等常 403, 换 `nsarchive.gwu.edu`、`archives.gov` 等结果.
 - `mineru_convert` 支持 `.pdf` / `.epub` / `.mobi`; 大部头 epub/mobi 约 5–10 分钟.

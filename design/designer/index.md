@@ -10,7 +10,7 @@
 
 场景包文件结构文件格式见./scenarios下面的参考.
 
-然后场景包文件结构里面还有个文件夹是./chats/, 用来放在这个场景包中所有的与agent的对话记录. chats格式自行设计: (基本的要素: 用户发送的信息, agent回复的信息, agent编辑的文件，编辑内容, 调用的工具等等...)
+然后场景包文件结构里面还有个隐藏文件夹是`./.chats/`, 用来放在这个场景包中所有的与agent的对话记录. chats格式自行设计: (基本的要素: 用户发送的信息, agent回复的信息, agent编辑的文件，编辑内容, 调用的工具等等...)
 
 这也就是说, agent对话和场景文件夹是绑定的
 
@@ -27,7 +27,7 @@
 
 | 文档 | 内容 |
 |---|---|
-| [01-data-chats.md](01-data-chats.md) | 场景包结构(manifest、venues.yaml 含 seats 清单、seats/ 角色卡、crisis_arcs、stats、chats/、.history/)、chat JSONL 格式(含 todo 派生状态)、编辑落盘与撤销、版本快照 |
+| [01-data-chats.md](01-data-chats.md) | 场景包结构(manifest、venues.yaml 含 seats 清单、seats/ 角色卡、crisis_arcs、stats、.chats/、.history/)、chat JSONL 格式(含 todo 派生状态)、编辑落盘与撤销、版本快照 |
 | [02-ui-modes.md](02-ui-modes.md) | 编辑/对话双模式布局与切换、路由与首页入口、文件树/编辑器/预览的行为、人机写冲突处理、校验 chip 与导出、历史版本面板 |
 | [03-agent-interaction.md](03-agent-interaction.md) | 对话面板(记录渲染/编辑卡/diff/撤销/思考块/当前计划条)、agent 任务与 SSE 流式协议、REST 契约(含快照接口)、前端代码组织、设计 Agent loop(原生 function calling + 流式三通道)、9 个工具与 LLM 层要求 |
 

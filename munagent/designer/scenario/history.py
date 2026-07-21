@@ -25,6 +25,9 @@ from munagent.designer.scenario.files import (
 _HISTORY_KIND = Literal["auto", "manual", "restore_backup"]
 _ROLLING_LIMIT = 30
 _SNAP_ID_RE = re.compile(r"^\d{14}-(auto|manual|restore_backup)$")
+_SNAP_META_NAME = ".meta.yaml"
+_LEGACY_SNAP_META_NAME = "meta.yaml"
+_SNAP_META_NAMES = frozenset({_SNAP_META_NAME, _LEGACY_SNAP_META_NAME})
 
 
 class HistorySnapshot(BaseModel):
@@ -63,10 +66,16 @@ def _format_snap_id(kind: _HISTORY_KIND) -> str:
     return f"{stamp}-{kind}"
 
 
+def _resolve_snap_meta_path(snap_dir: Path) -> Path:
+    for name in (_SNAP_META_NAME, _LEGACY_SNAP_META_NAME):
+        path = snap_dir / name
+        if path.is_file():
+            return path
+    raise ValueError(f"快照缺少 {_SNAP_META_NAME}: {snap_dir.name}")
+
+
 def _load_snap_meta(snap_dir: Path) -> HistorySnapshot:
-    meta_path = snap_dir / "meta.yaml"
-    if not meta_path.is_file():
-        raise ValueError(f"快照缺少 meta.yaml: {snap_dir.name}")
+    meta_path = _resolve_snap_meta_path(snap_dir)
     data: dict[str, Any] = yaml.safe_load(meta_path.read_text(encoding="utf-8")) or {}
     return HistorySnapshot(
         id=data.get("id", snap_dir.name),
@@ -82,6 +91,8 @@ def _load_snap_meta(snap_dir: Path) -> HistorySnapshot:
 def _content_paths_in_dir(base: Path) -> dict[str, str]:
     files: dict[str, str] = {}
     for rel in list_content_paths(base):
+        if rel in _SNAP_META_NAMES:
+            continue
         files[rel] = _read_text(base / rel)
     return files
 
@@ -146,7 +157,7 @@ def create_snapshot(
         "chat_id": chat_id,
         "turn": turn,
     }
-    (snap_dir / "meta.yaml").write_text(
+    (snap_dir / _SNAP_META_NAME).write_text(
         yaml.safe_dump(meta, allow_unicode=True, sort_keys=False),
         encoding="utf-8",
     )

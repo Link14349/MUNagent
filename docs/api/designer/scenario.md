@@ -12,7 +12,7 @@
 | `save_scenario_files(id, files) -> ScenarioDetail` | 更新用户场景文件(整包) |
 | `delete_scenario(id)` | 删除用户场景(内置只读) |
 | `duplicate_scenario(id, new_id, new_title)` | 另存为副本到用户目录 |
-| `export_scenario_zip(id, include_raw=False) -> bytes` | 导出 zip(剔除 chats/.history/) |
+| `export_scenario_zip(id, include_raw=False) -> bytes` | 导出 zip(剔除 .chats/.history/) |
 
 路径: 内置 `scenarios/`, 用户 `~/.munagent/scenarios/`
 
@@ -27,7 +27,7 @@
 | 函数 | 说明 |
 |---|---|
 | `get_file / put_file / delete_file / rename_file` | 单文件 CRUD; put/delete 返回 `validation` |
-| `build_file_tree / scenario_design_meta` | 文件树(隐藏 chats/.history/) + 校验 issues |
+| `build_file_tree / scenario_design_meta` | 文件树(隐藏 .chats/.history/) + 校验 issues |
 | `list_package_files / read_bytes / put_bytes` | Agent 工具用: 含二进制清单与读写 |
 | `validate_package_issues(root)` | 软校验, 供顶栏 chip |
 

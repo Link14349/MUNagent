@@ -13,7 +13,7 @@ import yaml
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 _SCENARIO_ID_RE = re.compile(r"^[a-z0-9-]+$")
-_HIDDEN_PREFIXES = ("chats/", ".history/")
+_HIDDEN_PREFIXES = (".chats/", ".history/")
 
 
 def _repo_root() -> Path:
