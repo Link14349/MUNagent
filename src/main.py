@@ -165,12 +165,15 @@ def demo_versioning(fs, draft, venue_id: str) -> None:
     except PermissionError as exc:
         _denied("代表读取任一提交副本", exc)
 
-    _section("B7. list_visible：代表侧看不到 submissions")
+    _section("B7. list_visible / list_writable（仅 reps/，不含 submissions）")
     for rep_id in (CHURCHILL, STALIN, EDEN):
-        names = [f.path.relative_to(fs.path).as_posix() for f in fs.list_visible(rep_id)]
-        print(f"  {rep_id} 可见: {names}")
+        visible = [f.path.relative_to(fs.path).as_posix() for f in fs.list_visible(rep_id)]
+        writable = [f.path.relative_to(fs.path).as_posix() for f in fs.list_writable(rep_id)]
+        print(f"  {rep_id}")
+        print(f"    visible:  {visible}")
+        print(f"    writable: {writable}")
     all_names = [f.path.relative_to(fs.path).as_posix() for f in fs.list_all()]
-    print(f"  系统全部文件: {all_names}")
+    print(f"  系统全部文件（含 submissions）: {all_names}")
 
 
 def demo_filesystem(scenario: Scenario) -> None:

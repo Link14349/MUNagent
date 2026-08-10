@@ -155,12 +155,23 @@ def test_submit_uses_primary_owner_not_submitter(fs: FileSystem, venue_id: str) 
     ) == "联合草案"
 
 
-def test_list_visible_hides_submissions_from_reps(fs: FileSystem) -> None:
+def test_list_visible_and_writable_only_reps(fs: FileSystem) -> None:
     draft = fs.create_rep_file(CHURCHILL, "draft.md", "草案")
+    shared = fs.create_rep_file(CHURCHILL, "shared.md", "共享草稿")
+    fs.add_scope(f"reps/{CHURCHILL}/shared.md", CHURCHILL, {EDEN})
     draft.submit(CHURCHILL)
-    visible = [f.path.name for f in fs.list_visible(CHURCHILL)]
-    assert visible == ["draft.md"]
-    assert len(fs.list_all()) == 2
+
+    assert [f.path.name for f in fs.list_visible(CHURCHILL)] == ["draft.md", "shared.md"]
+    assert [f.path.name for f in fs.list_writable(CHURCHILL)] == ["draft.md", "shared.md"]
+    assert [f.path.name for f in fs.list_visible(EDEN)] == ["shared.md"]
+    assert [f.path.name for f in fs.list_writable(EDEN)] == []
+    assert fs.list_visible(STALIN) == []
+    assert fs.list_writable(STALIN) == []
+    # submissions 不出现在上述列表中，但仍在 list_all 里
+    assert len(fs.list_all()) == 3
+
+    fs.add_owner(f"reps/{CHURCHILL}/shared.md", CHURCHILL, {EDEN})
+    assert [f.path.name for f in fs.list_writable(EDEN)] == ["shared.md"]
 
 
 def test_manifest_roundtrip(fs: FileSystem, scenario: Scenario, venue_id: str) -> None:

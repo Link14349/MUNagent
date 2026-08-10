@@ -84,6 +84,12 @@ class MotionSwitchEvent(Event):
 
 
 class InstructionEvent(Event):
+    """指示类事件：``instruction`` 绑定一份 File（通常为 submission 副本）。
+
+    事件落在代表 scope 内时，该代表可通过本事件索引得知并访问该文件；
+    不能通过 FileSystem.list_visible 直接发现 submissions/。
+    """
+
     type: EventType
     instruction: File
     __from: set[str]
@@ -103,6 +109,11 @@ class InstructionEvent(Event):
 
 
 class ResolutionEvent(Event):
+    """决议类事件：``resolution`` 绑定一份 File（通常为 submission 副本）。
+
+    可见性语义同 :class:`InstructionEvent`：经 EventList 可见事件索引，而非文件系统枚举。
+    """
+
     type: EventType
     resolution: File
     __from: set[str]

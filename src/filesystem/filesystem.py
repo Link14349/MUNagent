@@ -6,9 +6,13 @@
     ├── reps/
     │   ├── winston_churchill/...
     │   └── ...
-    └── submissions/          # 仅存放代表提交副本；owner 为空，代表不可见不可改
+    └── submissions/          # 提交副本；owner/scope 为空
         └── <venue_id>/
             └── <primary_owner>+<原文件名>+v<版本号>
+
+代表通过 ``list_visible`` / ``list_writable`` 只能看到 ``reps/`` 下的文件。
+``submissions/`` 不出现在上述列表中；代表若要得知某份提交的存在，只能经由
+``EventList`` 中对其可见、并索引到该 ``File`` 的事件（如 Instruction / Resolution）。
 """
 
 from __future__ import annotations
@@ -459,14 +463,39 @@ class FileSystem:
         file.add_owner(actor, newcomers)
         self._save_manifest()
 
-    def list_visible(self, actor: str) -> list[File]:
-        """列出对 ``actor`` 可见的文件（按相对路径排序）。"""
-        visible = [file for file in self._files.values() if file.visible_to(actor)]
+    def list_visible(self, rep_id: str) -> list[File]:
+        """列出 ``rep_id`` 在 ``reps/`` 下可见的文件。
+
+        不含 ``submissions/``：提交副本只能通过 EventList 中对该代表可见的事件索引获知。
+        """
+        self._require_rep_id(rep_id, field="list_visible.rep_id")
+        visible = [
+            file
+            for key, file in self._files.items()
+            if key.startswith("reps/") and file.visible_to(rep_id)
+        ]
         return sorted(visible, key=lambda item: self._relkey(item.path))
+
+    def list_writable(self, rep_id: str) -> list[File]:
+        """列出 ``rep_id`` 在 ``reps/`` 下可写的文件。
+
+        不含 ``submissions/``：提交副本对代表不可写，也不经由本方法暴露。
+        """
+        self._require_rep_id(rep_id, field="list_writable.rep_id")
+        writable = [
+            file
+            for key, file in self._files.items()
+            if key.startswith("reps/") and rep_id in file.owners
+        ]
+        return sorted(writable, key=lambda item: self._relkey(item.path))
 
     def list_all(self) -> list[File]:
         """列出全部已登记文件（仅供系统/调试）。"""
         return sorted(self._files.values(), key=lambda item: self._relkey(item.path))
+
+    def _require_rep_id(self, rep_id: str, *, field: str) -> None:
+        if rep_id not in self._known_rep_ids():
+            raise ValueError(f"{field} 含未知代表 ID: {rep_id}")
 
     def _latest_submission(
         self,

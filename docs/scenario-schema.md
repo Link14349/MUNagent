@@ -43,7 +43,13 @@
 
 `background.md` 和 `storyline.yaml` 使用固定文件名。venue 和代表文件分别通过扫描 `venues/*.yaml`、`reps/*.yaml` 发现，因此 `index.yaml` 不需要 `files`、`venues` 或 `representatives` 字段。
 
-`simulation/` 由通用引擎在 `Scenario.initialize()` 时创建并绑定一个 `FileSystem`；场景包作者不在此目录写入声明式内容。运行时文件的代表可见性由 `scope`/`owner` 程序强制执行：`submissions/` 只存放经 `File.submit()` 复制的用户提交，命名为 `<primary_owner>+<原文件名>+v<版本号>`（`primary_owner` 为该文件 owner 集合中最先加入者）；与同系列最新版内容 hash 相同则拒绝，否则递增版本。副本 `owner`/`scope` 为空（代表不可见、不可改）。
+`simulation/` 由通用引擎在 `Scenario.initialize()` 时创建并绑定一个 `FileSystem`；场景包作者不在此目录写入声明式内容。
+
+运行时文件可见性由程序强制执行：
+
+- `reps/<rep_id>/`：工作文件，通过 `scope`/`owner` 控制读/写；`list_visible` / `list_writable` 只枚举该目录。
+- `submissions/<venue_id>/`：仅存放经 `File.submit()` 复制的提交副本，命名为 `<primary_owner>+<原文件名>+v<版本号>`（`primary_owner` 为该文件 owner 集合中最先加入者）；与同系列最新版内容 hash 相同则拒绝，否则递增版本。副本 `owner`/`scope` 为空，**不能**通过文件系统列表或直接路径被代表发现或改写。
+- 代表若要得知某份 submission 的存在并读取其内容，只能经由 `EventList.get_events(rep_id)` 返回的、对该代表可见的事件（例如绑定了 `File` 的 `InstructionEvent` / `ResolutionEvent`）索引到该文件；引擎组装 Agent 上下文时不得把未被子事件引用的 submission 注入可见文件列表。
 
 ## 3. 通用约定
 

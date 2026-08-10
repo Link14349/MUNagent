@@ -65,6 +65,11 @@ class EventList:
         self.__time = event.time
 
     def get_events(self, rep: str) -> list[Event]:
+        """返回对 ``rep`` 可见的事件。
+
+        代表获知 submission 文件的唯一正规途径：可见事件（如 Instruction / Resolution）
+        上绑定的 ``File`` 引用；不得依赖 FileSystem 对 submissions/ 的直接枚举。
+        """
         if rep == "__GOD__":
             return [event for event in self.__events]
         return [event for event in self.__events if rep in event.scope]
