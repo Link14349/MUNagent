@@ -1,7 +1,8 @@
-"""MUNagent 入口：加载并打印场景包摘要。"""
+"""MUNagent 入口：演示 FileSystem（权限控制 + 提交版本管理）。"""
 
 from __future__ import annotations
 
+import shutil
 import sys
 from pathlib import Path
 
@@ -9,119 +10,201 @@ _SRC = Path(__file__).resolve().parent
 if str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
 
-from scenario.representative import PrivateTarget, Representative
+from filesystem.filesystem import SYSTEM_ACTOR
 from scenario.scenario import Scenario
-from scenario.venue import Agenda, Venue
+
+CHURCHILL = "winston_churchill"
+STALIN = "joseph_stalin"
+EDEN = "anthony_eden"
 
 
-def _indent(text: str, level: int = 1) -> str:
-    prefix = "  " * level
-    return "\n".join(f"{prefix}{line}" for line in text.splitlines())
-
-
-def _print_list(title: str, items: list[str], *, level: int = 1) -> None:
-    prefix = "  " * level
-    print(f"{prefix}{title}:")
-    if not items:
-        print(f"{prefix}  (空)")
-        return
-    for item in items:
-        print(f"{prefix}  - {item}")
-
-
-def _print_agenda(agenda: Agenda, *, level: int = 2) -> None:
-    prefix = "  " * level
-    print(f"{prefix}[{agenda.id}] {agenda.title}")
-    for question in agenda.questions:
-        print(f"{prefix}  ? {question}")
-
-
-def _print_venue(venue: Venue) -> None:
+def _section(title: str) -> None:
     print(f"\n{'=' * 60}")
-    print(f"会场: {venue.name} ({venue.id})")
-    print(f"{'=' * 60}")
-    print(_indent(f"时区: {venue.timezone}"))
-    print(_indent(f"主席: {venue.chair}"))
-    print(_indent(f"初始议题: {venue.initial_agenda}"))
-    print(_indent(f"描述:\n{_indent(venue.description, 2)}"))
-    _print_list("席位", venue.seats)
-    print(_indent("议程阶段:"))
-    for agenda in venue.agenda:
-        _print_agenda(agenda)
+    print(title)
+    print("=" * 60)
 
 
-def _print_private_target(target: PrivateTarget, *, level: int = 2) -> None:
-    prefix = "  " * level
-    print(f"{prefix}[{target.id}] ({target.importance}) {target.objective}")
+def _ok(message: str) -> None:
+    print(f"  ✓ {message}")
 
 
-def _print_representative(rep: Representative) -> None:
-    print(f"\n{'=' * 60}")
-    print(f"代表: {rep.name} ({rep.id})")
-    print(f"{'=' * 60}")
-    venue_id = rep.venue.id if rep.venue else "?"
-    print(_indent(f"会场: {venue_id}"))
-    print(_indent(f"代表团: {rep.delegation}"))
-    print(_indent(f"角色: {rep.role}"))
-    print(_indent(f"头衔: {rep.title}"))
-    print(_indent(f"立场: {rep.position}"))
+def _denied(action: str, exc: BaseException) -> None:
+    print(f"  ✗ 拒绝：{action}")
+    print(f"      → {exc}")
 
-    _print_list("公开目标", rep.public_target)
-    _print_list("正式权力", rep.public_formal_powers)
-    _print_list("公开限制", rep.public_limits)
 
-    print(_indent("私密目标:"))
-    for target in rep.private_target:
-        _print_private_target(target)
+def _hash_short(value: str) -> str:
+    return value[:12] + "…"
 
-    _print_list("红线", rep.private_red_lines)
-    _print_list("谈判空间", rep.private_bargaining_space)
-    _print_list("私密信息", rep.private_information)
 
-    print(_indent("人物关系:"))
-    if not rep.relationships:
-        print(_indent("(空)", 2))
-    else:
-        for related_id, note in rep.relationships.items():
-            print(_indent(f"{related_id}: {note}", 2))
+def demo_permissions(fs, venue_id: str) -> None:
+    _section("A. 权限：私有文件 / scope / owner")
+    draft = fs.create_rep_file(CHURCHILL, "percentages.md", "希腊 90% / 罗马尼亚 10%")
+    _ok(f"创建私有文件 owner={sorted(draft.owners)} scope={sorted(draft.scope)}")
+    _ok(f"primary_owner={draft.primary_owner!r}（提交命名将使用它）")
 
-    print(_indent("人格:"))
-    for key, value in rep._persona.items():
-        print(_indent(f"{key}: {value}", 2))
+    try:
+        fs.read(f"reps/{CHURCHILL}/percentages.md", STALIN)
+    except PermissionError as exc:
+        _denied("斯大林读取丘吉尔私有草案", exc)
 
-    print(_indent(f"Agent 指令:\n{_indent(rep._agent_directive, 2)}"))
+    fs.add_scope(f"reps/{CHURCHILL}/percentages.md", CHURCHILL, {EDEN})
+    _ok(f"艾登加入 scope 后可读: {fs.read(f'reps/{CHURCHILL}/percentages.md', EDEN)!r}")
+    try:
+        fs.write(f"reps/{CHURCHILL}/percentages.md", EDEN, "艾登篡改")
+    except PermissionError as exc:
+        _denied("艾登写入（在 scope 非 owner）", exc)
+
+    try:
+        fs.add_scope(f"reps/{CHURCHILL}/percentages.md", EDEN, {STALIN})
+    except PermissionError as exc:
+        _denied("非 owner 扩大 scope", exc)
+
+    fs.add_owner(f"reps/{CHURCHILL}/percentages.md", CHURCHILL, {EDEN})
+    fs.write(f"reps/{CHURCHILL}/percentages.md", EDEN, "希腊 90% / 罗马尼亚 10%（艾登修订）")
+    _ok(f"提升 owner 后艾登可写；owners={sorted(draft.owners)}")
+    _ok(f"primary_owner 仍为 {draft.primary_owner!r}（不因 add_owner 改变）")
+
+    fs.create_rep_file(STALIN, "red_lines.md", "巴尔干红线")
+    try:
+        fs.add_owner(f"reps/{STALIN}/red_lines.md", STALIN, {CHURCHILL})
+    except PermissionError as exc:
+        _denied("未入 scope 不能成为 owner", exc)
+
+    try:
+        fs.create_file(f"submissions/{venue_id}/forged.md", "伪造", owner=CHURCHILL)
+    except ValueError as exc:
+        _denied("禁止直接创建 submissions/", exc)
+
+    return draft
+
+
+def demo_versioning(fs, draft, venue_id: str) -> None:
+    _section("B1. 首次提交 → v1（命名 = primary_owner+原文件名+v版本）")
+    content_v1 = fs.read(f"reps/{CHURCHILL}/percentages.md", CHURCHILL)
+    _ok(f"提交前内容: {content_v1!r}")
+    _ok(f"content_hash: {_hash_short(draft.content_hash)}")
+    _ok(f"can_submit(丘吉尔)={draft.can_submit(CHURCHILL)}, can_submit(斯大林)={draft.can_submit(STALIN)}")
+
+    v1 = draft.submit(CHURCHILL)
+    rel_v1 = f"submissions/{venue_id}/{v1.path.name}"
+    _ok(f"生成: {rel_v1}")
+    assert v1.path.name == f"{CHURCHILL}+percentages.md+v1"
+    _ok(f"副本 owner/scope 为空: owners={sorted(v1.owners)}, scope={sorted(v1.scope)}")
+    _ok(f"系统可读 v1: {fs.read(rel_v1, SYSTEM_ACTOR)!r}")
+
+    _section("B2. 未改动再次提交 → 拒绝（hash 相同）")
+    _ok(f"can_submit(丘吉尔) 现在应为 False → {draft.can_submit(CHURCHILL)}")
+    try:
+        draft.submit(CHURCHILL)
+    except ValueError as exc:
+        _denied("内容相对 v1 未变化", exc)
+
+    _section("B3. 改稿后再提交 → v2（旧版本保留）")
+    fs.write(
+        f"reps/{CHURCHILL}/percentages.md",
+        CHURCHILL,
+        "希腊 90% / 罗马尼亚 10%（二稿）",
+    )
+    content_v2 = fs.read(f"reps/{CHURCHILL}/percentages.md", CHURCHILL)
+    _ok(f"原文件已改为: {content_v2!r}")
+    _ok(f"新 hash: {_hash_short(draft.content_hash)}（与 v1 不同）")
+    _ok(f"can_submit(丘吉尔)={draft.can_submit(CHURCHILL)}")
+
+    v2 = draft.submit(CHURCHILL)
+    rel_v2 = f"submissions/{venue_id}/{v2.path.name}"
+    assert v2.path.name == f"{CHURCHILL}+percentages.md+v2"
+    _ok(f"生成: {rel_v2}")
+    _ok(f"v1 仍保留旧稿: {fs.read(rel_v1, SYSTEM_ACTOR)!r}")
+    _ok(f"v2 为新稿:     {fs.read(rel_v2, SYSTEM_ACTOR)!r}")
+
+    _section("B4. 再改一版 → v3；未改动仍拒绝")
+    fs.write(
+        f"reps/{CHURCHILL}/percentages.md",
+        CHURCHILL,
+        "希腊 90% / 罗马尼亚 10%（三稿，最终）",
+    )
+    v3 = draft.submit(CHURCHILL)
+    rel_v3 = f"submissions/{venue_id}/{v3.path.name}"
+    assert v3.path.name == f"{CHURCHILL}+percentages.md+v3"
+    _ok(f"生成: {rel_v3}")
+    try:
+        draft.submit(CHURCHILL)
+    except ValueError as exc:
+        _denied("相对最新 v3 未改动", exc)
+
+    _section("B5. 联合 owner 提交：文件名仍用 primary_owner，不是提交者")
+    # 艾登已是 owner；由艾登提交，文件名仍以丘吉尔为前缀
+    fs.write(
+        f"reps/{CHURCHILL}/percentages.md",
+        EDEN,
+        "希腊 90% / 罗马尼亚 10%（艾登四稿）",
+    )
+    v4 = draft.submit(EDEN)
+    assert v4.path.name == f"{CHURCHILL}+percentages.md+v4"
+    _ok(f"提交者=艾登，但文件名为: {v4.path.name}")
+    _ok(f"primary_owner={draft.primary_owner!r} 决定命名前缀")
+
+    _section("B6. 版本链一览 + 提交副本不可再 submit / 代表不可见")
+    versions = sorted(
+        f.path.name
+        for f in fs.list_all()
+        if f.is_submission and f.path.name.startswith(f"{CHURCHILL}+percentages.md+v")
+    )
+    print("  版本链:")
+    for name in versions:
+        body = fs.read(f"submissions/{venue_id}/{name}", SYSTEM_ACTOR)
+        print(f"    - {name}: {body!r}")
+
+    try:
+        v1.submit(CHURCHILL)
+    except PermissionError as exc:
+        _denied("对提交副本再次 submit", exc)
+    try:
+        fs.read(f"submissions/{venue_id}/{v4.path.name}", CHURCHILL)
+    except PermissionError as exc:
+        _denied("代表读取任一提交副本", exc)
+
+    _section("B7. list_visible：代表侧看不到 submissions")
+    for rep_id in (CHURCHILL, STALIN, EDEN):
+        names = [f.path.relative_to(fs.path).as_posix() for f in fs.list_visible(rep_id)]
+        print(f"  {rep_id} 可见: {names}")
+    all_names = [f.path.relative_to(fs.path).as_posix() for f in fs.list_all()]
+    print(f"  系统全部文件: {all_names}")
+
+
+def demo_filesystem(scenario: Scenario) -> None:
+    fs = scenario.filesystem
+    if fs is None:
+        raise RuntimeError("Scenario 尚未 initialize，filesystem 为空")
+
+    venue_id = scenario.venues[0].id
+    print(f"推演目录: {fs.path}")
+    print(f"会场: {venue_id}")
+
+    draft = demo_permissions(fs, venue_id)
+    demo_versioning(fs, draft, venue_id)
 
 
 def main() -> None:
     root = Path(__file__).resolve().parent.parent / "scenario-template"
     scenario = Scenario()
     scenario.load(str(root))
+    scenario.initialize()
+    run_dir = scenario.filesystem.path if scenario.filesystem is not None else None
 
-    print(f"场景: {scenario.title}")
-    print(f"时区: {scenario.timezone}")
-    print(f"开场时间: {scenario.start_time}")
-    if scenario.event_list is not None:
-        print(f"当前时间: {scenario.event_list.time}")
-    print(f"背景字数: {len(scenario.background)}")
-    print(f"场景目标数: {len(scenario.targets)}")
-    print(f"会场数: {len(scenario.venues)}")
-    print(f"代表数: {len(scenario.representatives)}")
-    print(f"外部事件数: {len(scenario.event_pool)}")
-    print(f"结束条件数: {len(scenario.end_conditions)}")
+    try:
+        _section("场景已加载并 initialize")
+        print(f"  标题: {scenario.title}")
+        print(f"  代表: {', '.join(rep.id for rep in scenario.representatives)}")
+        assert scenario.filesystem is not None
 
-    print("\n场景目标:")
-    for index, target in enumerate(scenario.targets, start=1):
-        print(f"  {index}. {target}")
-
-    for venue in scenario.venues:
-        _print_venue(venue)
-
-    for rep in scenario.representatives:
-        _print_representative(rep)
-
-    print("\n外部事件:")
-    for event in scenario.event_pool:
-        print(f"  - [{event.condition.type}] {event.content[:80]}...")
+        demo_filesystem(scenario)
+        print("\n演示结束。")
+    finally:
+        if run_dir is not None and run_dir.is_dir():
+            shutil.rmtree(run_dir)
+            print(f"已清理演示目录: {run_dir}")
 
 
 if __name__ == "__main__":

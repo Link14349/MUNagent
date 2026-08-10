@@ -34,10 +34,16 @@
 ├── reps/
 │   └── <rep_id>.yaml         # 每名代表一个文件；文件名就是代表 ID
 ├── storyline.yaml            # 外部事件和结束条件
-└── mechanism.py              # 0 字节预留文件，当前不参与场景加载
+├── mechanism.py              # 0 字节预留文件，当前不参与场景加载
+└── simulation/               # 推演运行时输出；不参与场景内容加载
+    └── <YY-M-D-HH:MM>/       # 每次 initialize 新建；由 FileSystem 管理
+        ├── reps/<rep_id>/
+        └── submissions/<venue_id>/   # 仅含代表提交副本：<primary_owner>+<原文件名>+v<版本号>
 ```
 
 `background.md` 和 `storyline.yaml` 使用固定文件名。venue 和代表文件分别通过扫描 `venues/*.yaml`、`reps/*.yaml` 发现，因此 `index.yaml` 不需要 `files`、`venues` 或 `representatives` 字段。
+
+`simulation/` 由通用引擎在 `Scenario.initialize()` 时创建并绑定一个 `FileSystem`；场景包作者不在此目录写入声明式内容。运行时文件的代表可见性由 `scope`/`owner` 程序强制执行：`submissions/` 只存放经 `File.submit()` 复制的用户提交，命名为 `<primary_owner>+<原文件名>+v<版本号>`（`primary_owner` 为该文件 owner 集合中最先加入者）；与同系列最新版内容 hash 相同则拒绝，否则递增版本。副本 `owner`/`scope` 为空（代表不可见、不可改）。
 
 ## 3. 通用约定
 

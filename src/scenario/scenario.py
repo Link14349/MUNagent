@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from condition.condition import Condition
@@ -9,6 +10,7 @@ from scenario.venue import Venue
 
 if TYPE_CHECKING:
     from event.eventlist import EventList, PullUpEvent
+    from filesystem.filesystem import FileSystem
 
 
 class Scenario:
@@ -23,6 +25,8 @@ class Scenario:
     venues: list[Venue]
     representatives: list[Representative]
     event_list: EventList | None
+    root_path: Path | None
+    filesystem: FileSystem | None
 
     def __init__(self) -> None:
         self.title = ""
@@ -36,6 +40,8 @@ class Scenario:
         self.venues = []
         self.representatives = []
         self.event_list = None
+        self.root_path = None
+        self.filesystem = None
 
     def load(self, scenario_path: str) -> None:
         from scenario.load import populate_scenario
@@ -43,4 +49,11 @@ class Scenario:
         populate_scenario(self, scenario_path)
 
     def initialize(self) -> None:
+        """准备一次推演运行：事件表 + 绑定新建的 FileSystem。"""
+        from event.eventlist import EventList
+        from filesystem.filesystem import FileSystem
+
         self.event_list = EventList(self)
+        if self.filesystem is not None:
+            raise RuntimeError("Scenario 已绑定 FileSystem，不能重复 initialize")
+        self.filesystem = FileSystem.create_for_scenario(self)

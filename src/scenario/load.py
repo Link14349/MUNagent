@@ -32,9 +32,15 @@ def load_scenario(path: str | Path) -> Scenario:
 
 
 def populate_scenario(scenario: Scenario, scenario_path: str | Path) -> None:
-    """将场景包目录内容填入已有 Scenario 实例。"""
+    """将场景包目录内容填入已有 Scenario 实例。
+
+    仅加载声明式场景内容；不创建推演目录或 FileSystem。
+    推演运行时请调用 ``scenario.initialize()``。
+    """
     root = Path(scenario_path).resolve()
     validate_scenario_layout(root)
+    scenario.root_path = root
+    scenario.filesystem = None
 
     index = load_yaml(root / "index.yaml")
     _load_index(scenario, index)

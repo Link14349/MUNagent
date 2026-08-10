@@ -17,7 +17,10 @@ venues/<venue_id>.yaml     会场、主席、代表列表与议程
 reps/<rep_id>.yaml         单个代表的公开/私密角色卡
 storyline.yaml             目标、外部事件与结束条件
 mechanism.py               预留空文件；当前不加载、不实现任何机制
+simulation/                推演运行时目录；由引擎在 initialize 时写入，不手写内容
 ```
+
+`simulation/` 只存放引擎生成的运行目录（命名形如 `26-8-10-21:23`），场景作者不得在其中放入声明式内容。每次 `Scenario.initialize()` 新建一个子目录并绑定 `FileSystem`；代表工作文件在 `reps/<rep_id>/`，经 `File.submit()` 提交后的副本在 `submissions/<venue_id>/`（文件名为 `<primary_owner>+<原文件名>+v<版本号>`；相对最新版内容未变则拒绝，有改动则递增版本；对代表不可见不可改）。
 
 不要把角色秘密写入 `background.md` 或会场文件。`mechanism.yaml` 不属于场景包设计，禁止创建；`mechanism.py` 仅保留为 0 字节占位文件，当前不得写入代码，也不由加载器读取。比例校验、签署、时钟和终局判定由通用推演引擎实现。
 

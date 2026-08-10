@@ -8,21 +8,26 @@ from scenario.group import Group
 from scenario.venue import SessionPhase, Venue
 
 if TYPE_CHECKING:
+    from filesystem.filesystem import File
     from scenario.scenario import Scenario
+
 
 class EventType(StrEnum):
     SYSTEM = "system"
     MOTION_SWITCH = "motion_switch"
     INSTRUCTION = "instruction"
+    RESOLUTION = "resolution"
     NOTE = "note"
     MESSAGE = "message"
     CHAT = "chat"
+
 
 class EventStatus(StrEnum):
     PENDING = "pending"
     COMPLETED = "completed"
     FAILED = "failed"
     REJECTED = "rejected"
+
 
 class Event:
     time: datetime
@@ -36,11 +41,12 @@ class Event:
         # self.from_rep = None
         # self.to = None
         self.time = time
-        self.__content = ""
+        self.__content = content
         self.scenario = scenario
         self.id = None
         self.scope = scope
         self.status = EventStatus.PENDING
+
 
 class SystemEvent(Event):
     type: EventType
@@ -59,6 +65,7 @@ class SystemEvent(Event):
         self.__action = action
         self.status = EventStatus.COMPLETED
 
+
 class MotionSwitchEvent(Event):
     type: EventType
     target_phase: SessionPhase
@@ -75,9 +82,10 @@ class MotionSwitchEvent(Event):
         self.type = EventType.MOTION_SWITCH
         self.target_phase = target_phase
 
+
 class InstructionEvent(Event):
     type: EventType
-    instruction: str
+    instruction: File
     __from: set[str]
 
     def __init__(
@@ -85,7 +93,7 @@ class InstructionEvent(Event):
         time: datetime,
         content: str,
         fr: set[str],
-        instruction: str,
+        instruction: File,
         scenario: Scenario,
     ):
         super().__init__(time, content, fr, scenario)
@@ -93,9 +101,10 @@ class InstructionEvent(Event):
         self.instruction = instruction
         self.__from = fr
 
+
 class ResolutionEvent(Event):
     type: EventType
-    resolution: str
+    resolution: File
     __from: set[str]
 
     def __init__(
@@ -103,13 +112,14 @@ class ResolutionEvent(Event):
         time: datetime,
         content: str,
         fr: set[str],
-        resolution: str,
+        resolution: File,
         scenario: Scenario,
     ):
         super().__init__(time, content, fr, scenario)
         self.type = EventType.RESOLUTION
         self.resolution = resolution
         self.__from = fr
+
 
 # 会议期间的传纸条私聊
 class NoteEvent(Event):
@@ -131,6 +141,7 @@ class NoteEvent(Event):
         self.__to = to
         self.status = EventStatus.COMPLETED
 
+
 # 会议期间的消息
 class MessageEvent(Event):
     type: EventType
@@ -150,11 +161,12 @@ class MessageEvent(Event):
         self.__from = fr
         self.__CoT = CoT
         self.status = EventStatus.COMPLETED
-    
+
     def get_CoT(self, rep: str) -> str:
         if rep != self.__from:
             raise ValueError("Not the sender of this message")
         return self.__CoT
+
 
 # free discussion环节的消息
 class ChatEvent(Event):

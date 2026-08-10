@@ -228,4 +228,7 @@ out/
 munagent/web/node_modules/
 munagent/web/dist/
 
+# 推演运行时目录（保留 simulation/ 占位，忽略具体运行子目录）
+**/simulation/*/
+
 .vscode/

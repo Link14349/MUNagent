@@ -30,7 +30,8 @@ scenario-template/
 │   ├── anthony_eden.yaml
 │   └── vyacheslav_molotov.yaml
 ├── storyline.yaml             # 会议目标、外部事件与结束条件
-└── mechanism.py               # 当前为空的预留文件，不参与加载
+├── mechanism.py               # 当前为空的预留文件，不参与加载
+└── simulation/                # 推演运行目录；initialize 时按日期时间新建子目录
 ```
 
 角色卡分为 `public` 与 `private`。引擎必须在构建代表上下文前完成可见性过滤，不能把所有秘密交给 Agent 后再要求它“假装不知道”。
