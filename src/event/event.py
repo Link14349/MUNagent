@@ -42,7 +42,8 @@ class VotePassMode(StrEnum):
 class Event:
     """事件基类。
 
-    - ``time`` / ``id`` / ``type`` / ``venue``：一旦设定不可再改（``id`` 仅允许从 None 赋一次）。
+    - ``time`` / ``id``：构造时为 ``None``，由 ``EventList.add_event`` 赋一次后不可再改。
+    - ``type`` / ``venue``：一旦设定不可再改。
     - 其余属性：仅当 ``status == PENDING`` 时可改。
     - 子类 ``__init__`` 应直接写入私有字段，并用 ``_set_type`` / ``_init_status``。
     - 每个事件只属于一个会场（``venue`` 为会场 ID 字符串）。
@@ -50,13 +51,12 @@ class Event:
 
     def __init__(
         self,
-        time: datetime,
         content: str,
         venue: str,
         scope: set[str],
         scenario: Scenario,
     ):
-        self.__time = time
+        self.__time: datetime | None = None
         self.__content = content
         self.__venue = _normalize_venue_id(venue, scenario)
         self.__scenario = scenario
@@ -82,8 +82,16 @@ class Event:
         self.__status = EventStatus(status)
 
     @property
-    def time(self) -> datetime:
+    def time(self) -> datetime | None:
         return self.__time
+
+    @time.setter
+    def time(self, value: datetime) -> None:
+        if self.__time is not None:
+            raise PermissionError("事件 time 不可修改")
+        if not isinstance(value, datetime):
+            raise TypeError(f"time 须为 datetime，实际为 {type(value).__name__}")
+        self.__time = value
 
     @property
     def id(self) -> int | None:
@@ -146,14 +154,13 @@ class Event:
 class SystemEvent(Event):
     def __init__(
         self,
-        time: datetime,
         content: str,
         action: list[str],
         venue: str,
         scope: set[str],
         scenario: Scenario,
     ):
-        super().__init__(time, content, venue, scope, scenario)
+        super().__init__(content, venue, scope, scenario)
         self._set_type(EventType.SYSTEM)
         self.__action = list(action)
         self._init_status(EventStatus.COMPLETED)
@@ -171,14 +178,13 @@ class SystemEvent(Event):
 class MotionSwitchEvent(Event):
     def __init__(
         self,
-        time: datetime,
         content: str,
         target_phase: SessionPhase,
         venue: str,
         scope: set[str],
         scenario: Scenario,
     ):
-        super().__init__(time, content, venue, scope, scenario)
+        super().__init__(content, venue, scope, scenario)
         self._set_type(EventType.MOTION_SWITCH)
         self.__target_phase = SessionPhase(target_phase)
 
@@ -201,14 +207,13 @@ class InstructionEvent(Event):
 
     def __init__(
         self,
-        time: datetime,
         content: str,
         fr: set[str],
         instruction: File,
         venue: str,
         scenario: Scenario,
     ):
-        super().__init__(time, content, venue, fr, scenario)
+        super().__init__(content, venue, fr, scenario)
         self._set_type(EventType.INSTRUCTION)
         self.__instruction = instruction
         self.__from = set(fr)
@@ -240,14 +245,13 @@ class ResolutionEvent(Event):
 
     def __init__(
         self,
-        time: datetime,
         content: str,
         fr: set[str],
         resolution: File,
         venue: str,
         scenario: Scenario,
     ):
-        super().__init__(time, content, venue, fr, scenario)
+        super().__init__(content, venue, fr, scenario)
         self._set_type(EventType.RESOLUTION)
         self.__resolution = resolution
         self.__from = set(fr)
@@ -279,7 +283,6 @@ class VoteEvent(Event):
 
     def __init__(
         self,
-        time: datetime,
         content: str,
         venue: str,
         scope: set[str],
@@ -310,7 +313,7 @@ class VoteEvent(Event):
         if not isinstance(remark, str):
             raise TypeError(f"remark 须为字符串，实际为 {type(remark).__name__}")
 
-        super().__init__(time, content, venue, scope, scenario)
+        super().__init__(content, venue, scope, scenario)
         if target.venue != self.venue:
             raise ValueError(
                 f"VoteEvent.venue={self.venue!r} 与 target.venue={target.venue!r} 不一致"
@@ -434,14 +437,13 @@ class NoteEvent(Event):
 
     def __init__(
         self,
-        time: datetime,
         content: str,
         fr: str,
         to: set[str],
         venue: str,
         scenario: Scenario,
     ):
-        super().__init__(time, content, venue, {fr} | to, scenario)
+        super().__init__(content, venue, {fr} | to, scenario)
         self._set_type(EventType.NOTE)
         self.__from = fr
         self.__to = set(to)
@@ -473,7 +475,6 @@ class MessageEvent(Event):
 
     def __init__(
         self,
-        time: datetime,
         content: str,
         CoT: str,
         fr: str,
@@ -481,7 +482,7 @@ class MessageEvent(Event):
         scenario: Scenario,
     ):
         seats = _venue_seats(scenario, venue)
-        super().__init__(time, content, venue, set(seats), scenario)
+        super().__init__(content, venue, set(seats), scenario)
         self._set_type(EventType.MESSAGE)
         self.__from = fr
         self.__CoT = CoT
@@ -520,7 +521,6 @@ class ChatEvent(Event):
 
     def __init__(
         self,
-        time: datetime,
         content: str,
         fr: str,
         CoT: str,
@@ -528,7 +528,7 @@ class ChatEvent(Event):
         venue: str,
         scenario: Scenario,
     ):
-        super().__init__(time, content, venue, group.members, scenario)
+        super().__init__(content, venue, group.members, scenario)
         self._set_type(EventType.CHAT)
         self.__from = fr
         self.__CoT = CoT

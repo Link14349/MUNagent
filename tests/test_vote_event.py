@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -34,7 +33,6 @@ def venue_id(scenario: Scenario) -> str:
 
 def _motion(scenario: Scenario, venue_id: str) -> MotionSwitchEvent:
     return MotionSwitchEvent(
-        datetime(1944, 10, 9, 22, 0, tzinfo=timezone.utc),
         "动议进入自由讨论",
         SessionPhase.FREE_DISCUSSION,
         venue_id,
@@ -46,7 +44,6 @@ def _motion(scenario: Scenario, venue_id: str) -> MotionSwitchEvent:
 def test_vote_event_records_ballots(scenario: Scenario, venue_id: str) -> None:
     target = _motion(scenario, venue_id)
     vote = VoteEvent(
-        datetime(1944, 10, 9, 22, 5, tzinfo=timezone.utc),
         "就阶段切换动议表决",
         venue_id,
         {rep.id for rep in scenario.representatives},
@@ -62,6 +59,7 @@ def test_vote_event_records_ballots(scenario: Scenario, venue_id: str) -> None:
     )
     assert vote.type == EventType.VOTE
     assert vote.venue == venue_id
+    assert vote.time is None
     assert vote.target is target
     assert vote.valid_votes == 4
     assert vote.supporters == ["winston_churchill", "anthony_eden"]
@@ -76,7 +74,6 @@ def test_vote_event_rejects_overlap_and_bad_target(scenario: Scenario, venue_id:
     target = _motion(scenario, venue_id)
     with pytest.raises(ValueError, match="同时出现"):
         VoteEvent(
-            datetime(1944, 10, 9, 22, 5, tzinfo=timezone.utc),
             "重复投票",
             venue_id,
             {rep.id for rep in scenario.representatives},
@@ -89,7 +86,6 @@ def test_vote_event_rejects_overlap_and_bad_target(scenario: Scenario, venue_id:
         )
     with pytest.raises(TypeError, match="ResolutionEvent 或 MotionSwitchEvent"):
         VoteEvent(
-            datetime(1944, 10, 9, 22, 5, tzinfo=timezone.utc),
             "错误目标",
             venue_id,
             set(),
@@ -115,7 +111,6 @@ def test_vote_event_accepts_resolution_target(
     )
     submitted = draft.submit("winston_churchill")
     resolution = ResolutionEvent(
-        datetime(1944, 10, 9, 22, 10, tzinfo=timezone.utc),
         "提出决议",
         {"winston_churchill"},
         submitted,
@@ -123,7 +118,6 @@ def test_vote_event_accepts_resolution_target(
         scenario,
     )
     vote = VoteEvent(
-        datetime(1944, 10, 9, 22, 15, tzinfo=timezone.utc),
         "决议表决",
         venue_id,
         {rep.id for rep in scenario.representatives},
@@ -138,3 +132,5 @@ def test_vote_event_accepts_resolution_target(
     assert isinstance(vote.target, ResolutionEvent)
     assert vote.target.resolution is submitted
     assert vote.venue == resolution.venue == venue_id
+    assert vote.time is None
+    assert resolution.time is None

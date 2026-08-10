@@ -14,6 +14,7 @@ from event.event import (
     VoteEvent,
     VotePassMode,
 )
+from event.eventlist import EventList
 from scenario.scenario import Scenario
 from scenario.venue import SessionPhase
 
@@ -34,7 +35,6 @@ def venue_id(scenario: Scenario) -> str:
 
 def test_pending_event_allows_edits(scenario: Scenario, venue_id: str) -> None:
     event = MotionSwitchEvent(
-        datetime(1944, 10, 9, 22, 0, tzinfo=timezone.utc),
         "动议",
         SessionPhase.FREE_DISCUSSION,
         venue_id,
@@ -43,6 +43,7 @@ def test_pending_event_allows_edits(scenario: Scenario, venue_id: str) -> None:
     )
     assert event.status == EventStatus.PENDING
     assert event.venue == venue_id
+    assert event.time is None
     event.content = "更新后的动议说明"
     event.target_phase = SessionPhase.RECESS
     event.status = EventStatus.COMPLETED
@@ -52,7 +53,6 @@ def test_pending_event_allows_edits(scenario: Scenario, venue_id: str) -> None:
 
 def test_non_pending_rejects_edits(scenario: Scenario, venue_id: str) -> None:
     event = MotionSwitchEvent(
-        datetime(1944, 10, 9, 22, 0, tzinfo=timezone.utc),
         "动议",
         SessionPhase.FREE_DISCUSSION,
         venue_id,
@@ -70,7 +70,6 @@ def test_non_pending_rejects_edits(scenario: Scenario, venue_id: str) -> None:
 
 def test_time_type_venue_immutable_id_assign_once(scenario: Scenario, venue_id: str) -> None:
     event = MotionSwitchEvent(
-        datetime(1944, 10, 9, 22, 0, tzinfo=timezone.utc),
         "动议",
         SessionPhase.FREE_DISCUSSION,
         venue_id,
@@ -79,8 +78,15 @@ def test_time_type_venue_immutable_id_assign_once(scenario: Scenario, venue_id: 
     )
     assert event.type == EventType.MOTION_SWITCH
     assert event.venue == venue_id
-    with pytest.raises(AttributeError):
-        event.time = datetime(1944, 10, 10, tzinfo=timezone.utc)  # type: ignore[misc]
+    assert event.time is None
+    assert event.id is None
+
+    stamped = datetime(1944, 10, 9, 22, 0, tzinfo=timezone.utc)
+    event.time = stamped
+    assert event.time == stamped
+    with pytest.raises(PermissionError, match="time 不可修改"):
+        event.time = datetime(1944, 10, 10, tzinfo=timezone.utc)
+
     with pytest.raises(AttributeError):
         event.type = EventType.VOTE  # type: ignore[misc]
     with pytest.raises(AttributeError):
@@ -92,7 +98,6 @@ def test_time_type_venue_immutable_id_assign_once(scenario: Scenario, venue_id: 
         event.id = 1
 
     done = VoteEvent(
-        datetime(1944, 10, 9, 22, 5, tzinfo=timezone.utc),
         "表决",
         venue_id,
         {rep.id for rep in scenario.representatives},
@@ -105,6 +110,24 @@ def test_time_type_venue_immutable_id_assign_once(scenario: Scenario, venue_id: 
     )
     assert done.status == EventStatus.COMPLETED
     assert done.venue == venue_id
+    assert done.time is None
     done.id = 7
     with pytest.raises(PermissionError, match="id 不可修改"):
         done.id = 8
+
+
+def test_event_list_add_stamps_time_and_id(scenario: Scenario, venue_id: str) -> None:
+    events = EventList(scenario)
+    event = MotionSwitchEvent(
+        "动议",
+        SessionPhase.FREE_DISCUSSION,
+        venue_id,
+        {rep.id for rep in scenario.representatives},
+        scenario,
+    )
+    events.add_event(event)
+    assert event.time == scenario.start_time == events.time
+    assert event.id == 0
+
+    with pytest.raises(ValueError, match="应由 EventList.add_event 设定"):
+        events.add_event(event)

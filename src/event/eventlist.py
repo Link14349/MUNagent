@@ -11,6 +11,13 @@ if TYPE_CHECKING:
 
 
 class EventList:
+    """推演事件表。
+
+    事件对象构造时 ``time`` / ``id`` 为 ``None``；``add_event`` 用当前表时钟盖戳并分配
+    ``id``。剧情时钟仅由 ``update_time`` 推进；到期的 ``PullUpEvent`` 会落成
+    ``SystemEvent`` 再入表。
+    """
+
     scenario: Scenario
     pullup_events: list[PullUpEvent]
     __events: list[Event]
@@ -48,7 +55,6 @@ class EventList:
             venue_id = self.scenario.venues[0].id
             self.add_event(
                 SystemEvent(
-                    self.time,
                     pullup.content,
                     [],
                     venue_id,
@@ -60,11 +66,18 @@ class EventList:
         self.pullup_events = [pullup for pullup in self.pullup_events if pullup not in due_set]
 
     def add_event(self, event: Event):
-        if event.time < self.__time:
-            raise ValueError("Wrong time order error")
+        """将事件登记入表：盖上当前剧情时间并分配 ``id``。"""
+        if event.time is not None:
+            raise ValueError(
+                f"事件 time 应由 EventList.add_event 设定，当前已为 {event.time!r}"
+            )
+        if event.id is not None:
+            raise ValueError(
+                f"事件 id 应由 EventList.add_event 设定，当前已为 {event.id!r}"
+            )
+        event.time = self.__time
         event.id = len(self.__events)
         self.__events.append(event)
-        self.__time = event.time
 
     def get_events(self, rep: str) -> list[Event]:
         """返回对 ``rep`` 可见的事件。
