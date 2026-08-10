@@ -33,6 +33,7 @@ SYSTEM_ACTOR = "__system__"
 
 # 提交副本文件名：<primary_owner>+<原文件名>+v<版本号>
 _SUBMISSION_NAME_RE = re.compile(r"^(?P<owner>.+)\+(?P<original>.+)\+v(?P<version>\d+)$")
+_DESCRIPTION_MAX_LEN = 20
 
 
 class File:
@@ -41,6 +42,7 @@ class File:
     - ``scope``：可读（可见）的代表 ID 集合；空集合表示任何代表都不可见。
     - ``owner``：可写（及扩展 scope/owner）的代表 ID 集合；须为 ``scope`` 的子集。
       空集合表示不可写（用于 submissions 中的提交副本）。
+    - ``description``：不超过 20 字的文件简述。
     """
 
     path: Path
@@ -52,11 +54,13 @@ class File:
         content: str,
         *,
         owner: str | set[str],
+        description: str = "",
         scope: set[str] | None = None,
         filesystem: FileSystem | None = None,
     ) -> None:
         self.path = path
         self.__content = content
+        self.__description = _normalize_description(description)
         self.__owner: set[str] = _as_id_set(owner, field="owner")
         self.scope = set(scope) if scope is not None else set(self.__owner)
         self._filesystem = filesystem
@@ -72,6 +76,18 @@ class File:
     def primary_owner(self) -> str | None:
         """创建时确定的主 owner；提交文件名使用该 ID。"""
         return self.__primary_owner
+
+    @property
+    def description(self) -> str:
+        return self.__description
+
+    @description.setter
+    def description(self, value: str) -> None:
+        if self.is_submission:
+            raise PermissionError(f"提交副本不可修改 description: {self.path}")
+        if not self.__owner:
+            raise PermissionError(f"文件 {self.path} 的 owner 为空，不可修改 description")
+        self.__description = _normalize_description(value)
 
     def _restore_primary_owner(self, primary: str) -> None:
         """仅供 manifest 回读覆盖主 owner。"""
@@ -218,6 +234,7 @@ class File:
             dest_full,
             self._raw_content(),
             owner=set(),
+            description=self.__description,
             scope=set(),
             filesystem=fs,
         )
@@ -228,6 +245,7 @@ class File:
         rel = self.path.relative_to(root).as_posix()
         payload: dict[str, object] = {
             "path": rel,
+            "description": self.__description,
             "owner": list(self.__owner),
             "scope": sorted(self.scope),
         }
@@ -365,10 +383,15 @@ class FileSystem:
             if "writable" in entry:
                 raise ValueError(f"{context} 不再支持 writable 字段，请删除后重试")
 
+            description_raw = entry.get("description", "")
+            if not isinstance(description_raw, str):
+                raise ValueError(f"{context}.description 须为字符串")
+
             file = File(
                 full,
                 full.read_text(encoding="utf-8"),
                 owner=_ordered_id_set(owner_raw, field=f"{context}.owner"),
+                description=description_raw,
                 scope=set(str(item) for item in scope_raw),
                 filesystem=self,
             )
@@ -385,6 +408,7 @@ class FileSystem:
         content: str,
         *,
         owner: str | set[str],
+        description: str = "",
         scope: set[str] | None = None,
     ) -> File:
         """在运行目录下创建普通文件并登记可见性。
@@ -404,7 +428,14 @@ class FileSystem:
         scopes = set(scope) if scope is not None else set(owners)
         self._validate_actors(owners | scopes, field=f"create_file({key})")
 
-        file = File(full, content, owner=owners, scope=scopes, filesystem=self)
+        file = File(
+            full,
+            content,
+            owner=owners,
+            description=description,
+            scope=scopes,
+            filesystem=self,
+        )
         self._register(file)
         return file
 
@@ -414,6 +445,7 @@ class FileSystem:
         name: str,
         content: str,
         *,
+        description: str = "",
         scope: set[str] | None = None,
         owner: str | set[str] | None = None,
     ) -> File:
@@ -429,6 +461,7 @@ class FileSystem:
             relative,
             content,
             owner=owner if owner is not None else default_owner,
+            description=description,
             scope=scope if scope is not None else set(default_owner),
         )
 
@@ -533,6 +566,17 @@ def _venue_id_for_rep(scenario: Scenario, rep_id: str) -> str:
 
 def _content_hash(content: str) -> str:
     return hashlib.sha256(content.encode("utf-8")).hexdigest()
+
+
+def _normalize_description(value: str) -> str:
+    if not isinstance(value, str):
+        raise TypeError(f"description 须为字符串，实际为 {type(value).__name__}")
+    text = value.strip()
+    if len(text) > _DESCRIPTION_MAX_LEN:
+        raise ValueError(
+            f"description 不能超过 {_DESCRIPTION_MAX_LEN} 字，实际为 {len(text)} 字: {text!r}"
+        )
+    return text
 
 
 def _parse_submission_name(name: str) -> tuple[str, str, int] | None:

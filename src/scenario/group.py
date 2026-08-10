@@ -1,5 +1,9 @@
-from scenario.representative import Representative
-from scenario.venue import Venue
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from scenario.venue import Venue
 
 
 class Group:

@@ -39,8 +39,14 @@ def _hash_short(value: str) -> str:
 
 def demo_permissions(fs, venue_id: str) -> None:
     _section("A. 权限：私有文件 / scope / owner")
-    draft = fs.create_rep_file(CHURCHILL, "percentages.md", "希腊 90% / 罗马尼亚 10%")
+    draft = fs.create_rep_file(
+        CHURCHILL,
+        "percentages.md",
+        "希腊 90% / 罗马尼亚 10%",
+        description="百分比草案",
+    )
     _ok(f"创建私有文件 owner={sorted(draft.owners)} scope={sorted(draft.scope)}")
+    _ok(f"description={draft.description!r}")
     _ok(f"primary_owner={draft.primary_owner!r}（提交命名将使用它）")
 
     try:
@@ -65,7 +71,7 @@ def demo_permissions(fs, venue_id: str) -> None:
     _ok(f"提升 owner 后艾登可写；owners={sorted(draft.owners)}")
     _ok(f"primary_owner 仍为 {draft.primary_owner!r}（不因 add_owner 改变）")
 
-    fs.create_rep_file(STALIN, "red_lines.md", "巴尔干红线")
+    fs.create_rep_file(STALIN, "red_lines.md", "巴尔干红线", description="斯大林红线")
     try:
         fs.add_owner(f"reps/{STALIN}/red_lines.md", STALIN, {CHURCHILL})
     except PermissionError as exc:

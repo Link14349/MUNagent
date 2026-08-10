@@ -4,6 +4,7 @@ from enum import StrEnum
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from scenario.group import Group
     from scenario.scenario import Scenario
 
 
@@ -38,6 +39,7 @@ class Venue:
     seats: list[str]
     initial_agenda: str
     agenda: list[Agenda]
+    groups: list[Group]
 
     def __init__(self, scenario: Scenario):
         self.id = ""
@@ -49,6 +51,7 @@ class Venue:
         self.seats = []
         self.initial_agenda = ""
         self.agenda = []
+        self.groups = []
         self.__session_phase: SessionPhase | None = None
 
     @property

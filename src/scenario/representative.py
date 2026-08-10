@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from filesystem.filesystem import File, FileSystem
     from scenario.venue import Venue
 
 
@@ -54,3 +55,51 @@ class Representative:
         self.relationships = {}
         self._persona = {}
         self._agent_directive = ""
+
+    def _require_filesystem(self) -> FileSystem:
+        if not self.id:
+            raise RuntimeError("代表尚未设置 id")
+        if self.venue is None:
+            raise RuntimeError(f"代表 {self.id} 未绑定会场，无法访问 FileSystem")
+        filesystem = self.venue.scenario.filesystem
+        if filesystem is None:
+            raise RuntimeError(
+                f"代表 {self.id} 所在 Scenario 尚未 initialize，FileSystem 不可用"
+            )
+        return filesystem
+
+    def _require_managed_file(self, file: File) -> FileSystem:
+        filesystem = self._require_filesystem()
+        if file._filesystem is not filesystem:
+            raise ValueError(
+                f"文件 {file.path} 不属于当前 Scenario 的 FileSystem"
+            )
+        return filesystem
+
+    def list_visible(self) -> list[File]:
+        """列出本代表在 ``reps/`` 下可见的文件。"""
+        return self._require_filesystem().list_visible(self.id)
+
+    def list_writable(self) -> list[File]:
+        """列出本代表在 ``reps/`` 下可写的文件。"""
+        return self._require_filesystem().list_writable(self.id)
+
+    def read_file(self, file: File) -> str:
+        """以本代表身份读取 ``file`` 内容（须在其 scope 内）。"""
+        self._require_managed_file(file)
+        return file.get_content(self.id)
+
+    def write_file(self, file: File, content: str) -> None:
+        """以本代表身份写入 ``file`` 内容（须为其 owner）并落盘。"""
+        filesystem = self._require_managed_file(file)
+        relative = filesystem._relkey(file.path)
+        filesystem.write(relative, self.id, content)
+
+    def create_file(self, name: str, content: str, description: str) -> File:
+        """在本代表目录下创建新文件；``description`` 为不超过 20 字的简述。"""
+        return self._require_filesystem().create_rep_file(
+            self.id,
+            name,
+            content,
+            description=description,
+        )

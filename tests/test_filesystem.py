@@ -34,10 +34,36 @@ def venue_id(scenario: Scenario) -> str:
 
 
 def test_create_rep_file_private_by_default(fs: FileSystem) -> None:
-    file = fs.create_rep_file(CHURCHILL, "notes.md", "私有笔记")
+    file = fs.create_rep_file(
+        CHURCHILL,
+        "notes.md",
+        "私有笔记",
+        description="丘吉尔私人备忘",
+    )
     assert fs.read(f"reps/{CHURCHILL}/notes.md", CHURCHILL) == "私有笔记"
     assert file.owners == frozenset({CHURCHILL})
     assert file.scope == {CHURCHILL}
+    assert file.description == "丘吉尔私人备忘"
+
+
+def test_description_max_length_and_submit_copies(fs: FileSystem) -> None:
+    with pytest.raises(ValueError, match="不能超过 20 字"):
+        fs.create_rep_file(
+            CHURCHILL,
+            "long.md",
+            "x",
+            description="一二三四五六七八九十一二三四五六七八九十多",
+        )
+    draft = fs.create_rep_file(
+        CHURCHILL,
+        "draft.md",
+        "草案",
+        description="百分比草案初稿",
+    )
+    submitted = draft.submit(CHURCHILL)
+    assert submitted.description == "百分比草案初稿"
+    with pytest.raises(PermissionError, match="不可修改 description"):
+        submitted.description = "改描述"
 
 
 def test_other_rep_cannot_read_private_file(fs: FileSystem) -> None:
