@@ -17,7 +17,7 @@ class Scenario:
     targets: list[str]
     description: str
     timezone: str
-    time: datetime | None
+    start_time: datetime | None
     event_pool: list[PullUpEvent]
     end_conditions: list[Condition]
     venues: list[Venue]
@@ -30,7 +30,7 @@ class Scenario:
         self.targets = []
         self.description = ""
         self.timezone = ""
-        self.time = None
+        self.start_time = None
         self.event_pool = []
         self.end_conditions = []
         self.venues = []
@@ -42,5 +42,5 @@ class Scenario:
 
         populate_scenario(self, scenario_path)
 
-    def run(self) -> None:
-        pass
+    def initialize(self) -> None:
+        self.event_list = EventList(self)

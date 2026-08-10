@@ -8,4 +8,4 @@ class Simulator:
         self.scenario = scenario
 
     def run(self):
-        pass
+        self.scenario.initialize()

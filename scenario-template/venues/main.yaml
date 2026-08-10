@@ -6,6 +6,7 @@ description: >-
   会议记录、纸条与对外口径本身都是谈判对象。
 
 chair: none
+session_phase: unchaired_core
 
 seats:
   - winston_churchill

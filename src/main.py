@@ -99,7 +99,9 @@ def main() -> None:
 
     print(f"场景: {scenario.title}")
     print(f"时区: {scenario.timezone}")
-    print(f"开场时间: {scenario.time}")
+    print(f"开场时间: {scenario.start_time}")
+    if scenario.event_list is not None:
+        print(f"当前时间: {scenario.event_list.time}")
     print(f"背景字数: {len(scenario.background)}")
     print(f"场景目标数: {len(scenario.targets)}")
     print(f"会场数: {len(scenario.venues)}")

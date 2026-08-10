@@ -21,7 +21,7 @@ from scenario.load_helpers import (
 )
 from scenario.representative import PrivateTarget, Representative
 from scenario.scenario import Scenario
-from scenario.venue import Agenda, Venue
+from scenario.venue import Agenda, SessionPhase, Venue
 
 
 def load_scenario(path: str | Path) -> Scenario:
@@ -95,7 +95,7 @@ def _load_index(scenario: Scenario, index: dict[str, Any]) -> None:
     scenario.title = _require_str(index["title"], field=f"{context}.title")
     scenario.description = _require_str(index["description"], field=f"{context}.description")
     scenario.timezone = _require_str(index["timezone"], field=f"{context}.timezone")
-    scenario.time = parse_iso_datetime(
+    scenario.start_time = parse_iso_datetime(
         index["start_story_time"],
         context=f"{context}.start_story_time",
     )
@@ -193,6 +193,7 @@ def _load_venue(scenario: Scenario, venue_path: Path) -> Venue:
             "seats",
             "initial_agenda",
             "agenda",
+            "session_phase",
         },
         context=context,
     )
@@ -205,6 +206,12 @@ def _load_venue(scenario: Scenario, venue_path: Path) -> Venue:
     venue.initial_agenda = _require_str(
         data["initial_agenda"],
         field=f"{context}.initial_agenda",
+    )
+    venue.switch_phase(
+        _parse_session_phase(
+            data["session_phase"],
+            field=f"{context}.session_phase",
+        )
     )
 
     chair = data["chair"]
@@ -405,6 +412,17 @@ def _require_str(value: Any, *, field: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise ValueError(f"{field} 须为非空字符串")
     return value.strip()
+
+
+def _parse_session_phase(value: Any, *, field: str) -> SessionPhase:
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{field} 须为非空字符串")
+    normalized = value.strip()
+    try:
+        return SessionPhase(normalized)
+    except ValueError as exc:
+        allowed = "、".join(sorted(phase.value for phase in SessionPhase))
+        raise ValueError(f"{field} 只能是 {allowed}，实际为: {normalized!r}") from exc
 
 
 def _parse_str_list(value: Any, *, field: str) -> list[str]:

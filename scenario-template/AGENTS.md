@@ -48,12 +48,13 @@ mechanism.py               预留空文件；当前不加载、不实现任何�
 ## 会场规则与剧情
 
 - venue 的 `chair` 只能是 `none` 或一个代表 ID；`none` 表示使用系统中立主席；
+- venue 的 `session_phase` 声明开场会议阶段，取值见 `docs/scenario-schema.md` 第 6.2 节；
 - venue 的 `seats` 只能是代表 ID 列表，不重复保存代表团、职务或其他角色信息；
 - venue 不声明 procedure、允许动作、决议文件或信息策略；会议流程和动作规则由引擎实现；
 - `storyline.yaml` 只放代表无法直接控制的外部事件。发言、提案、让步、签署和命令属于运行时行动；
 - 事件不直接修改场景自定义数值；当前 schema 不使用 `effects`；
-- 每个 event 使用 `condition`，其中只能有 `type` 和 `content`；`type` 仅允许 `time_reached` 或 `text`；
-- `time_reached` 的 `content` 是带 UTC 偏移的 ISO 8601 时间，`text` 的 `content` 是交给 LLM 判断真假的自然语言条件；
+- 每个 event 使用 `condition`，其中只能有 `type` 和 `content`；`type` 仅允许 `time` 或 `text`；
+- `time` 的 `content` 是带 UTC 偏移的 ISO 8601 时间，`text` 的 `content` 是交给 LLM 判断真假的自然语言条件；
 - event 自身只包含 `id`、`condition`、`content`；不要添加与 content 重复的解释字段；
 - `end_conditions[]` 每项也只能包含 `type` 和 `content`，并使用同一套条件类型；
 - 场景内容不能要求 LLM 自行心算比例、决定签署是否有效或随意判定终局；这些都由未来的通用引擎统一处理。

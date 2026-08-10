@@ -9,7 +9,7 @@ from typing import Any
 import yaml
 
 SCHEMA_VERSION = "0.1"
-ALLOWED_CONDITION_TYPES = frozenset({"time_reached", "text"})
+ALLOWED_CONDITION_TYPES = frozenset({"time", "text"})
 
 INDEX_FORBIDDEN_KEYS = frozenset({
     "id",
@@ -83,11 +83,11 @@ def parse_condition(raw: dict[str, Any], *, context: str) -> tuple[str, str | da
     cond_type = raw["type"]
     if cond_type not in ALLOWED_CONDITION_TYPES:
         raise ValueError(
-            f"{context}.type 只能是 time_reached 或 text，实际为: {cond_type!r}"
+            f"{context}.type 只能是 time 或 text，实际为: {cond_type!r}"
         )
 
     content = raw["content"]
-    if cond_type == "time_reached":
+    if cond_type == "time":
         if not isinstance(content, str):
             raise ValueError(f"{context}.content 须为时间字符串")
         return cond_type, parse_iso_datetime(content, context=f"{context}.content")

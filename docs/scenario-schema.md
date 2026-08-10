@@ -115,9 +115,24 @@ venue 的 seats 和角色关系中使用的 `winston_churchill` 都指向该文�
 | `chair` | `str` | 是 | `none` 或代表 ID |
 | `seats` | `list[rep_id]` | 是 | 参加会场的代表 ID 列表 |
 | `initial_agenda` | `str` | 是 | 开场正在处理的议题 |
+| `session_phase` | `session_phase` | 是 | 会场开场时的会议阶段 |
 | `agenda` | `list[agenda_item]` | 是 | 议题阶段和引导问题 |
 
-### 6.2 `chair`
+### 6.2 `session_phase`
+
+`session_phase` 声明会场在推演开始时的会议阶段，取值如下：
+
+| 值 | 说明 |
+|---|---|
+| `chaired_core` | 有主持核心磋商 |
+| `unchaired_core` | 无主持核心磋商 |
+| `free_discussion` | 自由讨论 |
+| `recess` | 休会 |
+| `meeting_ended` | 会议结束 |
+
+引擎侧的对应枚举为 `SessionPhase`（`scenario.venue`）。
+
+### 6.3 `chair`
 
 `chair` 是单个字符串：
 
@@ -126,7 +141,7 @@ venue 的 seats 和角色关系中使用的 `winston_churchill` 都指向该文�
 
 它不是对象，不包含 `type`、`id` 或 `role` 子字段。
 
-### 6.3 `seats[]`
+### 6.4 `seats[]`
 
 `seats` 是纯字符串列表，每项都是从 `reps/<rep_id>.yaml` 文件名派生的代表 ID。代表姓名、代表团、职务和权力只在角色卡中定义，不在 venue 重复。
 
@@ -137,7 +152,7 @@ seats:
   - joseph_stalin
 ```
 
-### 6.4 `agenda[]`
+### 6.5 `agenda[]`
 
 | 字段 | 类型 | 说明 |
 |---|---|---|
@@ -251,14 +266,14 @@ event 的 `condition` 固定包含两个字段：
 
 | 字段 | 类型 | 说明 |
 |---|---|---|
-| `type` | `str` | 只能是 `time_reached` 或 `text` |
+| `type` | `str` | 只能是 `time` 或 `text` |
 | `content` | `str` | 与类型对应的时间值或自然语言判断条件 |
 
-`time_reached` 表示剧情时间到达指定时刻，由引擎直接比较时间：
+`time` 表示剧情时间到达指定时刻，由引擎直接比较时间：
 
 ```yaml
 condition:
-  type: time_reached
+  type: time
   content: "1944-10-09T22:45:00+03:00"
 ```
 
@@ -278,7 +293,7 @@ LLM 在这里仅判断条件真假，不直接修改状态、生成事件结果�
 
 | 字段 | 类型 | 说明 |
 |---|---|---|
-| `type` | `str` | `time_reached` 或 `text` |
+| `type` | `str` | `time` 或 `text` |
 | `content` | `str` | 时间值或交给 LLM 判断的自然语言结束条件 |
 
 示例：
@@ -287,7 +302,7 @@ LLM 在这里仅判断条件真假，不直接修改状态、生成事件结果�
 end_conditions:
   - type: text
     content: 主要代表均已接受同一份最终方案。
-  - type: time_reached
+  - type: time
     content: "1944-10-10T10:00:00+03:00"
 ```
 
@@ -303,10 +318,10 @@ end_conditions:
 2. `venues/` 和 `reps/` 中至少各有一个 YAML 文件，且加载器只扫描场景根目录内的这两个固定目录；
 3. 从角色文件名派生的代表 ID、venue 席位和角色文件一一对应；
 4. 每张角色卡包含 `public.target` 和 `private.target`，且不包含旧目标字段；
-5. venue 的 seats、角色关系引用有效代表 ID；chair 为 `none` 或 seats 中的代表 ID；
+5. venue 的 seats、角色关系引用有效代表 ID；chair 为 `none` 或 seats 中的代表 ID；`session_phase` 为合法枚举值；
 6. storyline 的事件 ID 唯一；event 顶层恰好只包含 `id`、`condition` 和 `content`，且 condition 只包含 `type` 和 `content`；
 7. 每个 `end_conditions[]` 元素恰好只包含 `type` 和 `content`；
-8. 所有 condition 的 `type` 只能是 `time_reached` 或 `text`，前者 content 必须是带 UTC 偏移的 ISO 8601 时间；
+8. 所有 condition 的 `type` 只能是 `time` 或 `text`，前者 content 必须是带 UTC 偏移的 ISO 8601 时间；
 9. 私密字段不会进入公共背景、普通会场广播或其他代表上下文；
 10. 不存在 `mechanism.yaml`，`mechanism.py` 存在且大小为 0 字节；
 11. index 不包含顶层 `id`、`files`、`historical_scope`、`venues`、`representatives`、`content_notice`、`subtitle`、`date` 或 `player_count`。

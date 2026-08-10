@@ -11,7 +11,7 @@ targets:
 events:
   - id: red_army_operational_report
     condition:
-      type: time_reached
+      type: time
       content: "1944-10-09T22:45:00+03:00"
     content: >-
       最新战报确认红军在罗马尼亚的部署与补给体系已经深度展开，并继续向匈牙利方向施压。
@@ -19,7 +19,7 @@ events:
 
   - id: greek_transition_window
     condition:
-      type: time_reached
+      type: time
       content: "1944-10-09T23:45:00+03:00"
     content: >-
       希腊方向的德军撤退正在加速。伦敦需要尽快决定英国力量如何进入并支持过渡政府，
@@ -27,7 +27,7 @@ events:
 
   - id: harriman_briefing_request
     condition:
-      type: time_reached
+      type: time
       content: "1944-10-10T01:30:00+03:00"
     content: >-
       美国驻苏大使哈里曼请求英方说明巴尔干讨论是否会代表美国作出承诺，
@@ -38,5 +38,5 @@ end_conditions:
     content: 两位首脑已经签署同一版本，两位外长也已副署，而且两位首脑已就原始纸条的保留、销毁或改写达成一致。
   - type: text
     content: 丘吉尔与斯大林都已明确宣布谈判破裂，且没有任何一方表示愿意继续磋商。
-  - type: time_reached
+  - type: time
     content: "1944-10-10T10:00:00+03:00"

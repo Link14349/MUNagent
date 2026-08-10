@@ -1,9 +1,10 @@
 from __future__ import annotations
+
 from datetime import datetime
+from typing import TYPE_CHECKING
 
 from condition.condition import Condition
 from event.event import Event, SystemEvent
-from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from scenario.scenario import Scenario
@@ -11,17 +12,21 @@ if TYPE_CHECKING:
 
 class EventList:
     scenario: Scenario
-    time: datetime
     pullup_events: list[PullUpEvent]
     __events: list[Event]
+    __time: datetime
 
     def __init__(self, scenario: Scenario):
         self.scenario = scenario
         self.__events = []
         self.pullup_events = []
-        if scenario.time is None:
-            raise ValueError("场景尚未初始化剧情时间")
-        self.time = scenario.time
+        if scenario.start_time is None:
+            raise ValueError("场景尚未初始化开场时间")
+        self.__time = scenario.start_time
+
+    @property
+    def time(self) -> datetime:
+        return self.__time
 
     def pull_up_event(self, pullup: PullUpEvent):
         if pullup.condition.type != "time":
@@ -31,26 +36,40 @@ class EventList:
         self.pullup_events.append(pullup)
 
     def update_time(self, time: datetime):
-        if time < self.time:
+        if time < self.__time:
             raise ValueError("Wrong time order error")
-        self.time = time
-        for pullup in self.pullup_events:
-            if pullup.condition.time <= self.time:
-                self.add_event(SystemEvent(self.time, pullup.content, [], {rep.id for rep in self.scenario.representatives}, self.scenario))
-                self.pullup_events.remove(pullup)
+        self.__time = time
+        due = [
+            pullup
+            for pullup in self.pullup_events
+            if pullup.condition.time is not None and pullup.condition.time <= self.time
+        ]
+        for pullup in due:
+            self.add_event(
+                SystemEvent(
+                    self.time,
+                    pullup.content,
+                    [],
+                    {rep.id for rep in self.scenario.representatives},
+                    self.scenario,
+                )
+            )
+        due_set = set(due)
+        self.pullup_events = [pullup for pullup in self.pullup_events if pullup not in due_set]
 
     def add_event(self, event: Event):
-        if event.time < self.time:
+        if event.time < self.__time:
             raise ValueError("Wrong time order error")
         event.id = len(self.__events)
         self.__events.append(event)
-        self.time = event.time
+        self.__time = event.time
 
     def get_events(self, rep: str) -> list[Event]:
         if rep == "__GOD__":
-            [event for event in self.__events]
+            return [event for event in self.__events]
         return [event for event in self.__events if rep in event.scope]
-    
+
+
 class PullUpEvent:
     condition: Condition
     content: str
