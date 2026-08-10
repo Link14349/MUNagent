@@ -45,11 +45,13 @@ class EventList:
             if pullup.condition.time is not None and pullup.condition.time <= self.time
         ]
         for pullup in due:
+            venue_id = self.scenario.venues[0].id
             self.add_event(
                 SystemEvent(
                     self.time,
                     pullup.content,
                     [],
+                    venue_id,
                     {rep.id for rep in self.scenario.representatives},
                     self.scenario,
                 )

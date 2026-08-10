@@ -1,0 +1,110 @@
+"""事件属性编辑权限：PENDING 可改；time/id/type/venue 不可变。"""
+
+from __future__ import annotations
+
+from datetime import datetime, timezone
+from pathlib import Path
+
+import pytest
+
+from event.event import (
+    EventStatus,
+    EventType,
+    MotionSwitchEvent,
+    VoteEvent,
+    VotePassMode,
+)
+from scenario.scenario import Scenario
+from scenario.venue import SessionPhase
+
+TEMPLATE = Path(__file__).resolve().parent.parent / "scenario-template"
+
+
+@pytest.fixture
+def scenario() -> Scenario:
+    loaded = Scenario()
+    loaded.load(str(TEMPLATE))
+    return loaded
+
+
+@pytest.fixture
+def venue_id(scenario: Scenario) -> str:
+    return scenario.venues[0].id
+
+
+def test_pending_event_allows_edits(scenario: Scenario, venue_id: str) -> None:
+    event = MotionSwitchEvent(
+        datetime(1944, 10, 9, 22, 0, tzinfo=timezone.utc),
+        "动议",
+        SessionPhase.FREE_DISCUSSION,
+        venue_id,
+        {rep.id for rep in scenario.representatives},
+        scenario,
+    )
+    assert event.status == EventStatus.PENDING
+    assert event.venue == venue_id
+    event.content = "更新后的动议说明"
+    event.target_phase = SessionPhase.RECESS
+    event.status = EventStatus.COMPLETED
+    assert event.content == "更新后的动议说明"
+    assert event.target_phase == SessionPhase.RECESS
+
+
+def test_non_pending_rejects_edits(scenario: Scenario, venue_id: str) -> None:
+    event = MotionSwitchEvent(
+        datetime(1944, 10, 9, 22, 0, tzinfo=timezone.utc),
+        "动议",
+        SessionPhase.FREE_DISCUSSION,
+        venue_id,
+        {rep.id for rep in scenario.representatives},
+        scenario,
+    )
+    event.status = EventStatus.COMPLETED
+    with pytest.raises(PermissionError, match="不能修改 content"):
+        event.content = "再改"
+    with pytest.raises(PermissionError, match="不能修改 target_phase"):
+        event.target_phase = SessionPhase.RECESS
+    with pytest.raises(PermissionError, match="不能修改 status"):
+        event.status = EventStatus.PENDING
+
+
+def test_time_type_venue_immutable_id_assign_once(scenario: Scenario, venue_id: str) -> None:
+    event = MotionSwitchEvent(
+        datetime(1944, 10, 9, 22, 0, tzinfo=timezone.utc),
+        "动议",
+        SessionPhase.FREE_DISCUSSION,
+        venue_id,
+        {rep.id for rep in scenario.representatives},
+        scenario,
+    )
+    assert event.type == EventType.MOTION_SWITCH
+    assert event.venue == venue_id
+    with pytest.raises(AttributeError):
+        event.time = datetime(1944, 10, 10, tzinfo=timezone.utc)  # type: ignore[misc]
+    with pytest.raises(AttributeError):
+        event.type = EventType.VOTE  # type: ignore[misc]
+    with pytest.raises(AttributeError):
+        event.venue = "other_venue"  # type: ignore[misc]
+
+    event.id = 0
+    assert event.id == 0
+    with pytest.raises(PermissionError, match="id 不可修改"):
+        event.id = 1
+
+    done = VoteEvent(
+        datetime(1944, 10, 9, 22, 5, tzinfo=timezone.utc),
+        "表决",
+        venue_id,
+        {rep.id for rep in scenario.representatives},
+        event,
+        valid_votes=1,
+        pass_mode=VotePassMode.UNANIMOUS,
+        scenario=scenario,
+        supporters=["winston_churchill"],
+        passed=True,
+    )
+    assert done.status == EventStatus.COMPLETED
+    assert done.venue == venue_id
+    done.id = 7
+    with pytest.raises(PermissionError, match="id 不可修改"):
+        done.id = 8

@@ -5,7 +5,7 @@ from enum import StrEnum
 from typing import TYPE_CHECKING
 
 from scenario.group import Group
-from scenario.venue import SessionPhase, Venue
+from scenario.venue import SessionPhase
 
 if TYPE_CHECKING:
     from filesystem.filesystem import File
@@ -17,6 +17,7 @@ class EventType(StrEnum):
     MOTION_SWITCH = "motion_switch"
     INSTRUCTION = "instruction"
     RESOLUTION = "resolution"
+    VOTE = "vote"
     NOTE = "note"
     MESSAGE = "message"
     CHAT = "chat"
@@ -27,60 +28,168 @@ class EventStatus(StrEnum):
     COMPLETED = "completed"
     FAILED = "failed"
     REJECTED = "rejected"
+    ACCEPTED = "accepted"
+
+
+class VotePassMode(StrEnum):
+    """投票通过门槛。"""
+
+    SIMPLE_MAJORITY = "simple_majority"  # 1/2 多数
+    TWO_THIRDS = "two_thirds"  # 2/3 多数
+    UNANIMOUS = "unanimous"  # 全体一致
 
 
 class Event:
-    time: datetime
-    scenario: Scenario
-    id: int | None
-    scope: set[str]
-    status: EventStatus
-    __content: str
+    """事件基类。
 
-    def __init__(self, time: datetime, content: str, scope: set[str], scenario: Scenario):
-        # self.from_rep = None
-        # self.to = None
-        self.time = time
+    - ``time`` / ``id`` / ``type`` / ``venue``：一旦设定不可再改（``id`` 仅允许从 None 赋一次）。
+    - 其余属性：仅当 ``status == PENDING`` 时可改。
+    - 子类 ``__init__`` 应直接写入私有字段，并用 ``_set_type`` / ``_init_status``。
+    - 每个事件只属于一个会场（``venue`` 为会场 ID 字符串）。
+    """
+
+    def __init__(
+        self,
+        time: datetime,
+        content: str,
+        venue: str,
+        scope: set[str],
+        scenario: Scenario,
+    ):
+        self.__time = time
         self.__content = content
-        self.scenario = scenario
-        self.id = None
-        self.scope = scope
-        self.status = EventStatus.PENDING
+        self.__venue = _normalize_venue_id(venue, scenario)
+        self.__scenario = scenario
+        self.__id: int | None = None
+        self.__scope = set(scope)
+        self.__status = EventStatus.PENDING
+        self.__type: EventType | None = None
+
+    def _require_editable(self, field: str) -> None:
+        if self.__status != EventStatus.PENDING:
+            raise PermissionError(
+                f"事件(id={self.__id!r}, type={self.__type}, venue={self.__venue!r}) 状态为 "
+                f"{self.__status.value}，不能修改 {field}"
+            )
+
+    def _set_type(self, event_type: EventType) -> None:
+        if self.__type is not None:
+            raise PermissionError("事件 type 不可修改")
+        self.__type = event_type
+
+    def _init_status(self, status: EventStatus) -> None:
+        """仅供子类构造时设定初始状态（可直接进入终态）。"""
+        self.__status = EventStatus(status)
+
+    @property
+    def time(self) -> datetime:
+        return self.__time
+
+    @property
+    def id(self) -> int | None:
+        return self.__id
+
+    @id.setter
+    def id(self, value: int) -> None:
+        if self.__id is not None:
+            raise PermissionError("事件 id 不可修改")
+        if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+            raise ValueError(f"id 须为非负整数，实际为: {value!r}")
+        self.__id = value
+
+    @property
+    def type(self) -> EventType:
+        if self.__type is None:
+            raise RuntimeError("事件 type 尚未初始化")
+        return self.__type
+
+    @property
+    def venue(self) -> str:
+        return self.__venue
+
+    @property
+    def scenario(self) -> Scenario:
+        return self.__scenario
+
+    @property
+    def status(self) -> EventStatus:
+        return self.__status
+
+    @status.setter
+    def status(self, value: EventStatus | str) -> None:
+        self._require_editable("status")
+        self.__status = EventStatus(value)
+
+    @property
+    def content(self) -> str:
+        return self.__content
+
+    @content.setter
+    def content(self, value: str) -> None:
+        self._require_editable("content")
+        if not isinstance(value, str):
+            raise TypeError(f"content 须为字符串，实际为 {type(value).__name__}")
+        self.__content = value
+
+    @property
+    def scope(self) -> set[str]:
+        return set(self.__scope)
+
+    @scope.setter
+    def scope(self, value: set[str]) -> None:
+        self._require_editable("scope")
+        if not isinstance(value, (set, frozenset)):
+            raise TypeError(f"scope 须为 set，实际为 {type(value).__name__}")
+        self.__scope = set(value)
 
 
 class SystemEvent(Event):
-    type: EventType
-    __action: list[str]
-
     def __init__(
         self,
         time: datetime,
         content: str,
         action: list[str],
+        venue: str,
         scope: set[str],
         scenario: Scenario,
     ):
-        super().__init__(time, content, scope, scenario)
-        self.type = EventType.SYSTEM
-        self.__action = action
-        self.status = EventStatus.COMPLETED
+        super().__init__(time, content, venue, scope, scenario)
+        self._set_type(EventType.SYSTEM)
+        self.__action = list(action)
+        self._init_status(EventStatus.COMPLETED)
+
+    @property
+    def action(self) -> list[str]:
+        return list(self.__action)
+
+    @action.setter
+    def action(self, value: list[str]) -> None:
+        self._require_editable("action")
+        self.__action = list(value)
 
 
 class MotionSwitchEvent(Event):
-    type: EventType
-    target_phase: SessionPhase
-
     def __init__(
         self,
         time: datetime,
         content: str,
         target_phase: SessionPhase,
+        venue: str,
         scope: set[str],
         scenario: Scenario,
     ):
-        super().__init__(time, content, scope, scenario)
-        self.type = EventType.MOTION_SWITCH
-        self.target_phase = target_phase
+        super().__init__(time, content, venue, scope, scenario)
+        self._set_type(EventType.MOTION_SWITCH)
+        self.__target_phase = SessionPhase(target_phase)
+
+    @property
+    def target_phase(self) -> SessionPhase:
+        return self.__target_phase
+
+    @target_phase.setter
+    def target_phase(self, value: SessionPhase | str) -> None:
+        self._require_editable("target_phase")
+        self.__target_phase = SessionPhase(value)
 
 
 class InstructionEvent(Event):
@@ -90,22 +199,37 @@ class InstructionEvent(Event):
     不能通过 FileSystem.list_visible 直接发现 submissions/。
     """
 
-    type: EventType
-    instruction: File
-    __from: set[str]
-
     def __init__(
         self,
         time: datetime,
         content: str,
         fr: set[str],
         instruction: File,
+        venue: str,
         scenario: Scenario,
     ):
-        super().__init__(time, content, fr, scenario)
-        self.type = EventType.INSTRUCTION
-        self.instruction = instruction
-        self.__from = fr
+        super().__init__(time, content, venue, fr, scenario)
+        self._set_type(EventType.INSTRUCTION)
+        self.__instruction = instruction
+        self.__from = set(fr)
+
+    @property
+    def instruction(self) -> File:
+        return self.__instruction
+
+    @instruction.setter
+    def instruction(self, value: File) -> None:
+        self._require_editable("instruction")
+        self.__instruction = value
+
+    @property
+    def from_reps(self) -> set[str]:
+        return set(self.__from)
+
+    @from_reps.setter
+    def from_reps(self, value: set[str]) -> None:
+        self._require_editable("from_reps")
+        self.__from = set(value)
 
 
 class ResolutionEvent(Event):
@@ -114,29 +238,199 @@ class ResolutionEvent(Event):
     可见性语义同 :class:`InstructionEvent`：经 EventList 可见事件索引，而非文件系统枚举。
     """
 
-    type: EventType
-    resolution: File
-    __from: set[str]
-
     def __init__(
         self,
         time: datetime,
         content: str,
         fr: set[str],
         resolution: File,
+        venue: str,
         scenario: Scenario,
     ):
-        super().__init__(time, content, fr, scenario)
-        self.type = EventType.RESOLUTION
-        self.resolution = resolution
-        self.__from = fr
+        super().__init__(time, content, venue, fr, scenario)
+        self._set_type(EventType.RESOLUTION)
+        self.__resolution = resolution
+        self.__from = set(fr)
+
+    @property
+    def resolution(self) -> File:
+        return self.__resolution
+
+    @resolution.setter
+    def resolution(self, value: File) -> None:
+        self._require_editable("resolution")
+        self.__resolution = value
+
+    @property
+    def from_reps(self) -> set[str]:
+        return set(self.__from)
+
+    @from_reps.setter
+    def from_reps(self, value: set[str]) -> None:
+        self._require_editable("from_reps")
+        self.__from = set(value)
 
 
-# 会议期间的传纸条私聊
+class VoteEvent(Event):
+    """投票事件：对某次 Resolution 或 MotionSwitch 进行表决记录。
+
+    ``remark`` 用于记录特殊规则，例如有权代表强制通过、安理会常任理事国一票否决等。
+    """
+
+    def __init__(
+        self,
+        time: datetime,
+        content: str,
+        venue: str,
+        scope: set[str],
+        target: ResolutionEvent | MotionSwitchEvent,
+        valid_votes: int,
+        pass_mode: VotePassMode | str,
+        scenario: Scenario,
+        *,
+        supporters: list[str] | None = None,
+        against: list[str] | None = None,
+        abstentions: list[str] | None = None,
+        passed: bool | None = None,
+        remark: str = "",
+    ):
+        if not isinstance(target, (ResolutionEvent, MotionSwitchEvent)):
+            raise TypeError(
+                "VoteEvent.target 必须是 ResolutionEvent 或 MotionSwitchEvent，"
+                f"实际为 {type(target).__name__}"
+            )
+        if not isinstance(valid_votes, int) or isinstance(valid_votes, bool) or valid_votes < 0:
+            raise ValueError(f"valid_votes 须为非负整数，实际为: {valid_votes!r}")
+
+        mode = VotePassMode(pass_mode) if not isinstance(pass_mode, VotePassMode) else pass_mode
+        support_list = _normalize_rep_list(supporters or [], field="supporters")
+        against_list = _normalize_rep_list(against or [], field="against")
+        abstain_list = _normalize_rep_list(abstentions or [], field="abstentions")
+        _validate_vote_ballots(support_list, against_list, abstain_list, valid_votes)
+        if not isinstance(remark, str):
+            raise TypeError(f"remark 须为字符串，实际为 {type(remark).__name__}")
+
+        super().__init__(time, content, venue, scope, scenario)
+        if target.venue != self.venue:
+            raise ValueError(
+                f"VoteEvent.venue={self.venue!r} 与 target.venue={target.venue!r} 不一致"
+            )
+        self._set_type(EventType.VOTE)
+        self.__target = target
+        self.__valid_votes = valid_votes
+        self.__supporters = support_list
+        self.__against = against_list
+        self.__abstentions = abstain_list
+        self.__pass_mode = mode
+        self.__passed = passed
+        self.__remark = remark.strip()
+        if passed is True:
+            self._init_status(EventStatus.COMPLETED)
+        elif passed is False:
+            self._init_status(EventStatus.REJECTED)
+
+    def _revalidate_ballots(self) -> None:
+        _validate_vote_ballots(
+            self.__supporters,
+            self.__against,
+            self.__abstentions,
+            self.__valid_votes,
+        )
+
+    @property
+    def target(self) -> ResolutionEvent | MotionSwitchEvent:
+        return self.__target
+
+    @target.setter
+    def target(self, value: ResolutionEvent | MotionSwitchEvent) -> None:
+        self._require_editable("target")
+        if not isinstance(value, (ResolutionEvent, MotionSwitchEvent)):
+            raise TypeError(
+                "VoteEvent.target 必须是 ResolutionEvent 或 MotionSwitchEvent，"
+                f"实际为 {type(value).__name__}"
+            )
+        if value.venue != self.venue:
+            raise ValueError(
+                f"VoteEvent.venue={self.venue!r} 与 target.venue={value.venue!r} 不一致"
+            )
+        self.__target = value
+
+    @property
+    def valid_votes(self) -> int:
+        return self.__valid_votes
+
+    @valid_votes.setter
+    def valid_votes(self, value: int) -> None:
+        self._require_editable("valid_votes")
+        if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+            raise ValueError(f"valid_votes 须为非负整数，实际为: {value!r}")
+        self.__valid_votes = value
+        self._revalidate_ballots()
+
+    @property
+    def supporters(self) -> list[str]:
+        return list(self.__supporters)
+
+    @supporters.setter
+    def supporters(self, value: list[str]) -> None:
+        self._require_editable("supporters")
+        self.__supporters = _normalize_rep_list(value, field="supporters")
+        self._revalidate_ballots()
+
+    @property
+    def against(self) -> list[str]:
+        return list(self.__against)
+
+    @against.setter
+    def against(self, value: list[str]) -> None:
+        self._require_editable("against")
+        self.__against = _normalize_rep_list(value, field="against")
+        self._revalidate_ballots()
+
+    @property
+    def abstentions(self) -> list[str]:
+        return list(self.__abstentions)
+
+    @abstentions.setter
+    def abstentions(self, value: list[str]) -> None:
+        self._require_editable("abstentions")
+        self.__abstentions = _normalize_rep_list(value, field="abstentions")
+        self._revalidate_ballots()
+
+    @property
+    def pass_mode(self) -> VotePassMode:
+        return self.__pass_mode
+
+    @pass_mode.setter
+    def pass_mode(self, value: VotePassMode | str) -> None:
+        self._require_editable("pass_mode")
+        self.__pass_mode = VotePassMode(value)
+
+    @property
+    def passed(self) -> bool | None:
+        return self.__passed
+
+    @passed.setter
+    def passed(self, value: bool | None) -> None:
+        self._require_editable("passed")
+        if value is not None and not isinstance(value, bool):
+            raise TypeError(f"passed 须为 bool 或 None，实际为 {type(value).__name__}")
+        self.__passed = value
+
+    @property
+    def remark(self) -> str:
+        return self.__remark
+
+    @remark.setter
+    def remark(self, value: str) -> None:
+        self._require_editable("remark")
+        if not isinstance(value, str):
+            raise TypeError(f"remark 须为字符串，实际为 {type(value).__name__}")
+        self.__remark = value.strip()
+
+
 class NoteEvent(Event):
-    type: EventType
-    __from: str
-    __to: set[str]
+    """会议期间的传纸条私聊。"""
 
     def __init__(
         self,
@@ -144,19 +438,38 @@ class NoteEvent(Event):
         content: str,
         fr: str,
         to: set[str],
+        venue: str,
         scenario: Scenario,
     ):
-        super().__init__(time, content, {fr} | to, scenario)
-        self.type = EventType.NOTE
+        super().__init__(time, content, venue, {fr} | to, scenario)
+        self._set_type(EventType.NOTE)
         self.__from = fr
-        self.__to = to
-        self.status = EventStatus.COMPLETED
+        self.__to = set(to)
+        self._init_status(EventStatus.COMPLETED)
+
+    @property
+    def from_rep(self) -> str:
+        return self.__from
+
+    @from_rep.setter
+    def from_rep(self, value: str) -> None:
+        self._require_editable("from_rep")
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError("from_rep 须为非空字符串")
+        self.__from = value.strip()
+
+    @property
+    def to_reps(self) -> set[str]:
+        return set(self.__to)
+
+    @to_reps.setter
+    def to_reps(self, value: set[str]) -> None:
+        self._require_editable("to_reps")
+        self.__to = set(value)
 
 
-# 会议期间的消息
 class MessageEvent(Event):
-    type: EventType
-    __from: str
+    """会议期间的消息。"""
 
     def __init__(
         self,
@@ -164,25 +477,46 @@ class MessageEvent(Event):
         content: str,
         CoT: str,
         fr: str,
-        venue: Venue,
+        venue: str,
         scenario: Scenario,
     ):
-        super().__init__(time, content, set(venue.seats), scenario)
-        self.type = EventType.MESSAGE
+        seats = _venue_seats(scenario, venue)
+        super().__init__(time, content, venue, set(seats), scenario)
+        self._set_type(EventType.MESSAGE)
         self.__from = fr
         self.__CoT = CoT
-        self.status = EventStatus.COMPLETED
+        self._init_status(EventStatus.COMPLETED)
+
+    @property
+    def from_rep(self) -> str:
+        return self.__from
+
+    @from_rep.setter
+    def from_rep(self, value: str) -> None:
+        self._require_editable("from_rep")
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError("from_rep 须为非空字符串")
+        self.__from = value.strip()
 
     def get_CoT(self, rep: str) -> str:
         if rep != self.__from:
             raise ValueError("Not the sender of this message")
         return self.__CoT
 
+    @property
+    def CoT(self) -> str:
+        return self.__CoT
 
-# free discussion环节的消息
+    @CoT.setter
+    def CoT(self, value: str) -> None:
+        self._require_editable("CoT")
+        if not isinstance(value, str):
+            raise TypeError(f"CoT 须为字符串，实际为 {type(value).__name__}")
+        self.__CoT = value
+
+
 class ChatEvent(Event):
-    type: EventType
-    __from: str
+    """free discussion 环节的消息。"""
 
     def __init__(
         self,
@@ -191,15 +525,97 @@ class ChatEvent(Event):
         fr: str,
         CoT: str,
         group: Group,
+        venue: str,
         scenario: Scenario,
     ):
-        super().__init__(time, content, group.members, scenario)
-        self.type = EventType.CHAT
+        super().__init__(time, content, venue, group.members, scenario)
+        self._set_type(EventType.CHAT)
         self.__from = fr
         self.__CoT = CoT
-        self.status = EventStatus.COMPLETED
+        self._init_status(EventStatus.COMPLETED)
+
+    @property
+    def from_rep(self) -> str:
+        return self.__from
+
+    @from_rep.setter
+    def from_rep(self, value: str) -> None:
+        self._require_editable("from_rep")
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError("from_rep 须为非空字符串")
+        self.__from = value.strip()
 
     def get_CoT(self, rep: str) -> str:
         if rep != self.__from:
             raise ValueError("Not the sender of this message")
         return self.__CoT
+
+    @property
+    def CoT(self) -> str:
+        return self.__CoT
+
+    @CoT.setter
+    def CoT(self, value: str) -> None:
+        self._require_editable("CoT")
+        if not isinstance(value, str):
+            raise TypeError(f"CoT 须为字符串，实际为 {type(value).__name__}")
+        self.__CoT = value
+
+
+def _normalize_venue_id(venue: str, scenario: Scenario) -> str:
+    if not isinstance(venue, str) or not venue.strip():
+        raise ValueError("venue 须为非空会场 ID 字符串")
+    venue_id = venue.strip()
+    known = {item.id for item in scenario.venues}
+    if known and venue_id not in known:
+        raise ValueError(f"未知会场 ID: {venue_id}")
+    return venue_id
+
+
+def _venue_seats(scenario: Scenario, venue: str) -> list[str]:
+    venue_id = _normalize_venue_id(venue, scenario)
+    for item in scenario.venues:
+        if item.id == venue_id:
+            return list(item.seats)
+    raise ValueError(f"未知会场 ID: {venue_id}")
+
+
+def _normalize_rep_list(values: list[str], *, field: str) -> list[str]:
+    result: list[str] = []
+    seen: set[str] = set()
+    for index, item in enumerate(values):
+        if not isinstance(item, str) or not item.strip():
+            raise ValueError(f"{field}[{index}] 须为非空代表 ID 字符串")
+        rep_id = item.strip()
+        if rep_id in seen:
+            raise ValueError(f"{field} 存在重复代表 ID: {rep_id}")
+        seen.add(rep_id)
+        result.append(rep_id)
+    return result
+
+
+def _validate_vote_ballots(
+    supporters: list[str],
+    against: list[str],
+    abstentions: list[str],
+    valid_votes: int,
+) -> None:
+    buckets = (
+        ("supporters", supporters),
+        ("against", against),
+        ("abstentions", abstentions),
+    )
+    seen: dict[str, str] = {}
+    for field, reps in buckets:
+        for rep_id in reps:
+            if rep_id in seen:
+                raise ValueError(
+                    f"代表 {rep_id} 同时出现在 {seen[rep_id]} 与 {field} 中"
+                )
+            seen[rep_id] = field
+
+    cast = len(supporters) + len(against) + len(abstentions)
+    if cast > valid_votes:
+        raise ValueError(
+            f"支持/反对/弃权合计 {cast} 超过总有效票数 valid_votes={valid_votes}"
+        )
