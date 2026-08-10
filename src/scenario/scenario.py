@@ -49,11 +49,16 @@ class Scenario:
         populate_scenario(self, scenario_path)
 
     def initialize(self) -> None:
-        """准备一次推演运行：事件表 + 绑定新建的 FileSystem。"""
+        """准备一次推演运行：事件表 + 挂载 time 条件外部事件 + 绑定新建的 FileSystem。"""
         from event.eventlist import EventList
         from filesystem.filesystem import FileSystem
 
-        self.event_list = EventList(self)
         if self.filesystem is not None:
             raise RuntimeError("Scenario 已绑定 FileSystem，不能重复 initialize")
+
+        self.event_list = EventList(self)
+        for pullup in self.event_pool:
+            if pullup.condition.type == "time":
+                self.event_list.pull_up_event(pullup)
+
         self.filesystem = FileSystem.create_for_scenario(self)

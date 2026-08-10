@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import TYPE_CHECKING
 
 from condition.condition import Condition
@@ -14,8 +14,8 @@ class EventList:
     """推演事件表。
 
     事件对象构造时 ``time`` / ``id`` 为 ``None``；``add_event`` 用当前表时钟盖戳并分配
-    ``id``。剧情时钟仅由 ``update_time`` 推进；到期的 ``PullUpEvent`` 会落成
-    ``SystemEvent`` 再入表。
+    ``id``。剧情时钟由 ``update_time`` / ``time_pass`` 推进；到期的 ``PullUpEvent``
+    会落成 ``SystemEvent`` 再入表。
     """
 
     scenario: Scenario
@@ -43,6 +43,7 @@ class EventList:
         self.pullup_events.append(pullup)
 
     def update_time(self, time: datetime):
+        """将剧情时钟推进到绝对时刻 ``time``（不可倒退）。"""
         if time < self.__time:
             raise ValueError("Wrong time order error")
         self.__time = time
@@ -64,6 +65,16 @@ class EventList:
             )
         due_set = set(due)
         self.pullup_events = [pullup for pullup in self.pullup_events if pullup not in due_set]
+
+    def time_pass(self, delta_time: timedelta) -> None:
+        """相对当前时钟推进 ``delta_time``，内部委托 ``update_time``。"""
+        if not isinstance(delta_time, timedelta):
+            raise TypeError(
+                f"delta_time 须为 timedelta，实际为 {type(delta_time).__name__}"
+            )
+        if delta_time < timedelta(0):
+            raise ValueError(f"delta_time 不可为负，实际为 {delta_time!r}")
+        self.update_time(self.__time + delta_time)
 
     def add_event(self, event: Event):
         """将事件登记入表：盖上当前剧情时间并分配 ``id``。"""

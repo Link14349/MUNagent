@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -131,3 +131,16 @@ def test_event_list_add_stamps_time_and_id(scenario: Scenario, venue_id: str) ->
 
     with pytest.raises(ValueError, match="应由 EventList.add_event 设定"):
         events.add_event(event)
+
+
+def test_event_list_time_pass(scenario: Scenario) -> None:
+    events = EventList(scenario)
+    assert scenario.start_time is not None
+    start = scenario.start_time
+    events.time_pass(timedelta(minutes=30))
+    assert events.time == start + timedelta(minutes=30)
+
+    with pytest.raises(ValueError, match="不可为负"):
+        events.time_pass(timedelta(seconds=-1))
+    with pytest.raises(TypeError, match="timedelta"):
+        events.time_pass(30)  # type: ignore[arg-type]

@@ -1,21 +1,33 @@
-"""MUNagent 入口：演示 FileSystem（权限控制 + 提交版本管理）。"""
+"""MUNagent 入口：演示 EventList（可见性 / pull-up / 权限）与 FileSystem。"""
 
 from __future__ import annotations
 
 import shutil
 import sys
+from datetime import datetime, timedelta
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 _SRC = Path(__file__).resolve().parent
 if str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
 
+from event.event import (
+    EventStatus,
+    InstructionEvent,
+    MessageEvent,
+    MotionSwitchEvent,
+    NoteEvent,
+    SystemEvent,
+)
 from filesystem.filesystem import SYSTEM_ACTOR
 from scenario.scenario import Scenario
+from scenario.venue import SessionPhase
 
 CHURCHILL = "winston_churchill"
 STALIN = "joseph_stalin"
 EDEN = "anthony_eden"
+MOLOTOV = "vyacheslav_molotov"
 
 
 def _section(title: str) -> None:
@@ -37,7 +49,151 @@ def _hash_short(value: str) -> str:
     return value[:12] + "…"
 
 
-def demo_permissions(fs, venue_id: str) -> None:
+def _show_visible(events, label: str, rep_id: str) -> None:
+    visible = events.get_events(rep_id)
+    print(f"  {label} ({rep_id}) 可见 {len(visible)} 条:")
+    for event in visible:
+        stamp = event.time.isoformat() if event.time else "?"
+        print(f"    [{event.id}] {event.type.value} @{stamp}: {event.content[:48]}…")
+
+
+def demo_eventlist(scenario: Scenario) -> None:
+    events = scenario.event_list
+    if events is None:
+        raise RuntimeError("Scenario 尚未 initialize，event_list 为空")
+    fs = scenario.filesystem
+    if fs is None:
+        raise RuntimeError("Scenario 尚未 initialize，filesystem 为空")
+
+    venue_id = scenario.venues[0].id
+    moscow = ZoneInfo("Europe/Moscow")
+
+    _section("E1. initialize 已挂载 time 条件 pull-up")
+    _ok(f"剧情时钟: {events.time.isoformat()}")
+    _ok(f"event_pool 中 time 事件: {sum(1 for e in scenario.event_pool if e.condition.type == 'time')}")
+    _ok(f"已 pull-up 待触发: {len(events.pullup_events)}")
+    for pullup in events.pullup_events:
+        due = pullup.condition.time.isoformat() if pullup.condition.time else "?"
+        print(f"    - due={due}: {pullup.content[:40]}…")
+
+    _section("E2. add_event 盖戳 + get_events 按 scope 过滤")
+    events.add_event(
+        SystemEvent(
+            "全员通报：会议正式开始",
+            [],
+            venue_id,
+            {CHURCHILL, STALIN, EDEN, MOLOTOV},
+            scenario,
+        )
+    )
+    events.add_event(NoteEvent("仅丘艾可见的密信：试探希腊条款", CHURCHILL, {EDEN}, venue_id, scenario))
+    events.add_event(NoteEvent("仅丘斯可见的密信：罗马尼亚底线", CHURCHILL, {STALIN}, venue_id, scenario))
+    _ok("已添加：全员通报 + 两封不同 scope 的纸条")
+
+    for rep_id, label in (
+        (CHURCHILL, "丘吉尔"),
+        (EDEN, "艾登"),
+        (STALIN, "斯大林"),
+        (MOLOTOV, "莫洛托夫"),
+        ("__GOD__", "上帝视角"),
+    ):
+        _show_visible(events, label, rep_id)
+
+    _section("E3. pull-up：推进时钟触发外部 SystemEvent")
+    first_due = datetime(1944, 10, 9, 22, 45, tzinfo=moscow)
+    events.update_time(first_due)
+    _ok(f"update_time → {events.time.isoformat()}，待触发剩余 {len(events.pullup_events)}")
+    fired = [e for e in events.get_events("__GOD__") if e.type.value == "system"]
+    _ok(f"系统事件累计 {len(fired)} 条；最新: {fired[-1].content[:48]}…")
+
+    events.time_pass(timedelta(hours=1))
+    _ok(f"time_pass(+1h) → {events.time.isoformat()}，待触发剩余 {len(events.pullup_events)}")
+    _show_visible(events, "丘吉尔（含外部事件）", CHURCHILL)
+
+    _section("E4. 权限：终态不可改 / time·id 不可改 / CoT 仅发送者")
+    pending = MotionSwitchEvent(
+        "动议进入自由讨论",
+        SessionPhase.FREE_DISCUSSION,
+        venue_id,
+        {CHURCHILL, STALIN, EDEN, MOLOTOV},
+        scenario,
+    )
+    events.add_event(pending)
+    pending.content = "动议说明已修订"
+    _ok(f"PENDING 可改 content → {pending.content!r}")
+
+    try:
+        pending.time = events.time + timedelta(minutes=5)
+    except PermissionError as exc:
+        _denied("改写已盖戳的 time", exc)
+    try:
+        pending.id = 999
+    except PermissionError as exc:
+        _denied("改写已分配的 id", exc)
+
+    pending.status = EventStatus.COMPLETED
+    try:
+        pending.content = "终态篡改"
+    except PermissionError as exc:
+        _denied("COMPLETED 后修改 content", exc)
+    try:
+        pending.scope = {STALIN}
+    except PermissionError as exc:
+        _denied("COMPLETED 后修改 scope", exc)
+
+    msg = MessageEvent(
+        "丘吉尔公开发言：希腊事务应交由伦敦主导",
+        "内心：先试探斯大林是否接受 90/10",
+        CHURCHILL,
+        venue_id,
+        scenario,
+    )
+    events.add_event(msg)
+    _ok(f"发送者可读 CoT: {msg.get_CoT(CHURCHILL)!r}")
+    try:
+        msg.get_CoT(STALIN)
+    except ValueError as exc:
+        _denied("斯大林读取丘吉尔 CoT", exc)
+    try:
+        msg.CoT = "偷改思维链"
+    except PermissionError as exc:
+        _denied("修改已完成消息的 CoT", exc)
+
+    _section("E5. InstructionEvent：经 scope 可见，submission 仍不可直接读")
+    draft = fs.create_rep_file(
+        CHURCHILL,
+        "foreign_office_note.md",
+        "请艾登核对希腊过渡安排措辞",
+        description="外长指示稿",
+    )
+    submitted = draft.submit(CHURCHILL)
+    instruction = InstructionEvent(
+        "外长指示已提交",
+        {CHURCHILL, EDEN},
+        submitted,
+        venue_id,
+        scenario,
+    )
+    events.add_event(instruction)
+    eden_events = events.get_events(EDEN)
+    linked = [e for e in eden_events if isinstance(e, InstructionEvent)]
+    _ok(f"艾登经事件看到 Instruction: {len(linked)} 条，文件={linked[0].instruction.path.name}")
+    stalin_linked = [e for e in events.get_events(STALIN) if isinstance(e, InstructionEvent)]
+    _ok(f"斯大林看不到该 Instruction: {len(stalin_linked)} 条")
+
+    rel = submitted.path.relative_to(fs.path).as_posix()
+    try:
+        fs.read(rel, EDEN)
+    except PermissionError as exc:
+        _denied("艾登直接读 submissions/（即使事件可见）", exc)
+    try:
+        fs.read(rel, STALIN)
+    except PermissionError as exc:
+        _denied("斯大林直接读 submissions/", exc)
+    _ok(f"系统可读 submission: {fs.read(rel, SYSTEM_ACTOR)!r}")
+
+
+def demo_permissions(fs, venue_id: str):
     _section("A. 权限：私有文件 / scope / owner")
     draft = fs.create_rep_file(
         CHURCHILL,
@@ -140,7 +296,6 @@ def demo_versioning(fs, draft, venue_id: str) -> None:
         _denied("相对最新 v3 未改动", exc)
 
     _section("B5. 联合 owner 提交：文件名仍用 primary_owner，不是提交者")
-    # 艾登已是 owner；由艾登提交，文件名仍以丘吉尔为前缀
     fs.write(
         f"reps/{CHURCHILL}/percentages.md",
         EDEN,
@@ -207,7 +362,9 @@ def main() -> None:
         print(f"  标题: {scenario.title}")
         print(f"  代表: {', '.join(rep.id for rep in scenario.representatives)}")
         assert scenario.filesystem is not None
+        assert scenario.event_list is not None
 
+        demo_eventlist(scenario)
         demo_filesystem(scenario)
         print("\n演示结束。")
     finally:

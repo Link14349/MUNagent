@@ -43,14 +43,14 @@
 
 `background.md` 和 `storyline.yaml` 使用固定文件名。venue 和代表文件分别通过扫描 `venues/*.yaml`、`reps/*.yaml` 发现，因此 `index.yaml` 不需要 `files`、`venues` 或 `representatives` 字段。
 
-`simulation/` 由通用引擎在 `Scenario.initialize()` 时创建并绑定一个 `FileSystem`；场景包作者不在此目录写入声明式内容。
+`simulation/` 由通用引擎在 `Scenario.initialize()` 时创建并绑定一个 `FileSystem`；场景包作者不在此目录写入声明式内容。`initialize` 同时新建 `EventList`，并将 `storyline.yaml` 载入的 `event_pool` 中所有 `type: time` 的外部事件经 `pull_up_event` 挂入待触发队列；`text` 条件事件暂不自动挂载。
 
 运行时文件可见性由程序强制执行：
 
 - `reps/<rep_id>/`：工作文件，通过 `scope`/`owner` 控制读/写；`list_visible` / `list_writable` 只枚举该目录。
 - `submissions/<venue_id>/`：仅存放经 `File.submit()` 复制的提交副本，命名为 `<primary_owner>+<原文件名>+v<版本号>`（`primary_owner` 为该文件 owner 集合中最先加入者）；与同系列最新版内容 hash 相同则拒绝，否则递增版本。副本 `owner`/`scope` 为空，**不能**通过文件系统列表或直接路径被代表发现或改写。
 - 代表若要得知某份 submission 的存在并读取其内容，只能经由 `EventList.get_events(rep_id)` 返回的、对该代表可见的事件（例如绑定了 `File` 的 `InstructionEvent` / `ResolutionEvent`）索引到该文件；引擎组装 Agent 上下文时不得把未被子事件引用的 submission 注入可见文件列表。
-- 运行时 `Event` 对象构造时不携带剧情时间（`time` 为 `None`）；只有经 `EventList.add_event` 入表时，才由事件表用当前时钟盖戳并分配 `id`。剧情时钟由 `EventList.update_time` 推进。
+- 运行时 `Event` 对象构造时不携带剧情时间（`time` 为 `None`）；只有经 `EventList.add_event` 入表时，才由事件表用当前时钟盖戳并分配 `id`。剧情时钟由 `EventList.update_time`（绝对时刻）或 `EventList.time_pass`（相对时长）推进。
 
 ## 3. 通用约定
 

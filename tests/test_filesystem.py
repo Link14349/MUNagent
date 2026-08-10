@@ -226,5 +226,9 @@ def test_scenario_initialize_binds_filesystem(scenario: Scenario, tmp_path: Path
     assert scenario.filesystem is not None
     assert scenario.filesystem.path.parent == tmp_path / "simulation"
     assert (scenario.filesystem.path / "reps" / CHURCHILL).is_dir()
+    assert scenario.event_list is not None
+    time_pool = [e for e in scenario.event_pool if e.condition.type == "time"]
+    assert time_pool
+    assert len(scenario.event_list.pullup_events) == len(time_pool)
     with pytest.raises(RuntimeError, match="不能重复 initialize"):
         scenario.initialize()
