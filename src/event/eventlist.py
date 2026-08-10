@@ -1,7 +1,8 @@
 from __future__ import annotations
+from datetime import datetime
 
 from condition.condition import Condition
-from event.event import Event
+from event.event import Event, SystemEvent
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -9,25 +10,52 @@ if TYPE_CHECKING:
 
 
 class EventList:
+    scenario: Scenario
+    time: datetime
+    pullup_events: list[PullUpEvent]
+    __events: list[Event]
+
     def __init__(self, scenario: Scenario):
         self.scenario = scenario
-        self.events = []
+        self.__events = []
+        self.pullup_events = []
         if scenario.time is None:
             raise ValueError("场景尚未初始化剧情时间")
         self.time = scenario.time
 
+    def pull_up_event(self, pullup: PullUpEvent):
+        if pullup.condition.type != "time":
+            raise ValueError("Pull up event must be a time condition")
+        if pullup.condition.time < self.time:
+            return
+        self.pullup_events.append(pullup)
+
+    def update_time(self, time: datetime):
+        if time < self.time:
+            raise ValueError("Wrong time order error")
+        self.time = time
+        for pullup in self.pullup_events:
+            if pullup.condition.time <= self.time:
+                self.add_event(SystemEvent(self.time, pullup.content, [], {rep.id for rep in self.scenario.representatives}, self.scenario))
+                self.pullup_events.remove(pullup)
+
     def add_event(self, event: Event):
         if event.time < self.time:
             raise ValueError("Wrong time order error")
-        event.id = len(self.events)
-        self.events.append(event)
+        event.id = len(self.__events)
+        self.__events.append(event)
+        self.time = event.time
 
-    def get_event(self, id: int):
-        if id < 0 or id >= len(self.events):
-            return None
-        return self.events[id]
+    def get_events(self, rep: str) -> list[Event]:
+        if rep == "__GOD__":
+            [event for event in self.__events]
+        return [event for event in self.__events if rep in event.scope]
     
 class PullUpEvent:
+    condition: Condition
+    content: str
+    scenario: Scenario
+
     def __init__(self, condition: Condition, content: str, scenario: Scenario):
         self.condition = condition
         self.content = content

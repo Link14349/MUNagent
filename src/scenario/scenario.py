@@ -21,19 +21,30 @@ from scenario.venue import Venue
 
 
 class Scenario:
-    def __init__(self) -> None:
-        self.title: str = ""
-        self.background: str = ""
-        self.targets: list[str] = []
-        self.description: str = ""
-        self.timezone: str = ""
-        self.time: datetime | None = None
-        self.event_pool: list[PullUpEvent] = []
-        self.end_conditions: list[Condition] = []
+    title: str
+    background: str
+    targets: list[str]
+    description: str
+    timezone: str
+    time: datetime | None
+    event_pool: list[PullUpEvent]
+    end_conditions: list[Condition]
+    venues: list[Venue]
+    representatives: list[Representative]
+    event_list: EventList | None
 
-        self.venues: list[Venue] = []
-        self.representatives: list[Representative] = []
-        self.event_list: EventList | None = None
+    def __init__(self) -> None:
+        self.title = ""
+        self.background = ""
+        self.targets = []
+        self.description = ""
+        self.timezone = ""
+        self.time = None
+        self.event_pool = []
+        self.end_conditions = []
+        self.venues = []
+        self.representatives = []
+        self.event_list = None
 
     def load(self, scenario_path: str) -> None:
         root = Path(scenario_path).resolve()
