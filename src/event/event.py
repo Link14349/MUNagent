@@ -4,7 +4,6 @@ from datetime import datetime
 from typing import TYPE_CHECKING
 
 from scenario.group import Group
-from scenario.representative import Representative
 from scenario.venue import Venue
 
 if TYPE_CHECKING:

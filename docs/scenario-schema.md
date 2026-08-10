@@ -295,6 +295,8 @@ end_conditions:
 
 ## 9. 跨文件不变量
 
+引擎侧入口为 `scenario.load.load_scenario(path)`，或 `Scenario().load(path)`（内部委托给前者）。解析与校验逻辑集中在 `scenario.load`，领域类 `Scenario`、`Venue`、`Representative` 只承载推演期状态。
+
 加载场景时至少检查：
 
 1. 固定文件 `index.yaml`、`background.md`、`storyline.yaml` 存在；
