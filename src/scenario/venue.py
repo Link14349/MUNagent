@@ -56,7 +56,7 @@ class Venue:
 
     @property
     def session_phase(self) -> SessionPhase | None:
-        """当前会议阶段（只读）。"""
+        """当前会议阶段(只读)。"""
         return self.__session_phase
 
     def switch_phase(self, phase: SessionPhase) -> None:

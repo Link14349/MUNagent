@@ -7,7 +7,7 @@
 ## 依赖与运行环境
 
 - Python 3.11+
-- 运行时依赖：`httpx`、`pyyaml`（见仓库根目录 `pyproject.toml`）
+- 运行时依赖：`httpx`、`pyyaml`(见仓库根目录 `pyproject.toml`)
 - 开发/测试：`pytest`、`pytest-asyncio`
 
 本地开发时，将 `src/` 加入模块搜索路径：
@@ -91,7 +91,7 @@ asyncio.run(main())
 
 ### 拼接完整正文
 
-`complete()` 在内部消费流式响应，只拼接 `TextDelta`（thinking 不计入返回值）：
+`complete()` 在内部消费流式响应，只拼接 `TextDelta`(thinking 不计入返回值)：
 
 ```python
 text = await llm.complete(messages, max_tokens=4096)
@@ -137,7 +137,7 @@ asyncio.run(main())
 
 ### 重试策略
 
-- 仅在**尚未产出任何增量**时，对网络错误与 5xx 进行指数退避重试（默认最多 3 次）。
+- 仅在**尚未产出任何增量**时，对网络错误与 5xx 进行指数退避重试(默认最多 3 次)。
 - 一旦开始吐字，中途断流**不会**静默重试，直接抛出 `RuntimeError`，避免上层已展示的内容与重试结果不一致。
 
 ## 命令行
@@ -173,7 +173,7 @@ await run_interactive(llm, "你好", system="你是模联推演助手。")
 
 ## API 参考
 
-### 公开导出（`from llm import ...`）
+### 公开导出(`from llm import ...`)
 
 | 名称 | 说明 |
 |------|------|
@@ -208,9 +208,9 @@ LLM(
 | `provider` | provider 名，对应 config 中 `providers` 的键 |
 | `model` | 模型 ID，原样写入请求体 `model` 字段 |
 | `thinking` | `True` 时发送 `{"thinking": {"type": "enabled"}}`；`False` 为 `disabled` |
-| `config` | 注入完整配置，跳过磁盘读取（测试常用） |
+| `config` | 注入完整配置，跳过磁盘读取(测试常用) |
 | `config_path` | 指定 YAML 路径 |
-| `stream_read_timeout_s` | 相邻 SSE 行之间的读超时（秒） |
+| `stream_read_timeout_s` | 相邻 SSE 行之间的读超时(秒) |
 | `transport` | 注入 `httpx` transport，用于 mock 测试 |
 
 #### `async stream(messages, *, max_tokens=4096, on_delta=None)`
@@ -316,9 +316,9 @@ llm = LLM(config=config, transport=httpx.MockTransport(handler))
 
 以下能力**尚未**实现，调用方请勿假设存在：
 
-- 非流式（一次性 JSON）请求模式
+- 非流式(一次性 JSON)请求模式
 - Function calling / tools 参数拼装
-- 多 provider 角色路由（如 chair、delegate 分模型）
+- 多 provider 角色路由(如 chair、delegate 分模型)
 - Token 用量持久化与计费统计
 - 自动把 thinking 内容写回对话历史
 

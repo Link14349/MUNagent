@@ -46,9 +46,9 @@ class Event:
     - ``type`` / ``venue``：一旦设定不可再改。
     - 其余属性：仅当 ``status == PENDING`` 时可改。
     - 通过 ``status`` setter 离开 ``PENDING`` 时，若事件已入表，会通知
-      ``EventList`` 将其从 pending 队列移除（约定仅由此路径回调）。
+      ``EventList`` 将其从 pending 队列移除(约定仅由此路径回调)。
     - 子类 ``__init__`` 应直接写入私有字段，并用 ``_set_type`` / ``_init_status``。
-    - 每个事件只属于一个会场（``venue`` 为会场 ID 字符串）。
+    - 每个事件只属于一个会场(``venue`` 为会场 ID 字符串)。
     """
 
     def __init__(
@@ -80,9 +80,9 @@ class Event:
         self.__type = event_type
 
     def _init_status(self, status: EventStatus) -> None:
-        """仅供子类构造时设定初始状态（可直接进入终态）。
+        """仅供子类构造时设定初始状态(可直接进入终态)。
 
-        不走 ``status`` setter，也不通知 EventList（构造时尚未入表）。
+        不走 ``status`` setter，也不通知 EventList(构造时尚未入表)。
         """
         self.__status = EventStatus(status)
 
@@ -207,7 +207,7 @@ class MotionSwitchEvent(Event):
 
 
 class InstructionEvent(Event):
-    """指示类事件：``instruction`` 绑定一份 File（通常为 submission 副本）。
+    """指示类事件：``instruction`` 绑定一份 File(通常为 submission 副本)。
 
     事件落在代表 scope 内时，该代表可通过本事件索引得知并访问该文件；
     不能通过 FileSystem.list_visible 直接发现 submissions/。
@@ -246,7 +246,7 @@ class InstructionEvent(Event):
 
 
 class ResolutionEvent(Event):
-    """决议类事件：``resolution`` 绑定一份 File（通常为 submission 副本）。
+    """决议类事件：``resolution`` 绑定一份 File(通常为 submission 副本)。
 
     可见性语义同 :class:`InstructionEvent`：经 EventList 可见事件索引，而非文件系统枚举。
     """

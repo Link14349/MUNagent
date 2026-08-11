@@ -48,9 +48,9 @@
 运行时文件可见性由程序强制执行：
 
 - `reps/<rep_id>/`：工作文件，通过 `scope`/`owner` 控制读/写；`list_visible` / `list_writable` 只枚举该目录。
-- `submissions/<venue_id>/`：仅存放经 `File.submit()` 复制的提交副本，命名为 `<primary_owner>+<原文件名>+v<版本号>`（`primary_owner` 为该文件 owner 集合中最先加入者）；与同系列最新版内容 hash 相同则拒绝，否则递增版本。副本 `owner`/`scope` 为空，**不能**通过文件系统列表或直接路径被代表发现或改写。
-- 代表若要得知某份 submission 的存在并读取其内容，只能经由 `EventList.get_events(rep_id)` 返回的、对该代表可见的事件（例如绑定了 `File` 的 `InstructionEvent` / `ResolutionEvent`）索引到该文件；引擎组装 Agent 上下文时不得把未被子事件引用的 submission 注入可见文件列表。
-- 运行时 `Event` 对象构造时不携带剧情时间（`time` 为 `None`）；只有经 `EventList.submit_event` 入表时，才由事件表用当前时钟盖戳并分配 `id`。仍为 `PENDING` 的事件进入 pending 队列；经 `Event.status` 离开 `PENDING` 时由事件回调 `EventList._event_updated` 出队。剧情时钟由 `EventList.update_time`（绝对时刻）或 `EventList.time_pass`（相对时长）推进。
+- `submissions/<venue_id>/`：仅存放经 `File.submit()` 复制的提交副本，命名为 `<primary_owner>+<原文件名>+v<版本号>`(`primary_owner` 为该文件 owner 集合中最先加入者)；与同系列最新版内容 hash 相同则拒绝，否则递增版本。副本 `owner`/`scope` 为空，**不能**通过文件系统列表或直接路径被代表发现或改写。
+- 代表若要得知某份 submission 的存在并读取其内容，只能经由 `EventList.get_events(rep_id)` 返回的、对该代表可见的事件(例如绑定了 `File` 的 `InstructionEvent` / `ResolutionEvent`)索引到该文件；引擎组装 Agent 上下文时不得把未被子事件引用的 submission 注入可见文件列表。
+- 运行时 `Event` 对象构造时不携带剧情时间(`time` 为 `None`)；只有经 `EventList.submit_event` 入表时，才由事件表用当前时钟盖戳并分配 `id`。仍为 `PENDING` 的事件进入 pending 队列；经 `Event.status` 离开 `PENDING` 时由事件回调 `EventList._event_updated` 出队。剧情时钟由 `EventList.update_time`(绝对时刻)或 `EventList.time_pass`(相对时长)推进。
 
 ## 3. 通用约定
 
@@ -143,7 +143,7 @@ venue 的 seats 和角色关系中使用的 `winston_churchill` 都指向该文�
 | `recess` | 休会 |
 | `meeting_ended` | 会议结束 |
 
-引擎侧的对应枚举为 `SessionPhase`（`scenario.venue`）。
+引擎侧的对应枚举为 `SessionPhase`(`scenario.venue`)。
 
 ### 6.3 `chair`
 
@@ -323,7 +323,7 @@ end_conditions:
 
 ## 9. 跨文件不变量
 
-引擎侧入口为 `scenario.load.load_scenario(path)`，或 `Scenario().load(path)`（内部委托给前者）。解析与校验逻辑集中在 `scenario.load`，领域类 `Scenario`、`Venue`、`Representative` 只承载推演期状态。
+引擎侧入口为 `scenario.load.load_scenario(path)`，或 `Scenario().load(path)`(内部委托给前者)。解析与校验逻辑集中在 `scenario.load`，领域类 `Scenario`、`Venue`、`Representative` 只承载推演期状态。
 
 加载场景时至少检查：
 

@@ -63,7 +63,26 @@ def test_description_max_length_and_submit_copies(fs: FileSystem) -> None:
     submitted = draft.submit(CHURCHILL)
     assert submitted.description == "百分比草案初稿"
     with pytest.raises(PermissionError, match="不可修改 description"):
-        submitted.description = "改描述"
+        submitted.set_description(CHURCHILL, "改描述")
+
+
+def test_set_description_requires_owner_and_persists(fs: FileSystem) -> None:
+    path = f"reps/{CHURCHILL}/draft.md"
+    draft = fs.create_rep_file(
+        CHURCHILL,
+        "draft.md",
+        "草案",
+        description="百分比草案",
+    )
+    fs.add_scope(path, CHURCHILL, {EDEN})
+    with pytest.raises(PermissionError, match="不是文件"):
+        fs.set_description(path, EDEN, "篡改简述")
+
+    fs.set_description(path, CHURCHILL, "修订简述")
+    assert draft.description == "修订简述"
+
+    reloaded = FileSystem(fs.path, fs.scenario)
+    assert reloaded.get(path, CHURCHILL).description == "修订简述"
 
 
 def test_other_rep_cannot_read_private_file(fs: FileSystem) -> None:

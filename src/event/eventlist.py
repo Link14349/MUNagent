@@ -40,12 +40,12 @@ class EventList:
 
     @property
     def pending_event_ids(self) -> list[int]:
-        """当前仍为 PENDING 的已入表事件 id（按入队顺序的副本）。"""
+        """当前仍为 PENDING 的已入表事件 id(按入队顺序的副本)。"""
         return list(self.__pending_events)
 
     @property
     def pending_events(self) -> list[Event]:
-        """当前仍为 PENDING 的已入表事件（按入队顺序的浅拷贝列表，不影响内部队列）。"""
+        """当前仍为 PENDING 的已入表事件(按入队顺序的浅拷贝列表，不影响内部队列)。"""
         return [self.__events[event_id] for event_id in self.__pending_events]
 
     def pull_up_event(self, pullup: PullUpEvent):
@@ -56,7 +56,7 @@ class EventList:
         self.pullup_events.append(pullup)
 
     def update_time(self, time: datetime):
-        """将剧情时钟推进到绝对时刻 ``time``（不可倒退）。"""
+        """将剧情时钟推进到绝对时刻 ``time``(不可倒退)。"""
         if time < self.__time:
             raise ValueError("Wrong time order error")
         self.__time = time
@@ -130,7 +130,7 @@ class EventList:
     def get_events(self, rep: str) -> list[Event]:
         """返回对 ``rep`` 可见的事件。
 
-        代表获知 submission 文件的唯一正规途径：可见事件（如 Instruction / Resolution）
+        代表获知 submission 文件的唯一正规途径：可见事件(如 Instruction / Resolution)
         上绑定的 ``File`` 引用；不得依赖 FileSystem 对 submissions/ 的直接枚举。
         """
         if rep == "__GOD__":

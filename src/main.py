@@ -1,4 +1,4 @@
-"""MUNagent 入口：演示 EventList（可见性 / pull-up / 权限）与 FileSystem。"""
+"""MUNagent 入口：演示 EventList(可见性 / pull-up / 权限)与 FileSystem。"""
 
 from __future__ import annotations
 
@@ -108,7 +108,7 @@ def demo_eventlist(scenario: Scenario) -> None:
 
     events.time_pass(timedelta(hours=1))
     _ok(f"time_pass(+1h) → {events.time.isoformat()}，待触发剩余 {len(events.pullup_events)}")
-    _show_visible(events, "丘吉尔（含外部事件）", CHURCHILL)
+    _show_visible(events, "丘吉尔(含外部事件)", CHURCHILL)
 
     _section("E4. 权限：终态不可改 / time·id 不可改 / CoT 仅发送者")
     pending = MotionSwitchEvent(
@@ -187,7 +187,7 @@ def demo_eventlist(scenario: Scenario) -> None:
     try:
         fs.read(rel, EDEN)
     except PermissionError as exc:
-        _denied("艾登直接读 submissions/（即使事件可见）", exc)
+        _denied("艾登直接读 submissions/(即使事件可见)", exc)
     try:
         fs.read(rel, STALIN)
     except PermissionError as exc:
@@ -205,7 +205,7 @@ def demo_permissions(fs, venue_id: str):
     )
     _ok(f"创建私有文件 owner={sorted(draft.owners)} scope={sorted(draft.scope)}")
     _ok(f"description={draft.description!r}")
-    _ok(f"primary_owner={draft.primary_owner!r}（提交命名将使用它）")
+    _ok(f"primary_owner={draft.primary_owner!r}(提交命名将使用它)")
 
     try:
         fs.read(f"reps/{CHURCHILL}/percentages.md", STALIN)
@@ -217,7 +217,7 @@ def demo_permissions(fs, venue_id: str):
     try:
         fs.write(f"reps/{CHURCHILL}/percentages.md", EDEN, "艾登篡改")
     except PermissionError as exc:
-        _denied("艾登写入（在 scope 非 owner）", exc)
+        _denied("艾登写入(在 scope 非 owner)", exc)
 
     try:
         fs.add_scope(f"reps/{CHURCHILL}/percentages.md", EDEN, {STALIN})
@@ -225,9 +225,9 @@ def demo_permissions(fs, venue_id: str):
         _denied("非 owner 扩大 scope", exc)
 
     fs.add_owner(f"reps/{CHURCHILL}/percentages.md", CHURCHILL, {EDEN})
-    fs.write(f"reps/{CHURCHILL}/percentages.md", EDEN, "希腊 90% / 罗马尼亚 10%（艾登修订）")
+    fs.write(f"reps/{CHURCHILL}/percentages.md", EDEN, "希腊 90% / 罗马尼亚 10%(艾登修订)")
     _ok(f"提升 owner 后艾登可写；owners={sorted(draft.owners)}")
-    _ok(f"primary_owner 仍为 {draft.primary_owner!r}（不因 add_owner 改变）")
+    _ok(f"primary_owner 仍为 {draft.primary_owner!r}(不因 add_owner 改变)")
 
     fs.create_rep_file(STALIN, "red_lines.md", "巴尔干红线", description="斯大林红线")
     try:
@@ -244,7 +244,7 @@ def demo_permissions(fs, venue_id: str):
 
 
 def demo_versioning(fs, draft, venue_id: str) -> None:
-    _section("B1. 首次提交 → v1（命名 = primary_owner+原文件名+v版本）")
+    _section("B1. 首次提交 → v1(命名 = primary_owner+原文件名+v版本)")
     content_v1 = fs.read(f"reps/{CHURCHILL}/percentages.md", CHURCHILL)
     _ok(f"提交前内容: {content_v1!r}")
     _ok(f"content_hash: {_hash_short(draft.content_hash)}")
@@ -257,22 +257,22 @@ def demo_versioning(fs, draft, venue_id: str) -> None:
     _ok(f"副本 owner/scope 为空: owners={sorted(v1.owners)}, scope={sorted(v1.scope)}")
     _ok(f"系统可读 v1: {fs.read(rel_v1, SYSTEM_ACTOR)!r}")
 
-    _section("B2. 未改动再次提交 → 拒绝（hash 相同）")
+    _section("B2. 未改动再次提交 → 拒绝(hash 相同)")
     _ok(f"can_submit(丘吉尔) 现在应为 False → {draft.can_submit(CHURCHILL)}")
     try:
         draft.submit(CHURCHILL)
     except ValueError as exc:
         _denied("内容相对 v1 未变化", exc)
 
-    _section("B3. 改稿后再提交 → v2（旧版本保留）")
+    _section("B3. 改稿后再提交 → v2(旧版本保留)")
     fs.write(
         f"reps/{CHURCHILL}/percentages.md",
         CHURCHILL,
-        "希腊 90% / 罗马尼亚 10%（二稿）",
+        "希腊 90% / 罗马尼亚 10%(二稿)",
     )
     content_v2 = fs.read(f"reps/{CHURCHILL}/percentages.md", CHURCHILL)
     _ok(f"原文件已改为: {content_v2!r}")
-    _ok(f"新 hash: {_hash_short(draft.content_hash)}（与 v1 不同）")
+    _ok(f"新 hash: {_hash_short(draft.content_hash)}(与 v1 不同)")
     _ok(f"can_submit(丘吉尔)={draft.can_submit(CHURCHILL)}")
 
     v2 = draft.submit(CHURCHILL)
@@ -286,7 +286,7 @@ def demo_versioning(fs, draft, venue_id: str) -> None:
     fs.write(
         f"reps/{CHURCHILL}/percentages.md",
         CHURCHILL,
-        "希腊 90% / 罗马尼亚 10%（三稿，最终）",
+        "希腊 90% / 罗马尼亚 10%(三稿，最终)",
     )
     v3 = draft.submit(CHURCHILL)
     rel_v3 = f"submissions/{venue_id}/{v3.path.name}"
@@ -301,7 +301,7 @@ def demo_versioning(fs, draft, venue_id: str) -> None:
     fs.write(
         f"reps/{CHURCHILL}/percentages.md",
         EDEN,
-        "希腊 90% / 罗马尼亚 10%（艾登四稿）",
+        "希腊 90% / 罗马尼亚 10%(艾登四稿)",
     )
     v4 = draft.submit(EDEN)
     assert v4.path.name == f"{CHURCHILL}+percentages.md+v4"
@@ -328,7 +328,7 @@ def demo_versioning(fs, draft, venue_id: str) -> None:
     except PermissionError as exc:
         _denied("代表读取任一提交副本", exc)
 
-    _section("B7. list_visible / list_writable（仅 reps/，不含 submissions）")
+    _section("B7. list_visible / list_writable(仅 reps/，不含 submissions)")
     for rep_id in (CHURCHILL, STALIN, EDEN):
         visible = [f.path.relative_to(fs.path).as_posix() for f in fs.list_visible(rep_id)]
         writable = [f.path.relative_to(fs.path).as_posix() for f in fs.list_writable(rep_id)]
@@ -336,7 +336,7 @@ def demo_versioning(fs, draft, venue_id: str) -> None:
         print(f"    visible:  {visible}")
         print(f"    writable: {writable}")
     all_names = [f.path.relative_to(fs.path).as_posix() for f in fs.list_all()]
-    print(f"  系统全部文件（含 submissions）: {all_names}")
+    print(f"  系统全部文件(含 submissions): {all_names}")
 
 
 def demo_filesystem(scenario: Scenario) -> None:
