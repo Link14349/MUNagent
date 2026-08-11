@@ -125,7 +125,7 @@ venue 的 seats 和角色关系中使用的 `winston_churchill` 都指向该文�
 | `name` | `str` | 是 | 会场显示名称 |
 | `timezone` | `str` | 是 | IANA 时区 |
 | `description` | `str` | 是 | 空间,保密程度和谈判形态 |
-| `chair` | `str` | 是 | `none` 或代表 ID |
+| `chair` | `object` | 是 | 主席人选与主席权力;见 6.3 |
 | `seats` | `list[rep_id]` | 是 | 参加会场的代表 ID 列表 |
 | `initial_agenda` | `agenda_id` | 是 | 开场议题 ID,必须引用本文件中的一个 `agenda[].id` |
 | `session_phase` | `session_phase` | 是 | 会场开场时的会议阶段 |
@@ -147,25 +147,44 @@ venue 的 seats 和角色关系中使用的 `winston_churchill` 都指向该文�
 
 ### 6.3 `chair`
 
-场景包中 `chair` 是单个字符串:
+`chair` 是对象,包含人选与权力声明:
+
+| 字段 | 类型 | 必需 | 说明 |
+|---|---|---:|---|
+| `rep` | `str` | 是 | `none` 或代表 ID |
+| `powers` | `object` | 是 | 主席权力开关;键为权力名,值为布尔 |
+
+`rep`:
 
 - `none`:使用系统提供的中立主席;
 - 代表 ID:由该代表担任会场主席,该 ID 必须同时出现在 `seats`.
 
-它不是对象,不包含 `type`,`id` 或 `role` 子字段.
+`powers` 必须声明下列全部键(不得缺省,不得出现未知键):
 
-引擎侧 `Venue.chair` 为 `str | None`:`none` 加载为 `None`;赋值时会同步更新相关代表的 `is_chair`.
+| 键 | 说明 |
+|---|---|
+| `decide_resolution` | 主席可否直接裁定决议是否通过(绕过或覆盖常规表决门槛) |
+| `decide_switch_phase` | 主席可否直接裁定阶段切换动议通过并落地 |
 
-### 6.4 `seats[]`
+引擎侧:
 
-`seats` 是纯字符串列表,每项都是从 `reps/<rep_id>.yaml` 文件名派生的代表 ID.代表姓名,代表团,职务和权力只在角色卡中定义,不在 venue 重复.
+- `Venue.chair` 为 `str | None`:`rep: none` 加载为 `None`;赋值时会同步更新相关代表的 `is_chair`;
+- `Venue.chair_power` 为 `dict[CHAIR_POWER, bool]`,键枚举见 `scenario.venue.CHAIR_POWER`.
 
 ```yaml
-chair: none
+chair:
+  rep: none
+  powers:
+    decide_resolution: false
+    decide_switch_phase: false
 seats:
   - winston_churchill
   - joseph_stalin
 ```
+
+### 6.4 `seats[]`
+
+`seats` 是纯字符串列表,每项都是从 `reps/<rep_id>.yaml` 文件名派生的代表 ID.代表姓名,代表团,职务和权力只在角色卡中定义,不在 venue 重复.
 
 ### 6.5 `initial_agenda`
 
@@ -347,7 +366,7 @@ end_conditions:
 2. `venues/` 和 `reps/` 中至少各有一个 YAML 文件,且加载器只扫描场景根目录内的这两个固定目录;
 3. 从角色文件名派生的代表 ID,venue 席位和角色文件一一对应;
 4. 每张角色卡包含 `public.target` 和 `private.target`,且不包含旧目标字段;
-5. venue 的 seats,角色关系引用有效代表 ID;chair 为 `none`(引擎侧 `None`) 或 seats 中的代表 ID;`session_phase` 为合法枚举值;`initial_agenda` 引用同一文件内唯一存在的 `agenda[].id`;
+5. venue 的 seats,角色关系引用有效代表 ID;`chair.rep` 为 `none`(引擎侧 `None`) 或 seats 中的代表 ID;`chair.powers` 声明全部合法主席权力布尔开关;`session_phase` 为合法枚举值;`initial_agenda` 引用同一文件内唯一存在的 `agenda[].id`;
 6. storyline 的事件 ID 唯一;event 顶层恰好只包含 `id`,`condition` 和 `content`,且 condition 只包含 `type` 和 `content`;
 7. 每个 `end_conditions[]` 元素恰好只包含 `type` 和 `content`;
 8. 所有 condition 的 `type` 只能是 `time` 或 `text`,前者 content 必须是带 UTC 偏移的 ISO 8601 时间;

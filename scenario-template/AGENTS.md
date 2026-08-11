@@ -50,7 +50,7 @@ simulation/                推演运行时目录;由引擎在 initialize 时写�
 
 ## 会场规则与剧情
 
-- venue 的 `chair` 只能是 `none` 或一个代表 ID;`none` 表示使用系统中立主席;
+- venue 的 `chair` 是对象:``rep`` 为 `none` 或一个代表 ID(原顶层 chair 字符串),`none` 表示系统中立主席;``powers`` 声明主席权力布尔开关(须覆盖 schema 全部键,如 `decide_resolution`,`decide_switch_phase`);
 - venue 的 `session_phase` 声明开场会议阶段,取值见 `docs/scenario-schema.md` 第 6.2 节;
 - venue 的 `initial_agenda` 只能是议题 ID,必须引用同一文件内某个 `agenda[].id`,不得再写长段说明文字;
 - venue 的 `seats` 只能是代表 ID 列表,不重复保存代表团,职务或其他角色信息;
@@ -77,7 +77,7 @@ simulation/                推演运行时目录;由引擎在 initialize 时写�
 - 所有 YAML 均可解析;
 - `background.md`,`storyline.yaml`,至少一个 venue 文件和至少一个代表文件存在;
 - reps 文件名派生出的 ID,venue 席位和角色文件一一对应;
-- chair 为 `none` 或 seats 中存在的代表 ID,seats 每项都是字符串代表 ID;
+- `chair.rep` 为 `none` 或 seats 中存在的代表 ID;`chair.powers` 声明全部合法主席权力且值为布尔;seats 每项都是字符串代表 ID;
 - `initial_agenda` 引用同一 venue 文件内唯一存在的 `agenda[].id`;
 - 每张角色卡同时且仅使用 `public.target`,`private.target` 表达目标;
 - 跨文件 ID 引用一致;

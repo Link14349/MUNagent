@@ -5,7 +5,11 @@ description: >-
   四名代表围桌进行不公开谈判.房间内没有新闻记者,也没有来自五个相关国家的代表;
   会议记录,纸条与对外口径本身都是谈判对象.
 
-chair: none
+chair:
+  rep: none
+  powers:
+    decide_resolution: false
+    decide_switch_phase: false
 session_phase: unchaired_core
 
 seats:

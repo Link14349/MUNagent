@@ -82,6 +82,63 @@ def test_submit_event_stamps_time_and_id(
     assert note.id == 1
 
 
+def test_submit_event_notifies_listeners_by_type(
+    scenario: Scenario, events: EventList, venue_id: str
+) -> None:
+    from event.event import Event
+
+    seen_notes: list[Event] = []
+    seen_motions: list[Event] = []
+    order: list[str] = []
+
+    events.add_listener(EventType.NOTE, lambda e: seen_notes.append(e))
+    events.add_listener(EventType.NOTE, lambda e: order.append("note-a"))
+    events.add_listener(EventType.NOTE, lambda e: order.append("note-b"))
+    events.add_listener(EventType.MOTION_SWITCH, lambda e: seen_motions.append(e))
+
+    note = NoteEvent("私下试探", CHURCHILL, {EDEN}, venue_id, scenario)
+    events.submit_event(note)
+    motion = MotionSwitchEvent(
+        "进入自由讨论",
+        SessionPhase.FREE_DISCUSSION,
+        venue_id,
+        {CHURCHILL, STALIN},
+        scenario,
+    )
+    events.submit_event(motion)
+
+    assert seen_notes == [note]
+    assert seen_motions == [motion]
+    assert order == ["note-a", "note-b"]
+    assert note.id is not None
+    assert motion.id is not None
+
+
+def test_submit_event_listeners_filter_by_venue(
+    scenario: Scenario, events: EventList, venue_id: str
+) -> None:
+    from event.event import Event
+
+    global_seen: list[Event] = []
+    matched_seen: list[Event] = []
+    other_seen: list[Event] = []
+
+    events.add_listener(EventType.NOTE, lambda e: global_seen.append(e), venue=None)
+    events.add_listener(
+        EventType.NOTE, lambda e: matched_seen.append(e), venue=venue_id
+    )
+    events.add_listener(
+        EventType.NOTE, lambda e: other_seen.append(e), venue="other_venue"
+    )
+
+    note = NoteEvent("私下试探", CHURCHILL, {EDEN}, venue_id, scenario)
+    events.submit_event(note)
+
+    assert global_seen == [note]
+    assert matched_seen == [note]
+    assert other_seen == []
+
+
 def test_submit_event_rejects_preassigned_time_or_id(
     scenario: Scenario, events: EventList, venue_id: str
 ) -> None:

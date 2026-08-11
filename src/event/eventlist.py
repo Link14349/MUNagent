@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Callable
 
 from condition.condition import Condition
-from event.event import Event, EventStatus, SystemEvent
+from event.event import Event, EventStatus, EventType, SystemEvent
 
 if TYPE_CHECKING:
     from scenario.scenario import Scenario
@@ -24,15 +24,30 @@ class EventList:
     __events: list[Event]
     __pending_events: list[int]
     __time: datetime
+    __listeners: dict[EventType, list[tuple[str | None, Callable[[Event], None]]]]
 
     def __init__(self, scenario: Scenario):
         self.scenario = scenario
         self.__events = []
         self.pullup_events = []
         self.__pending_events: list[int] = []
+        self.__listeners = {}
         if scenario.start_time is None:
             raise ValueError("场景尚未初始化开场时间")
         self.__time = scenario.start_time
+
+    def add_listener(
+        self,
+        event_type: EventType,
+        listener: Callable[[Event], None],
+        venue: str | None = None,
+    ) -> None:
+        """按 ``EventType`` 注册入表回调.
+
+        ``venue`` 为 ``None`` 时匹配任意会场;否则仅当入表事件的 ``event.venue``
+        与之相同才调用.``submit_event`` 成功后按注册顺序通知匹配的 listener.
+        """
+        self.__listeners.setdefault(event_type, []).append((venue, listener))
 
     @property
     def time(self) -> datetime:
@@ -86,7 +101,7 @@ class EventList:
         self.update_time(self.__time + delta_time)
 
     def submit_event(self, event: Event):
-        """将事件登记入表:盖上当前剧情时间并分配 ``id``."""
+        """将事件登记入表:盖上当前剧情时间并分配 ``id``,再通知匹配的 listener."""
         if event.time is not None:
             raise ValueError(
                 f"事件 time 应由 EventList.submit_event 设定,当前已为 {event.time!r}"
@@ -100,6 +115,9 @@ class EventList:
         self.__events.append(event)
         if event.status == EventStatus.PENDING:
             self.__pending_events.append(event.id)
+        for listener_venue, listener in self.__listeners.get(event.type, ()):
+            if listener_venue is None or listener_venue == event.venue:
+                listener(event)
 
     def _event_updated(self, event: Event) -> None:
         """由 ``Event.status`` setter 在离开 PENDING 时回调;校验归属后移出 pending.

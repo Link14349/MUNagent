@@ -64,3 +64,6 @@ class Scenario:
                 self.event_list.pull_up_event(pullup)
 
         self.filesystem = FileSystem.create_for_scenario(self)
+
+        for venue in self.venues:
+            venue.initialize()

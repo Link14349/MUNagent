@@ -217,10 +217,11 @@ class MotionSwitchEvent(Event):
 
 
 class PhaseSwitchEvent(Event):
-    """会场阶段切换事件:一经构造即切换对应会场的 ``session_phase``.
+    """会场阶段切换事件:记录目标阶段,入表后由 Venue listener 落地 ``session_phase``.
 
-    与 :class:`MotionSwitchEvent` 不同——后者只是动议,本事件才是真正的阶段变更记录.
-    构造时读取并保存切换前阶段,调用 ``Venue.switch_phase``,状态直接为 ``COMPLETED``.
+    与 :class:`MotionSwitchEvent` 不同——后者只是动议;本事件表示阶段变更已裁定.
+    构造时只读取并保存切换前阶段,不改会场状态;``EventList.submit_event`` 通知
+    对应会场 listener 后才调用 ``Venue.switch_phase``.状态直接为 ``COMPLETED``.
     """
 
     def __init__(
@@ -236,7 +237,6 @@ class PhaseSwitchEvent(Event):
         venue_obj = _find_venue(scenario, self.venue)
         self.__previous_phase = venue_obj.session_phase
         self.__target_phase = SessionPhase(target_phase)
-        venue_obj.switch_phase(self.__target_phase)
         self._init_status(EventStatus.COMPLETED)
 
     @property

@@ -22,7 +22,7 @@ from scenario.load_helpers import (
 from scenario.representative import PrivateTarget, Representative
 from scenario.scenario import Scenario
 from agenda.agenda import Agenda, AgendaManager
-from scenario.venue import SessionPhase, Venue
+from scenario.venue import CHAIR_POWER, SessionPhase, Venue
 
 
 def load_scenario(path: str | Path) -> Scenario:
@@ -235,12 +235,9 @@ def _load_venue(scenario: Scenario, venue_path: Path) -> Venue:
             raise ValueError(f"{context}.seats[{index}] 须为非空代表 ID 字符串")
         venue.seats.append(seat.strip())
 
-    chair = data["chair"]
-    if not isinstance(chair, str) or not chair.strip():
-        raise ValueError(f"{context}.chair 须为非空字符串")
-    # YAML 用 "none" 表示系统主席;引擎侧存为 None
-    chair_id = chair.strip()
-    venue.chair = None if chair_id == "none" else chair_id
+    chair_id, chair_power = _parse_chair(data["chair"], field=f"{context}.chair")
+    venue.chair = chair_id
+    venue.chair_power = chair_power
 
     agenda_raw = data["agenda"]
     if not isinstance(agenda_raw, list) or not agenda_raw:
@@ -405,9 +402,19 @@ def _validate_cross_references(
     for venue in scenario.venues:
         context = f"会场 {venue.id}"
         if venue.chair is not None and venue.chair not in rep_ids:
-            raise ValueError(f"{context}.chair 引用未知代表: {venue.chair}")
+            raise ValueError(f"{context}.chair.rep 引用未知代表: {venue.chair}")
         if venue.chair is not None and venue.chair not in venue.seats:
-            raise ValueError(f"{context}.chair 必须是 None 或 seats 中的代表 ID")
+            raise ValueError(
+                f"{context}.chair.rep 必须是 None 或 seats 中的代表 ID"
+            )
+        unknown_powers = set(venue.chair_power) - set(CHAIR_POWER)
+        if unknown_powers:
+            joined = ",".join(sorted(p.value for p in unknown_powers))
+            raise ValueError(f"{context}.chair_power 含未知权力键: {joined}")
+        missing_powers = set(CHAIR_POWER) - set(venue.chair_power)
+        if missing_powers:
+            joined = ",".join(sorted(p.value for p in missing_powers))
+            raise ValueError(f"{context}.chair_power 缺少权力键: {joined}")
 
         seat_ids = set(venue.seats)
         if len(seat_ids) != len(venue.seats):
@@ -456,6 +463,50 @@ def _parse_session_phase(value: Any, *, field: str) -> SessionPhase:
     except ValueError as exc:
         allowed = ",".join(sorted(phase.value for phase in SessionPhase))
         raise ValueError(f"{field} 只能是 {allowed},实际为: {normalized!r}") from exc
+
+
+def _parse_chair(value: Any, *, field: str) -> tuple[str | None, dict[CHAIR_POWER, bool]]:
+    """解析 venue.chair 对象.
+
+    返回 ``(chair_rep_id_or_None, chair_power)``.
+    YAML ``rep: none`` 加载为引擎侧 ``None``.
+    """
+    if not isinstance(value, dict):
+        raise ValueError(f"{field} 须为对象,包含 rep 与 powers")
+    require_keys(value, {"rep", "powers"}, context=field)
+
+    rep_raw = _require_str(value["rep"], field=f"{field}.rep")
+    chair_id: str | None = None if rep_raw == "none" else rep_raw
+    chair_power = _parse_chair_power(value["powers"], field=f"{field}.powers")
+    return chair_id, chair_power
+
+
+def _parse_chair_power(value: Any, *, field: str) -> dict[CHAIR_POWER, bool]:
+    if not isinstance(value, dict) or not value:
+        raise ValueError(f"{field} 须为非空对象")
+
+    allowed = {power.value: power for power in CHAIR_POWER}
+    result: dict[CHAIR_POWER, bool] = {}
+    for raw_key, raw_enabled in value.items():
+        if not isinstance(raw_key, str) or not raw_key.strip():
+            raise ValueError(f"{field} 的键须为非空字符串,实际为: {raw_key!r}")
+        key = raw_key.strip()
+        if key not in allowed:
+            joined = ",".join(sorted(allowed))
+            raise ValueError(f"{field}.{key} 不是合法主席权力,允许: {joined}")
+        if not isinstance(raw_enabled, bool):
+            raise ValueError(f"{field}.{key} 须为布尔值,实际为: {raw_enabled!r}")
+        power = allowed[key]
+        if power in result:
+            raise ValueError(f"{field}.{key} 重复声明")
+        result[power] = raw_enabled
+
+    missing = [power.value for power in CHAIR_POWER if power not in result]
+    if missing:
+        raise ValueError(
+            f"{field} 必须声明全部主席权力,缺少: {','.join(sorted(missing))}"
+        )
+    return result
 
 
 def _parse_str_list(value: Any, *, field: str) -> list[str]:

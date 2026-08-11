@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from agenda.agenda import Agenda, AgendaManager
+    from event.event import PhaseSwitchEvent
     from scenario.group import Group
     from scenario.representative import Representative
     from scenario.scenario import Scenario
@@ -19,6 +20,10 @@ class SessionPhase(StrEnum):
     RECESS = "recess"  # 休会
     MEETING_ENDED = "meeting_ended"  # 会议结束
 
+class CHAIR_POWER(StrEnum):
+    DECIDE_RESOLUTION = "decide_resolution"
+    DECIDE_SWITCH_PHASE = "decide_switch_phase"
+
 
 class Venue:
     id: str
@@ -30,6 +35,7 @@ class Venue:
     reps: dict[str, Representative]
     initial_agenda: str
     groups: list[Group]
+    chair_power: dict[CHAIR_POWER, bool]
 
     def __init__(self, scenario: Scenario):
         self.id = ""
@@ -44,6 +50,7 @@ class Venue:
         self.__agenda_manager: AgendaManager | None = None
         self.groups = []
         self.__session_phase: SessionPhase | None = None
+        self.chair_power = {power: False for power in CHAIR_POWER}
 
     def _find_rep(self, rep_id: str) -> Representative | None:
         return self.reps.get(rep_id) or self.scenario.reps.get(rep_id)
@@ -63,15 +70,28 @@ class Venue:
             )
         self.__agenda_manager = manager
 
-    def _require_chair_actor(self, rep_id: str) -> None:
+    def _require_chair_actor(
+        self, rep_id: str, *, action: str = "发起议题操作"
+    ) -> None:
         if self.__chair is None:
             raise PermissionError(
-                f"会场 {self.id or '<unset>'} 当前为系统主席，代表不能发起议题操作"
+                f"会场 {self.id or '<unset>'} 当前为系统主席，代表不能{action}"
             )
         if rep_id != self.__chair:
             raise PermissionError(
                 f"代表 {rep_id} 不是会场 {self.id or '<unset>'} 的主席"
-                f"(chair={self.__chair!r})，不能发起议题操作"
+                f"(chair={self.__chair!r})，不能{action}"
+            )
+
+    def _require_chair_power(
+        self, rep_id: str, power: CHAIR_POWER, *, action: str
+    ) -> None:
+        """校验 ``rep_id`` 为主席且 ``chair_power[power]`` 为真."""
+        self._require_chair_actor(rep_id, action=action)
+        if not self.chair_power[power]:
+            raise PermissionError(
+                f"会场 {self.id or '<unset>'} 的主席权力 {power.value}=False，"
+                f"代表 {rep_id} 不能{action}"
             )
 
     @property
@@ -191,3 +211,40 @@ class Venue:
         Agent 可调用的会场动作暴露;读取仍使用 session_phase 属性.
         """
         self.__session_phase = phase
+
+    def decide_switch_phase(
+        self,
+        rep_id: str,
+        content: str,
+        target_phase: SessionPhase | str,
+    ) -> PhaseSwitchEvent:
+        """由具备 ``decide_switch_phase`` 的主席直接切换阶段并提交 PhaseSwitchEvent."""
+        from event.event import PhaseSwitchEvent
+
+        self._require_chair_power(
+            rep_id,
+            CHAIR_POWER.DECIDE_SWITCH_PHASE,
+            action="直接切换会议阶段",
+        )
+        event = PhaseSwitchEvent(
+            content,
+            target_phase,
+            self.id,
+            set(self.seats),
+            self.scenario,
+        )
+        self._require_event_list().submit_event(event)
+        return event
+
+    def initialize(self) -> None:
+        """向 EventList 注册本会场对 PHASE_SWITCH 的监听."""
+        from event.event import EventType
+
+        self._require_event_list().add_listener(
+            EventType.PHASE_SWITCH,
+            self._on_phase_switch,
+            self.id,
+        )
+
+    def _on_phase_switch(self, event: PhaseSwitchEvent) -> None:
+        self.switch_phase(event.target_phase)

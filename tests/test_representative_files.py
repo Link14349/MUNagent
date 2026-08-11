@@ -47,9 +47,15 @@ def test_scenario_and_venue_reps_index(scenario: Scenario) -> None:
 
 
 def test_representative_is_chair_from_venue(scenario: Scenario) -> None:
-    # 模板会场 chair: none → 引擎侧 None，全体代表均非主席
+    # 模板会场 chair.rep: none → 引擎侧 None，全体代表均非主席
+    from scenario.venue import CHAIR_POWER
+
     venue = scenario.venues[0]
     assert venue.chair is None
+    assert venue.chair_power == {
+        CHAIR_POWER.DECIDE_RESOLUTION: False,
+        CHAIR_POWER.DECIDE_SWITCH_PHASE: False,
+    }
     assert all(not rep.is_chair for rep in scenario.representatives)
     for rep in scenario.representatives:
         assert rep.is_chair is (rep.venue is not None and rep.venue.chair == rep.id)
@@ -146,3 +152,171 @@ def test_representative_set_description(scenario: Scenario) -> None:
     churchill.set_description(draft, "修订简述")
     assert draft.description == "修订简述"
     assert churchill.list_visible()[0].description == "修订简述"
+
+
+def test_representative_send_message(scenario: Scenario) -> None:
+    churchill = _rep(scenario, CHURCHILL)
+    stalin = _rep(scenario, STALIN)
+    assert scenario.event_list is not None
+
+    msg = churchill.send_message("希腊事务应交由伦敦主导", "先试探斯大林是否接受 90/10")
+    assert msg.id is not None
+    assert msg.from_rep == CHURCHILL
+    assert msg.content == "希腊事务应交由伦敦主导"
+    assert msg.get_CoT(CHURCHILL) == "先试探斯大林是否接受 90/10"
+    assert churchill.venue is not None
+    assert set(msg.scope) == set(churchill.venue.seats)
+    assert msg in scenario.event_list.get_events(STALIN)
+    with pytest.raises(ValueError, match="Not the sender"):
+        msg.get_CoT(STALIN)
+
+
+def test_representative_pass_note(scenario: Scenario) -> None:
+    churchill = _rep(scenario, CHURCHILL)
+    stalin = _rep(scenario, STALIN)
+    assert scenario.event_list is not None
+
+    note = churchill.pass_note("试探希腊条款", EDEN)
+    assert note.id is not None
+    assert note.from_rep == CHURCHILL
+    assert note.to_reps == {EDEN}
+    assert note.scope == {CHURCHILL, EDEN}
+    assert note in scenario.event_list.get_events(EDEN)
+    assert note in scenario.event_list.get_events(CHURCHILL)
+    assert note not in scenario.event_list.get_events(STALIN)
+
+    multi = churchill.pass_note("共同核对底线", {EDEN, STALIN})
+    assert multi.to_reps == {EDEN, STALIN}
+    assert multi.scope == {CHURCHILL, EDEN, STALIN}
+
+    with pytest.raises(ValueError, match="传纸条收件人 不能为空"):
+        churchill.pass_note("空收件人", set())
+    with pytest.raises(ValueError, match="不在会场"):
+        churchill.pass_note("场外收件人", "not_a_seat")
+
+
+def test_representative_submit_phase_switch(scenario: Scenario) -> None:
+    from event.event import EventStatus, EventType
+    from scenario.venue import CHAIR_POWER, SessionPhase
+
+    churchill = _rep(scenario, CHURCHILL)
+    stalin = _rep(scenario, STALIN)
+    venue = scenario.venues[0]
+    assert scenario.event_list is not None
+    before = venue.session_phase
+
+    with pytest.raises(PermissionError, match="系统主席"):
+        churchill.submit_phase_switch("越权切阶段", SessionPhase.FREE_DISCUSSION)
+
+    venue.chair = CHURCHILL
+    with pytest.raises(PermissionError, match="不是会场 .* 的主席"):
+        stalin.submit_phase_switch("非主席切阶段", SessionPhase.FREE_DISCUSSION)
+    with pytest.raises(PermissionError, match="decide_switch_phase=False"):
+        churchill.submit_phase_switch("无权力切阶段", SessionPhase.FREE_DISCUSSION)
+    assert venue.session_phase == before
+
+    venue.chair_power[CHAIR_POWER.DECIDE_SWITCH_PHASE] = True
+    event = churchill.submit_phase_switch(
+        "主席裁定进入自由讨论", SessionPhase.FREE_DISCUSSION
+    )
+    assert event.id is not None
+    assert event.type == EventType.PHASE_SWITCH
+    assert event.status == EventStatus.COMPLETED
+    assert event.previous_phase == before
+    assert event.target_phase == SessionPhase.FREE_DISCUSSION
+    assert venue.session_phase == SessionPhase.FREE_DISCUSSION
+    assert event in scenario.event_list.get_events(STALIN)
+
+
+def test_representative_submit_motion_switch(scenario: Scenario) -> None:
+    from event.event import EventStatus, EventType
+    from scenario.venue import SessionPhase
+
+    churchill = _rep(scenario, CHURCHILL)
+    stalin = _rep(scenario, STALIN)
+    assert scenario.event_list is not None
+    assert churchill.venue is not None
+    before_phase = churchill.venue.session_phase
+
+    motion = churchill.submit_motion_switch(
+        "动议进入自由讨论",
+        SessionPhase.FREE_DISCUSSION,
+    )
+    assert motion.id is not None
+    assert motion.type == EventType.MOTION_SWITCH
+    assert motion.status == EventStatus.PENDING
+    assert motion.target_phase == SessionPhase.FREE_DISCUSSION
+    assert set(motion.scope) == set(churchill.venue.seats)
+    assert motion in scenario.event_list.get_events(STALIN)
+    assert motion.id in scenario.event_list.pending_event_ids
+    # 动议不改变会场阶段
+    assert churchill.venue.session_phase == before_phase
+
+
+def test_representative_submit_instruction(scenario: Scenario) -> None:
+    from event.event import EventStatus, EventType, InstructionEvent
+
+    churchill = _rep(scenario, CHURCHILL)
+    stalin = _rep(scenario, STALIN)
+    assert scenario.event_list is not None
+
+    draft = churchill.create_file("instruction.md", "请外长核对希腊条款", "外长指示")
+    with pytest.raises(ValueError, match="submissions/"):
+        churchill.submit_instruction("未提交的指示", {CHURCHILL, EDEN}, draft)
+
+    submitted = churchill.submit_file(draft)
+    instruction = churchill.submit_instruction(
+        "外长指示已提交", {CHURCHILL, EDEN}, submitted
+    )
+    assert instruction.id is not None
+    assert instruction.type == EventType.INSTRUCTION
+    assert instruction.status == EventStatus.PENDING
+    assert instruction.instruction is submitted
+    assert instruction.from_reps == {CHURCHILL, EDEN}
+    assert instruction.scope == {CHURCHILL, EDEN}
+    assert instruction in scenario.event_list.get_events(EDEN)
+    assert instruction in scenario.event_list.get_events(CHURCHILL)
+    assert instruction not in scenario.event_list.get_events(STALIN)
+    linked = [
+        e
+        for e in scenario.event_list.get_events(EDEN)
+        if isinstance(e, InstructionEvent)
+    ]
+    assert linked[0].instruction is submitted
+
+    with pytest.raises(ValueError, match="fr 不能为空"):
+        churchill.submit_instruction("空 fr", set(), submitted)
+    with pytest.raises(ValueError, match="不在会场"):
+        churchill.submit_instruction("场外 fr", {CHURCHILL, "not_a_seat"}, submitted)
+
+
+def test_representative_submit_resolution(scenario: Scenario) -> None:
+    from event.event import EventStatus, EventType
+
+    churchill = _rep(scenario, CHURCHILL)
+    stalin = _rep(scenario, STALIN)
+    assert scenario.event_list is not None
+    assert churchill.venue is not None
+
+    draft = churchill.create_file("resolution.md", "百分比草案", "决议草案")
+    submitted = churchill.submit_file(draft)
+
+    resolution = churchill.submit_resolution(
+        "提出百分比决议", set(churchill.venue.seats), submitted
+    )
+    assert resolution.id is not None
+    assert resolution.type == EventType.RESOLUTION
+    assert resolution.status == EventStatus.PENDING
+    assert resolution.resolution is submitted
+    assert resolution.from_reps == set(churchill.venue.seats)
+    assert set(resolution.scope) == set(churchill.venue.seats)
+    assert resolution in scenario.event_list.get_events(STALIN)
+
+    limited = churchill.submit_resolution(
+        "仅英方可见草案", {CHURCHILL, EDEN}, submitted
+    )
+    assert limited.from_reps == {CHURCHILL, EDEN}
+    assert limited.scope == {CHURCHILL, EDEN}
+    assert limited in scenario.event_list.get_events(EDEN)
+    assert limited not in scenario.event_list.get_events(STALIN)
+
