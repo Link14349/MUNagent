@@ -81,10 +81,6 @@ class EventList:
 
     def time_pass(self, delta_time: timedelta) -> None:
         """相对当前时钟推进 ``delta_time``，内部委托 ``update_time``。"""
-        if not isinstance(delta_time, timedelta):
-            raise TypeError(
-                f"delta_time 须为 timedelta，实际为 {type(delta_time).__name__}"
-            )
         if delta_time < timedelta(0):
             raise ValueError(f"delta_time 不可为负，实际为 {delta_time!r}")
         self.update_time(self.__time + delta_time)

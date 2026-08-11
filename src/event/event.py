@@ -94,8 +94,6 @@ class Event:
     def time(self, value: datetime) -> None:
         if self.__time is not None:
             raise PermissionError("事件 time 不可修改")
-        if not isinstance(value, datetime):
-            raise TypeError(f"time 须为 datetime，实际为 {type(value).__name__}")
         self.__time = value
 
     @property
@@ -106,7 +104,7 @@ class Event:
     def id(self, value: int) -> None:
         if self.__id is not None:
             raise PermissionError("事件 id 不可修改")
-        if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+        if value < 0:
             raise ValueError(f"id 须为非负整数，实际为: {value!r}")
         self.__id = value
 
@@ -149,8 +147,6 @@ class Event:
     @content.setter
     def content(self, value: str) -> None:
         self._require_editable("content")
-        if not isinstance(value, str):
-            raise TypeError(f"content 须为字符串，实际为 {type(value).__name__}")
         self.__content = value
 
     @property
@@ -160,8 +156,6 @@ class Event:
     @scope.setter
     def scope(self, value: set[str]) -> None:
         self._require_editable("scope")
-        if not isinstance(value, (set, frozenset)):
-            raise TypeError(f"scope 须为 set，实际为 {type(value).__name__}")
         self.__scope = set(value)
 
 
@@ -311,21 +305,14 @@ class VoteEvent(Event):
         passed: bool | None = None,
         remark: str = "",
     ):
-        if not isinstance(target, (ResolutionEvent, MotionSwitchEvent)):
-            raise TypeError(
-                "VoteEvent.target 必须是 ResolutionEvent 或 MotionSwitchEvent，"
-                f"实际为 {type(target).__name__}"
-            )
-        if not isinstance(valid_votes, int) or isinstance(valid_votes, bool) or valid_votes < 0:
+        if valid_votes < 0:
             raise ValueError(f"valid_votes 须为非负整数，实际为: {valid_votes!r}")
 
-        mode = VotePassMode(pass_mode) if not isinstance(pass_mode, VotePassMode) else pass_mode
+        mode = VotePassMode(pass_mode)
         support_list = _normalize_rep_list(supporters or [], field="supporters")
         against_list = _normalize_rep_list(against or [], field="against")
         abstain_list = _normalize_rep_list(abstentions or [], field="abstentions")
         _validate_vote_ballots(support_list, against_list, abstain_list, valid_votes)
-        if not isinstance(remark, str):
-            raise TypeError(f"remark 须为字符串，实际为 {type(remark).__name__}")
 
         super().__init__(content, venue, scope, scenario)
         if target.venue != self.venue:
@@ -361,11 +348,6 @@ class VoteEvent(Event):
     @target.setter
     def target(self, value: ResolutionEvent | MotionSwitchEvent) -> None:
         self._require_editable("target")
-        if not isinstance(value, (ResolutionEvent, MotionSwitchEvent)):
-            raise TypeError(
-                "VoteEvent.target 必须是 ResolutionEvent 或 MotionSwitchEvent，"
-                f"实际为 {type(value).__name__}"
-            )
         if value.venue != self.venue:
             raise ValueError(
                 f"VoteEvent.venue={self.venue!r} 与 target.venue={value.venue!r} 不一致"
@@ -379,7 +361,7 @@ class VoteEvent(Event):
     @valid_votes.setter
     def valid_votes(self, value: int) -> None:
         self._require_editable("valid_votes")
-        if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+        if value < 0:
             raise ValueError(f"valid_votes 须为非负整数，实际为: {value!r}")
         self.__valid_votes = value
         self._revalidate_ballots()
@@ -430,8 +412,6 @@ class VoteEvent(Event):
     @passed.setter
     def passed(self, value: bool | None) -> None:
         self._require_editable("passed")
-        if value is not None and not isinstance(value, bool):
-            raise TypeError(f"passed 须为 bool 或 None，实际为 {type(value).__name__}")
         self.__passed = value
 
     @property
@@ -441,8 +421,6 @@ class VoteEvent(Event):
     @remark.setter
     def remark(self, value: str) -> None:
         self._require_editable("remark")
-        if not isinstance(value, str):
-            raise TypeError(f"remark 须为字符串，实际为 {type(value).__name__}")
         self.__remark = value.strip()
 
 
@@ -470,7 +448,7 @@ class NoteEvent(Event):
     @from_rep.setter
     def from_rep(self, value: str) -> None:
         self._require_editable("from_rep")
-        if not isinstance(value, str) or not value.strip():
+        if not value.strip():
             raise ValueError("from_rep 须为非空字符串")
         self.__from = value.strip()
 
@@ -509,7 +487,7 @@ class MessageEvent(Event):
     @from_rep.setter
     def from_rep(self, value: str) -> None:
         self._require_editable("from_rep")
-        if not isinstance(value, str) or not value.strip():
+        if not value.strip():
             raise ValueError("from_rep 须为非空字符串")
         self.__from = value.strip()
 
@@ -525,8 +503,6 @@ class MessageEvent(Event):
     @CoT.setter
     def CoT(self, value: str) -> None:
         self._require_editable("CoT")
-        if not isinstance(value, str):
-            raise TypeError(f"CoT 须为字符串，实际为 {type(value).__name__}")
         self.__CoT = value
 
 
@@ -555,7 +531,7 @@ class ChatEvent(Event):
     @from_rep.setter
     def from_rep(self, value: str) -> None:
         self._require_editable("from_rep")
-        if not isinstance(value, str) or not value.strip():
+        if not value.strip():
             raise ValueError("from_rep 须为非空字符串")
         self.__from = value.strip()
 
@@ -571,13 +547,11 @@ class ChatEvent(Event):
     @CoT.setter
     def CoT(self, value: str) -> None:
         self._require_editable("CoT")
-        if not isinstance(value, str):
-            raise TypeError(f"CoT 须为字符串，实际为 {type(value).__name__}")
         self.__CoT = value
 
 
 def _normalize_venue_id(venue: str, scenario: Scenario) -> str:
-    if not isinstance(venue, str) or not venue.strip():
+    if not venue.strip():
         raise ValueError("venue 须为非空会场 ID 字符串")
     venue_id = venue.strip()
     known = {item.id for item in scenario.venues}
@@ -598,7 +572,7 @@ def _normalize_rep_list(values: list[str], *, field: str) -> list[str]:
     result: list[str] = []
     seen: set[str] = set()
     for index, item in enumerate(values):
-        if not isinstance(item, str) or not item.strip():
+        if not item.strip():
             raise ValueError(f"{field}[{index}] 须为非空代表 ID 字符串")
         rep_id = item.strip()
         if rep_id in seen:

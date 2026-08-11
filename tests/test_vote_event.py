@@ -70,7 +70,7 @@ def test_vote_event_records_ballots(scenario: Scenario, venue_id: str) -> None:
     assert "否决权" in vote.remark
 
 
-def test_vote_event_rejects_overlap_and_bad_target(scenario: Scenario, venue_id: str) -> None:
+def test_vote_event_rejects_overlap(scenario: Scenario, venue_id: str) -> None:
     target = _motion(scenario, venue_id)
     with pytest.raises(ValueError, match="同时出现"):
         VoteEvent(
@@ -83,16 +83,6 @@ def test_vote_event_rejects_overlap_and_bad_target(scenario: Scenario, venue_id:
             scenario=scenario,
             supporters=["winston_churchill"],
             against=["winston_churchill"],
-        )
-    with pytest.raises(TypeError, match="ResolutionEvent 或 MotionSwitchEvent"):
-        VoteEvent(
-            "错误目标",
-            venue_id,
-            set(),
-            object(),  # type: ignore[arg-type]
-            valid_votes=1,
-            pass_mode=VotePassMode.UNANIMOUS,
-            scenario=scenario,
         )
 
 
