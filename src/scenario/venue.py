@@ -122,20 +122,62 @@ class Venue:
     def get_agenda(self, agenda_id: str) -> Agenda:
         return self._require_agenda_manager().get(agenda_id)
 
+    def _require_event_list(self):
+        event_list = self.scenario.event_list
+        if event_list is None:
+            raise RuntimeError(
+                f"会场 {self.id or '<unset>'} 所在 Scenario 尚未创建 EventList,"
+                "无法提交议题事件"
+            )
+        return event_list
+
+    def _agenda_event_scope(self) -> set[str]:
+        return set(self.seats)
+
     def set_current_agenda(
         self,
         rep_id: str,
         agenda: Agenda,
         finished: bool = False,
     ) -> None:
-        """由主席将 ``agenda`` 设为当前议题;非主席拒绝."""
+        """由主席将 ``agenda`` 设为当前议题;非主席拒绝;成功后提交 SetAgendaEvent."""
+        from event.event import SetAgendaEvent
+
         self._require_chair_actor(rep_id)
-        self._require_agenda_manager().set_current_agenda(agenda, finished=finished)
+        manager = self._require_agenda_manager()
+        previous = manager.current_agenda
+        if agenda is previous:
+            return
+        manager.set_current_agenda(agenda, finished=finished)
+        self._require_event_list().submit_event(
+            SetAgendaEvent(
+                f"主席 {rep_id} 将当前议题切换为 {agenda.id}",
+                agenda,
+                rep_id,
+                self.id,
+                self._agenda_event_scope(),
+                self.scenario,
+                finished=finished,
+                previous=previous,
+            )
+        )
 
     def add_agenda(self, rep_id: str, agenda: Agenda) -> None:
-        """由主席向 todo 追加议题;非主席拒绝."""
+        """由主席向 todo 追加议题;非主席拒绝;成功后提交 AddAgendaEvent."""
+        from event.event import AddAgendaEvent
+
         self._require_chair_actor(rep_id)
         self._require_agenda_manager().add_todo(agenda)
+        self._require_event_list().submit_event(
+            AddAgendaEvent(
+                f"主席 {rep_id} 追加议题 {agenda.id}",
+                agenda,
+                rep_id,
+                self.id,
+                self._agenda_event_scope(),
+                self.scenario,
+            )
+        )
 
     @property
     def session_phase(self) -> SessionPhase | None:

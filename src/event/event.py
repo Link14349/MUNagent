@@ -8,6 +8,7 @@ from scenario.group import Group
 from scenario.venue import SessionPhase, Venue
 
 if TYPE_CHECKING:
+    from agenda.agenda import Agenda
     from filesystem.filesystem import File
     from scenario.scenario import Scenario
 
@@ -16,6 +17,8 @@ class EventType(StrEnum):
     SYSTEM = "system"
     MOTION_SWITCH = "motion_switch"
     PHASE_SWITCH = "phase_switch"
+    ADD_AGENDA = "add_agenda"
+    SET_AGENDA = "set_agenda"
     INSTRUCTION = "instruction"
     RESOLUTION = "resolution"
     VOTE = "vote"
@@ -243,6 +246,77 @@ class PhaseSwitchEvent(Event):
     @property
     def target_phase(self) -> SessionPhase:
         return self.__target_phase
+
+
+class AddAgendaEvent(Event):
+    """主席向会场 todo 追加议题的记录事件(状态直接 COMPLETED)."""
+
+    def __init__(
+        self,
+        content: str,
+        agenda: Agenda,
+        fr: str,
+        venue: str,
+        scope: set[str],
+        scenario: Scenario,
+    ):
+        super().__init__(content, venue, scope, scenario)
+        self._set_type(EventType.ADD_AGENDA)
+        self.__agenda = agenda
+        self.__from = fr
+        self._init_status(EventStatus.COMPLETED)
+
+    @property
+    def agenda(self) -> Agenda:
+        return self.__agenda
+
+    @property
+    def from_rep(self) -> str:
+        return self.__from
+
+
+class SetAgendaEvent(Event):
+    """主席切换当前议题的记录事件(状态直接 COMPLETED).
+
+    ``finished`` 表示切换时是否将原当前议题记入 finished;
+    ``previous`` 为切换前的当前议题(若有).
+    """
+
+    def __init__(
+        self,
+        content: str,
+        agenda: Agenda,
+        fr: str,
+        venue: str,
+        scope: set[str],
+        scenario: Scenario,
+        *,
+        finished: bool = False,
+        previous: Agenda | None = None,
+    ):
+        super().__init__(content, venue, scope, scenario)
+        self._set_type(EventType.SET_AGENDA)
+        self.__agenda = agenda
+        self.__from = fr
+        self.__finished = bool(finished)
+        self.__previous = previous
+        self._init_status(EventStatus.COMPLETED)
+
+    @property
+    def agenda(self) -> Agenda:
+        return self.__agenda
+
+    @property
+    def from_rep(self) -> str:
+        return self.__from
+
+    @property
+    def finished(self) -> bool:
+        return self.__finished
+
+    @property
+    def previous(self) -> Agenda | None:
+        return self.__previous
 
 
 class InstructionEvent(Event):
