@@ -1,4 +1,4 @@
-"""Representative 对 FileSystem 的封装接口。"""
+"""Representative 对 FileSystem 的封装接口."""
 
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-"""LLM 模块 mock 测试 — 不调用真实 API."""
+"""LLM 模块 mock 测试 - 不调用真实 API."""
 
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-"""OpenAI 兼容异步 LLM 客户端 — 流式输出与随时停止."""
+"""OpenAI 兼容异步 LLM 客户端 - 流式输出与随时停止."""
 
 from __future__ import annotations
 
@@ -215,7 +215,7 @@ async def _main(argv: list[str] | None = None) -> int:
     import argparse
 
     parser = argparse.ArgumentParser(description="MUNagent LLM 流式测试")
-    parser.add_argument("prompt", nargs="?", default="用一句话介绍雅尔塔会议。")
+    parser.add_argument("prompt", nargs="?", default="用一句话介绍雅尔塔会议.")
     parser.add_argument("--provider", default=None, help="config 中的 provider 名")
     parser.add_argument("--model", default=None, help="模型名, 如 deepseek-v4-flash")
     parser.add_argument(

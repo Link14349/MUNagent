@@ -1,4 +1,4 @@
-"""配置 schema — providers 与可选默认模型."""
+"""配置 schema - providers 与可选默认模型."""
 
 from __future__ import annotations
 

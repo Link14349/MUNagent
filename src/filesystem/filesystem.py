@@ -1,4 +1,4 @@
-"""推演运行时文件系统：磁盘落盘 + 代表可见性控制。
+"""推演运行时文件系统:磁盘落盘 + 代表可见性控制.
 
 目录布局示例::
 
@@ -6,13 +6,13 @@
     ├── reps/
     │   ├── winston_churchill/...
     │   └── ...
-    └── submissions/          # 提交副本；owner/scope 为空
+    └── submissions/          # 提交副本;owner/scope 为空
         └── <venue_id>/
             └── <primary_owner>+<原文件名>+v<版本号>
 
-代表通过 ``list_visible`` / ``list_writable`` 只能看到 ``reps/`` 下的文件。
-``submissions/`` 不出现在上述列表中；代表若要得知某份提交的存在，只能经由
-``EventList`` 中对其可见、并索引到该 ``File`` 的事件(如 Instruction / Resolution)。
+代表通过 ``list_visible`` / ``list_writable`` 只能看到 ``reps/`` 下的文件.
+``submissions/`` 不出现在上述列表中;代表若要得知某份提交的存在,只能经由
+``EventList`` 中对其可见,并索引到该 ``File`` 的事件(如 Instruction / Resolution).
 """
 
 from __future__ import annotations
@@ -28,21 +28,21 @@ import yaml
 if TYPE_CHECKING:
     from scenario.scenario import Scenario
 
-# 引擎/系统身份：可读任意文件；写权限仍要求属于 owner。
+# 引擎/系统身份:可读任意文件;写权限仍要求属于 owner.
 SYSTEM_ACTOR = "__system__"
 
-# 提交副本文件名：<primary_owner>+<原文件名>+v<版本号>
+# 提交副本文件名:<primary_owner>+<原文件名>+v<版本号>
 _SUBMISSION_NAME_RE = re.compile(r"^(?P<owner>.+)\+(?P<original>.+)\+v(?P<version>\d+)$")
 _DESCRIPTION_MAX_LEN = 20
 
 
 class File:
-    """带可见性与写权限的逻辑文件。
+    """带可见性与写权限的逻辑文件.
 
-    - ``scope``：可读(可见)的代表 ID 集合；空集合表示任何代表都不可见。
-    - ``owner``：可写(及扩展 scope/owner)的代表 ID 集合；须为 ``scope`` 的子集。
-      空集合表示不可写(用于 submissions 中的提交副本)。
-    - ``description``：不超过 20 字的文件简述。
+    - ``scope``:可读(可见)的代表 ID 集合;空集合表示任何代表都不可见.
+    - ``owner``:可写(及扩展 scope/owner)的代表 ID 集合;须为 ``scope`` 的子集.
+      空集合表示不可写(用于 submissions 中的提交副本).
+    - ``description``:不超过 20 字的文件简述.
     """
 
     path: Path
@@ -64,7 +64,7 @@ class File:
         self.__owner: set[str] = _as_id_set(owner, field="owner")
         self.scope = set(scope) if scope is not None else set(self.__owner)
         self._filesystem = filesystem
-        # 提交命名用的主 owner：创建时 owner 集合的首位，后续 add_owner 不改变。
+        # 提交命名用的主 owner:创建时 owner 集合的首位,后续 add_owner 不改变.
         self.__primary_owner: str | None = next(iter(self.__owner), None)
         self._ensure_owners_in_scope()
 
@@ -74,7 +74,7 @@ class File:
 
     @property
     def primary_owner(self) -> str | None:
-        """创建时确定的主 owner；提交文件名使用该 ID。"""
+        """创建时确定的主 owner;提交文件名使用该 ID."""
         return self.__primary_owner
 
     @property
@@ -82,11 +82,11 @@ class File:
         return self.__description
 
     def set_description(self, actor: str, value: str) -> None:
-        """由 owner(或系统)修改简述；提交副本不可改。"""
+        """由 owner(或系统)修改简述;提交副本不可改."""
         if self.is_submission:
             raise PermissionError(f"提交副本不可修改 description: {self.path}")
         if not self.__owner:
-            raise PermissionError(f"文件 {self.path} 的 owner 为空，不可修改 description")
+            raise PermissionError(f"文件 {self.path} 的 owner 为空,不可修改 description")
         if actor != SYSTEM_ACTOR and actor not in self.__owner:
             raise PermissionError(
                 f"对象 {actor!r} 不是文件 {self.path} 的 owner(当前 owner={sorted(self.__owner)})"
@@ -94,7 +94,7 @@ class File:
         self.__description = _normalize_description(value)
 
     def _restore_primary_owner(self, primary: str) -> None:
-        """仅供 manifest 回读覆盖主 owner。"""
+        """仅供 manifest 回读覆盖主 owner."""
         if self.__owner and primary not in self.__owner:
             raise ValueError(
                 f"primary_owner {primary!r} 不在 owner 中(owner={list(self.__owner)})"
@@ -107,7 +107,7 @@ class File:
 
     @property
     def is_submission(self) -> bool:
-        """是否为 submissions/ 下的提交副本。"""
+        """是否为 submissions/ 下的提交副本."""
         if self._filesystem is None:
             return "submissions/" in self.path.as_posix()
         try:
@@ -122,8 +122,8 @@ class File:
     def _ensure_owners_in_scope(self) -> None:
         missing = self.__owner - self.scope
         if missing:
-            joined = "、".join(sorted(missing))
-            raise ValueError(f"文件 {self.path} 的 owner 必须同时在 scope 中，缺失: {joined}")
+            joined = ",".join(sorted(missing))
+            raise ValueError(f"文件 {self.path} 的 owner 必须同时在 scope 中,缺失: {joined}")
 
     def _require_owner(self, actor: str) -> None:
         if actor == SYSTEM_ACTOR:
@@ -134,7 +134,7 @@ class File:
             )
 
     def add_owner(self, actor: str, obj: set[str]) -> None:
-        """由现有 owner(或系统)将已在 scope 中的对象提升为 owner。"""
+        """由现有 owner(或系统)将已在 scope 中的对象提升为 owner."""
         if self.is_submission:
             raise PermissionError(f"提交副本不可修改 owner: {self.path}")
         self._require_owner(actor)
@@ -142,13 +142,13 @@ class File:
         for identity in newcomers:
             if identity not in self.scope:
                 raise PermissionError(
-                    f"不能将 {identity!r} 设为 owner：其不在文件 {self.path} 的 scope "
+                    f"不能将 {identity!r} 设为 owner:其不在文件 {self.path} 的 scope "
                     f"(当前 scope={sorted(self.scope)})"
                 )
             self.__owner.add(identity)
 
     def add_scope(self, actor: str, obj: set[str]) -> None:
-        """由 owner(或系统)扩大可见范围。"""
+        """由 owner(或系统)扩大可见范围."""
         if self.is_submission:
             raise PermissionError(f"提交副本不可修改 scope: {self.path}")
         self._require_owner(actor)
@@ -164,7 +164,7 @@ class File:
 
     def set_content(self, actor: str, content: str) -> None:
         if not self.__owner:
-            raise PermissionError(f"文件 {self.path} 的 owner 为空，不可写入")
+            raise PermissionError(f"文件 {self.path} 的 owner 为空,不可写入")
         if actor != SYSTEM_ACTOR and actor not in self.__owner:
             raise PermissionError(
                 f"对象 {actor!r} 不是文件 {self.path} 的 owner(当前 owner={sorted(self.__owner)})"
@@ -177,7 +177,7 @@ class File:
         return actor in self.scope
 
     def can_submit(self, actor: str) -> bool:
-        """判断 ``actor`` 是否可将本文件提交到 submissions/。"""
+        """判断 ``actor`` 是否可将本文件提交到 submissions/."""
         try:
             self._validate_submission(actor)
         except (PermissionError, ValueError, RuntimeError, FileExistsError):
@@ -186,7 +186,7 @@ class File:
 
     def _validate_submission(self, actor: str) -> tuple[FileSystem, Path, int]:
         if self._filesystem is None:
-            raise RuntimeError(f"文件 {self.path} 未绑定 FileSystem，无法提交")
+            raise RuntimeError(f"文件 {self.path} 未绑定 FileSystem,无法提交")
         fs = self._filesystem
         if actor == SYSTEM_ACTOR:
             raise PermissionError("系统身份不能作为提交者")
@@ -198,12 +198,12 @@ class File:
             raise PermissionError(f"owner 为空的文件不可提交: {self.path}")
         if actor not in self.__owner:
             raise PermissionError(
-                f"对象 {actor!r} 不是文件 {self.path} 的 owner，不能提交"
+                f"对象 {actor!r} 不是文件 {self.path} 的 owner,不能提交"
             )
 
         rel = fs._relkey(self.path)
         if not rel.startswith("reps/"):
-            raise PermissionError(f"只能提交 reps/ 下的文件，实际为: {rel}")
+            raise PermissionError(f"只能提交 reps/ 下的文件,实际为: {rel}")
 
         primary = self.primary_owner
         if primary is None:
@@ -214,7 +214,7 @@ class File:
         latest = fs._latest_submission(venue_id, primary, original_name)
         if latest is not None and latest.content_hash == self.content_hash:
             raise ValueError(
-                f"内容相对最新提交未变化(hash={self.content_hash})，拒绝重复提交: "
+                f"内容相对最新提交未变化(hash={self.content_hash}),拒绝重复提交: "
                 f"{fs._relkey(latest.path)}"
             )
 
@@ -227,11 +227,11 @@ class File:
         return fs, dest_full, next_version
 
     def submit(self, actor: str) -> File:
-        """验证通过后复制到 submissions/。
+        """验证通过后复制到 submissions/.
 
-        文件名：``<primary_owner>+<原文件名>+v<版本号>``。
-        与同系列最新版本内容 hash 相同则拒绝；否则分配新版本号。
-        提交副本的 owner/scope 均为空集：代表不可见、不可改。
+        文件名:``<primary_owner>+<原文件名>+v<版本号>``.
+        与同系列最新版本内容 hash 相同则拒绝;否则分配新版本号.
+        提交副本的 owner/scope 均为空集:代表不可见,不可改.
         """
         fs, dest_full, _version = self._validate_submission(actor)
         copy = File(
@@ -261,7 +261,7 @@ class File:
 
 
 class FileSystem:
-    """绑定单次推演运行目录的文件系统。"""
+    """绑定单次推演运行目录的文件系统."""
 
     path: Path
     scenario: Scenario
@@ -275,10 +275,10 @@ class FileSystem:
 
     @classmethod
     def create_for_scenario(cls, scenario: Scenario) -> FileSystem:
-        """在场景包 ``simulation/`` 下新建「日期+时间」目录并绑定。"""
+        """在场景包 ``simulation/`` 下新建"日期+时间"目录并绑定."""
         root = scenario.root_path
         if root is None:
-            raise ValueError("Scenario.root_path 未设置，无法创建 FileSystem；请先 load 场景包")
+            raise ValueError("Scenario.root_path 未设置,无法创建 FileSystem;请先 load 场景包")
 
         run_dir = root / "simulation" / _format_run_dirname(datetime.now())
         if run_dir.exists():
@@ -328,7 +328,7 @@ class FileSystem:
         known = self._known_rep_ids()
         unknown = actors - known
         if unknown:
-            joined = "、".join(sorted(unknown))
+            joined = ",".join(sorted(unknown))
             raise ValueError(f"{field} 含未知代表 ID: {joined}")
 
     def _register(self, file: File) -> None:
@@ -385,7 +385,7 @@ class FileSystem:
             if not isinstance(owner_raw, list) or not isinstance(scope_raw, list):
                 raise ValueError(f"{context} 的 owner/scope 须为列表")
             if "writable" in entry:
-                raise ValueError(f"{context} 不再支持 writable 字段，请删除后重试")
+                raise ValueError(f"{context} 不再支持 writable 字段,请删除后重试")
 
             description_raw = entry.get("description", "")
             if not isinstance(description_raw, str):
@@ -415,14 +415,14 @@ class FileSystem:
         description: str = "",
         scope: set[str] | None = None,
     ) -> File:
-        """在运行目录下创建普通文件并登记可见性。
+        """在运行目录下创建普通文件并登记可见性.
 
-        禁止直接在 ``submissions/`` 下创建；提交请使用 :meth:`File.submit`。
+        禁止直接在 ``submissions/`` 下创建;提交请使用 :meth:`File.submit`.
         """
         full = self._resolve(relative_path)
         key = self._relkey(full)
         if key == "submissions" or key.startswith("submissions/"):
-            raise ValueError("不能直接在 submissions/ 下创建文件，请使用 File.submit()")
+            raise ValueError("不能直接在 submissions/ 下创建文件,请使用 File.submit()")
         if key in self._files or full.exists():
             raise FileExistsError(f"文件已存在: {key}")
 
@@ -453,7 +453,7 @@ class FileSystem:
         scope: set[str] | None = None,
         owner: str | set[str] | None = None,
     ) -> File:
-        """在 ``reps/<rep_id>/`` 下创建文件；默认仅该代表可见可写。"""
+        """在 ``reps/<rep_id>/`` 下创建文件;默认仅该代表可见可写."""
         if rep_id not in self._known_rep_ids():
             raise ValueError(f"未知代表 ID: {rep_id}")
         if not name or name.endswith("/") or Path(name).is_absolute() or ".." in Path(name).parts:
@@ -508,9 +508,9 @@ class FileSystem:
         self._save_manifest()
 
     def list_visible(self, rep_id: str) -> list[File]:
-        """列出 ``rep_id`` 在 ``reps/`` 下可见的文件。
+        """列出 ``rep_id`` 在 ``reps/`` 下可见的文件.
 
-        不含 ``submissions/``：提交副本只能通过 EventList 中对该代表可见的事件索引获知。
+        不含 ``submissions/``:提交副本只能通过 EventList 中对该代表可见的事件索引获知.
         """
         self._require_rep_id(rep_id, field="list_visible.rep_id")
         visible = [
@@ -521,9 +521,9 @@ class FileSystem:
         return sorted(visible, key=lambda item: self._relkey(item.path))
 
     def list_writable(self, rep_id: str) -> list[File]:
-        """列出 ``rep_id`` 在 ``reps/`` 下可写的文件。
+        """列出 ``rep_id`` 在 ``reps/`` 下可写的文件.
 
-        不含 ``submissions/``：提交副本对代表不可写，也不经由本方法暴露。
+        不含 ``submissions/``:提交副本对代表不可写,也不经由本方法暴露.
         """
         self._require_rep_id(rep_id, field="list_writable.rep_id")
         writable = [
@@ -534,7 +534,7 @@ class FileSystem:
         return sorted(writable, key=lambda item: self._relkey(item.path))
 
     def list_all(self) -> list[File]:
-        """列出全部已登记文件(仅供系统/调试)。"""
+        """列出全部已登记文件(仅供系统/调试)."""
         return sorted(self._files.values(), key=lambda item: self._relkey(item.path))
 
     def _require_rep_id(self, rep_id: str, *, field: str) -> None:
@@ -547,7 +547,7 @@ class FileSystem:
         primary_owner: str,
         original_name: str,
     ) -> File | None:
-        """查找同系列(primary_owner + 原文件名)的最新提交副本。"""
+        """查找同系列(primary_owner + 原文件名)的最新提交副本."""
         prefix = f"submissions/{venue_id}/"
         latest: File | None = None
         latest_version = 0
@@ -570,7 +570,7 @@ def _venue_id_for_rep(scenario: Scenario, rep_id: str) -> str:
     for rep in scenario.representatives:
         if rep.id == rep_id:
             if rep.venue is None:
-                raise ValueError(f"代表 {rep_id} 未绑定会场，无法提交")
+                raise ValueError(f"代表 {rep_id} 未绑定会场,无法提交")
             return rep.venue.id
     raise ValueError(f"未知代表 ID: {rep_id}")
 
@@ -581,11 +581,11 @@ def _content_hash(content: str) -> str:
 
 def _normalize_description(value: str) -> str:
     if not isinstance(value, str):
-        raise TypeError(f"description 须为字符串，实际为 {type(value).__name__}")
+        raise TypeError(f"description 须为字符串,实际为 {type(value).__name__}")
     text = value.strip()
     if len(text) > _DESCRIPTION_MAX_LEN:
         raise ValueError(
-            f"description 不能超过 {_DESCRIPTION_MAX_LEN} 字，实际为 {len(text)} 字: {text!r}"
+            f"description 不能超过 {_DESCRIPTION_MAX_LEN} 字,实际为 {len(text)} 字: {text!r}"
         )
     return text
 
@@ -611,11 +611,11 @@ def _as_id_set(value: str | set[str] | list[str] | frozenset[str], *, field: str
         return {value.strip()}
     if isinstance(value, (set, frozenset, list, tuple)):
         return _ordered_id_set(value, field=field)
-    raise TypeError(f"{field} 须为 str 或字符串集合，实际为 {type(value).__name__}")
+    raise TypeError(f"{field} 须为 str 或字符串集合,实际为 {type(value).__name__}")
 
 
 def _ordered_id_set(value: set[str] | list[str] | frozenset[str] | tuple[str, ...], *, field: str) -> set[str]:
-    """按输入顺序构建 set(CPython 3.7+ 保留插入序)，以便 primary_owner 稳定。"""
+    """按输入顺序构建 set(CPython 3.7+ 保留插入序),以便 primary_owner 稳定."""
     result: set[str] = set()
     for item in value:
         if not isinstance(item, str) or not item.strip():
@@ -625,7 +625,7 @@ def _ordered_id_set(value: set[str] | list[str] | frozenset[str] | tuple[str, ..
 
 
 def _format_run_dirname(when: datetime) -> str:
-    """生成推演目录名，形如 ``26-8-10-21:23``(年取后两位，月日时分不补零)。"""
+    """生成推演目录名,形如 ``26-8-10-21:23``(年取后两位,月日时分不补零)."""
     return (
         f"{when.year % 100}-{when.month}-{when.day}-"
         f"{when.hour}:{when.minute:02d}"

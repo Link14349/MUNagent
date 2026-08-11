@@ -1,4 +1,4 @@
-"""MUNagent 入口：演示 EventList(可见性 / pull-up / 权限)与 FileSystem。"""
+"""MUNagent 入口:演示 EventList(可见性 / pull-up / 权限)与 FileSystem."""
 
 from __future__ import annotations
 
@@ -19,6 +19,8 @@ from event.event import (
     MotionSwitchEvent,
     NoteEvent,
     SystemEvent,
+    VoteEvent,
+    VotePassMode,
 )
 from filesystem.filesystem import SYSTEM_ACTOR
 from scenario.scenario import Scenario
@@ -41,12 +43,12 @@ def _ok(message: str) -> None:
 
 
 def _denied(action: str, exc: BaseException) -> None:
-    print(f"  ✗ 拒绝：{action}")
+    print(f"  ✗ 拒绝:{action}")
     print(f"      → {exc}")
 
 
 def _hash_short(value: str) -> str:
-    return value[:12] + "…"
+    return value[:12] + "..."
 
 
 def _show_visible(events, label: str, rep_id: str) -> None:
@@ -54,16 +56,16 @@ def _show_visible(events, label: str, rep_id: str) -> None:
     print(f"  {label} ({rep_id}) 可见 {len(visible)} 条:")
     for event in visible:
         stamp = event.time.isoformat() if event.time else "?"
-        print(f"    [{event.id}] {event.type.value} @{stamp}: {event.content[:48]}…")
+        print(f"    [{event.id}] {event.type.value} @{stamp}: {event.content[:48]}...")
 
 
 def demo_eventlist(scenario: Scenario) -> None:
     events = scenario.event_list
     if events is None:
-        raise RuntimeError("Scenario 尚未 initialize，event_list 为空")
+        raise RuntimeError("Scenario 尚未 initialize,event_list 为空")
     fs = scenario.filesystem
     if fs is None:
-        raise RuntimeError("Scenario 尚未 initialize，filesystem 为空")
+        raise RuntimeError("Scenario 尚未 initialize,filesystem 为空")
 
     venue_id = scenario.venues[0].id
     moscow = ZoneInfo("Europe/Moscow")
@@ -74,21 +76,21 @@ def demo_eventlist(scenario: Scenario) -> None:
     _ok(f"已 pull-up 待触发: {len(events.pullup_events)}")
     for pullup in events.pullup_events:
         due = pullup.condition.time.isoformat() if pullup.condition.time else "?"
-        print(f"    - due={due}: {pullup.content[:40]}…")
+        print(f"    - due={due}: {pullup.content[:40]}...")
 
     _section("E2. submit_event 盖戳 + get_events 按 scope 过滤")
     events.submit_event(
         SystemEvent(
-            "全员通报：会议正式开始",
+            "全员通报:会议正式开始",
             [],
             venue_id,
             {CHURCHILL, STALIN, EDEN, MOLOTOV},
             scenario,
         )
     )
-    events.submit_event(NoteEvent("仅丘艾可见的密信：试探希腊条款", CHURCHILL, {EDEN}, venue_id, scenario))
-    events.submit_event(NoteEvent("仅丘斯可见的密信：罗马尼亚底线", CHURCHILL, {STALIN}, venue_id, scenario))
-    _ok("已添加：全员通报 + 两封不同 scope 的纸条")
+    events.submit_event(NoteEvent("仅丘艾可见的密信:试探希腊条款", CHURCHILL, {EDEN}, venue_id, scenario))
+    events.submit_event(NoteEvent("仅丘斯可见的密信:罗马尼亚底线", CHURCHILL, {STALIN}, venue_id, scenario))
+    _ok("已添加:全员通报 + 两封不同 scope 的纸条")
 
     for rep_id, label in (
         (CHURCHILL, "丘吉尔"),
@@ -99,18 +101,18 @@ def demo_eventlist(scenario: Scenario) -> None:
     ):
         _show_visible(events, label, rep_id)
 
-    _section("E3. pull-up：推进时钟触发外部 SystemEvent")
+    _section("E3. pull-up:推进时钟触发外部 SystemEvent")
     first_due = datetime(1944, 10, 9, 22, 45, tzinfo=moscow)
     events.update_time(first_due)
-    _ok(f"update_time → {events.time.isoformat()}，待触发剩余 {len(events.pullup_events)}")
+    _ok(f"update_time → {events.time.isoformat()},待触发剩余 {len(events.pullup_events)}")
     fired = [e for e in events.get_events("__GOD__") if e.type.value == "system"]
-    _ok(f"系统事件累计 {len(fired)} 条；最新: {fired[-1].content[:48]}…")
+    _ok(f"系统事件累计 {len(fired)} 条;最新: {fired[-1].content[:48]}...")
 
     events.time_pass(timedelta(hours=1))
-    _ok(f"time_pass(+1h) → {events.time.isoformat()}，待触发剩余 {len(events.pullup_events)}")
+    _ok(f"time_pass(+1h) → {events.time.isoformat()},待触发剩余 {len(events.pullup_events)}")
     _show_visible(events, "丘吉尔(含外部事件)", CHURCHILL)
 
-    _section("E4. 权限：终态不可改 / time·id 不可改 / CoT 仅发送者")
+    _section("E4. 权限:终态不可改 / time·id 不可改 / CoT 仅发送者")
     pending = MotionSwitchEvent(
         "动议进入自由讨论",
         SessionPhase.FREE_DISCUSSION,
@@ -144,8 +146,8 @@ def demo_eventlist(scenario: Scenario) -> None:
         _denied("COMPLETED 后修改 scope", exc)
 
     msg = MessageEvent(
-        "丘吉尔公开发言：希腊事务应交由伦敦主导",
-        "内心：先试探斯大林是否接受 90/10",
+        "丘吉尔公开发言:希腊事务应交由伦敦主导",
+        "内心:先试探斯大林是否接受 90/10",
         CHURCHILL,
         venue_id,
         scenario,
@@ -161,7 +163,7 @@ def demo_eventlist(scenario: Scenario) -> None:
     except PermissionError as exc:
         _denied("修改已完成消息的 CoT", exc)
 
-    _section("E5. InstructionEvent：经 scope 可见，submission 仍不可直接读")
+    _section("E5. InstructionEvent:经 scope 可见,submission 仍不可直接读")
     draft = fs.create_rep_file(
         CHURCHILL,
         "foreign_office_note.md",
@@ -179,7 +181,7 @@ def demo_eventlist(scenario: Scenario) -> None:
     events.submit_event(instruction)
     eden_events = events.get_events(EDEN)
     linked = [e for e in eden_events if isinstance(e, InstructionEvent)]
-    _ok(f"艾登经事件看到 Instruction: {len(linked)} 条，文件={linked[0].instruction.path.name}")
+    _ok(f"艾登经事件看到 Instruction: {len(linked)} 条,文件={linked[0].instruction.path.name}")
     stalin_linked = [e for e in events.get_events(STALIN) if isinstance(e, InstructionEvent)]
     _ok(f"斯大林看不到该 Instruction: {len(stalin_linked)} 条")
 
@@ -194,9 +196,79 @@ def demo_eventlist(scenario: Scenario) -> None:
         _denied("斯大林直接读 submissions/", exc)
     _ok(f"系统可读 submission: {fs.read(rel, SYSTEM_ACTOR)!r}")
 
+    _section("E6. VoteEvent:记名可读名单 / 不记名仅人数")
+    motion = MotionSwitchEvent(
+        "动议进入有主持核心磋商",
+        SessionPhase.CHAIRED_CORE,
+        venue_id,
+        {CHURCHILL, STALIN, EDEN, MOLOTOV},
+        scenario,
+    )
+    events.submit_event(motion)
+
+    named_vote = VoteEvent(
+        "记名表决:是否进入有主持核心磋商",
+        venue_id,
+        {CHURCHILL, STALIN, EDEN, MOLOTOV},
+        motion,
+        valid_votes=4,
+        pass_mode=VotePassMode.SIMPLE_MAJORITY,
+        scenario=scenario,
+        supporters=[CHURCHILL, EDEN],
+        against=[STALIN],
+        abstentions=[MOLOTOV],
+        passed=True,
+        named=True,
+        remark="记名;按简单多数通过",
+    )
+    events.submit_event(named_vote)
+    _ok(
+        f"记名人数 support={named_vote.support_count} "
+        f"against={named_vote.against_count} abstain={named_vote.abstention_count}"
+    )
+    _ok(f"记名名单 supporters={named_vote.supporters}")
+    _ok(f"记名名单 against={named_vote.against}")
+    _ok(f"记名名单 abstentions={named_vote.abstentions}")
+    ballots = named_vote.supporters
+    ballots.clear()
+    _ok(f"名单属性返回副本,clear 后仍可读: {named_vote.supporters}")
+
+    secret_vote = VoteEvent(
+        "不记名表决:是否接受百分比安排试探案",
+        venue_id,
+        {CHURCHILL, STALIN, EDEN, MOLOTOV},
+        motion,
+        valid_votes=4,
+        pass_mode=VotePassMode.TWO_THIRDS,
+        scenario=scenario,
+        supporters=[CHURCHILL, EDEN, STALIN],
+        against=[MOLOTOV],
+        passed=False,
+        named=False,
+        remark="不记名;未达三分之二",
+    )
+    events.submit_event(secret_vote)
+    _ok(
+        f"不记名人数 support={secret_vote.support_count} "
+        f"against={secret_vote.against_count} abstain={secret_vote.abstention_count}"
+    )
+    _ok(f"不记名 passed={secret_vote.passed} status={secret_vote.status.value}")
+    try:
+        _ = secret_vote.supporters
+    except PermissionError as exc:
+        _denied("读取不记名 supporters 名单", exc)
+    try:
+        _ = secret_vote.against
+    except PermissionError as exc:
+        _denied("读取不记名 against 名单", exc)
+    try:
+        _ = secret_vote.abstentions
+    except PermissionError as exc:
+        _denied("读取不记名 abstentions 名单", exc)
+
 
 def demo_permissions(fs, venue_id: str):
-    _section("A. 权限：私有文件 / scope / owner")
+    _section("A. 权限:私有文件 / scope / owner")
     draft = fs.create_rep_file(
         CHURCHILL,
         "percentages.md",
@@ -226,7 +298,7 @@ def demo_permissions(fs, venue_id: str):
 
     fs.add_owner(f"reps/{CHURCHILL}/percentages.md", CHURCHILL, {EDEN})
     fs.write(f"reps/{CHURCHILL}/percentages.md", EDEN, "希腊 90% / 罗马尼亚 10%(艾登修订)")
-    _ok(f"提升 owner 后艾登可写；owners={sorted(draft.owners)}")
+    _ok(f"提升 owner 后艾登可写;owners={sorted(draft.owners)}")
     _ok(f"primary_owner 仍为 {draft.primary_owner!r}(不因 add_owner 改变)")
 
     fs.create_rep_file(STALIN, "red_lines.md", "巴尔干红线", description="斯大林红线")
@@ -282,11 +354,11 @@ def demo_versioning(fs, draft, venue_id: str) -> None:
     _ok(f"v1 仍保留旧稿: {fs.read(rel_v1, SYSTEM_ACTOR)!r}")
     _ok(f"v2 为新稿:     {fs.read(rel_v2, SYSTEM_ACTOR)!r}")
 
-    _section("B4. 再改一版 → v3；未改动仍拒绝")
+    _section("B4. 再改一版 → v3;未改动仍拒绝")
     fs.write(
         f"reps/{CHURCHILL}/percentages.md",
         CHURCHILL,
-        "希腊 90% / 罗马尼亚 10%(三稿，最终)",
+        "希腊 90% / 罗马尼亚 10%(三稿,最终)",
     )
     v3 = draft.submit(CHURCHILL)
     rel_v3 = f"submissions/{venue_id}/{v3.path.name}"
@@ -297,7 +369,7 @@ def demo_versioning(fs, draft, venue_id: str) -> None:
     except ValueError as exc:
         _denied("相对最新 v3 未改动", exc)
 
-    _section("B5. 联合 owner 提交：文件名仍用 primary_owner，不是提交者")
+    _section("B5. 联合 owner 提交:文件名仍用 primary_owner,不是提交者")
     fs.write(
         f"reps/{CHURCHILL}/percentages.md",
         EDEN,
@@ -305,7 +377,7 @@ def demo_versioning(fs, draft, venue_id: str) -> None:
     )
     v4 = draft.submit(EDEN)
     assert v4.path.name == f"{CHURCHILL}+percentages.md+v4"
-    _ok(f"提交者=艾登，但文件名为: {v4.path.name}")
+    _ok(f"提交者=艾登,但文件名为: {v4.path.name}")
     _ok(f"primary_owner={draft.primary_owner!r} 决定命名前缀")
 
     _section("B6. 版本链一览 + 提交副本不可再 submit / 代表不可见")
@@ -328,7 +400,7 @@ def demo_versioning(fs, draft, venue_id: str) -> None:
     except PermissionError as exc:
         _denied("代表读取任一提交副本", exc)
 
-    _section("B7. list_visible / list_writable(仅 reps/，不含 submissions)")
+    _section("B7. list_visible / list_writable(仅 reps/,不含 submissions)")
     for rep_id in (CHURCHILL, STALIN, EDEN):
         visible = [f.path.relative_to(fs.path).as_posix() for f in fs.list_visible(rep_id)]
         writable = [f.path.relative_to(fs.path).as_posix() for f in fs.list_writable(rep_id)]
@@ -342,7 +414,7 @@ def demo_versioning(fs, draft, venue_id: str) -> None:
 def demo_filesystem(scenario: Scenario) -> None:
     fs = scenario.filesystem
     if fs is None:
-        raise RuntimeError("Scenario 尚未 initialize，filesystem 为空")
+        raise RuntimeError("Scenario 尚未 initialize,filesystem 为空")
 
     venue_id = scenario.venues[0].id
     print(f"推演目录: {fs.path}")
@@ -368,7 +440,7 @@ def main() -> None:
 
         demo_eventlist(scenario)
         demo_filesystem(scenario)
-        print("\n演示结束。")
+        print("\n演示结束.")
     finally:
         if run_dir is not None and run_dir.is_dir():
             shutil.rmtree(run_dir)

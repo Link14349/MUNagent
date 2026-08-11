@@ -1,4 +1,4 @@
-"""文件系统包。"""
+"""文件系统包."""
 
 from filesystem.filesystem import SYSTEM_ACTOR, File, FileSystem
 

@@ -1,4 +1,4 @@
-"""FileSystem 可见性与提交流程单元测试。"""
+"""FileSystem 可见性与提交流程单元测试."""
 
 from __future__ import annotations
 
@@ -212,7 +212,7 @@ def test_list_visible_and_writable_only_reps(fs: FileSystem) -> None:
     assert [f.path.name for f in fs.list_writable(EDEN)] == []
     assert fs.list_visible(STALIN) == []
     assert fs.list_writable(STALIN) == []
-    # submissions 不出现在上述列表中，但仍在 list_all 里
+    # submissions 不出现在上述列表中,但仍在 list_all 里
     assert len(fs.list_all()) == 3
 
     fs.add_owner(f"reps/{CHURCHILL}/shared.md", CHURCHILL, {EDEN})

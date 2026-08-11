@@ -1,4 +1,4 @@
-"""场景包加载辅助函数：YAML 解析、时间与跨文件校验。"""
+"""场景包加载辅助函数:YAML 解析,时间与跨文件校验."""
 
 from __future__ import annotations
 
@@ -47,14 +47,14 @@ def load_yaml(path: Path) -> dict[str, Any]:
 def require_keys(data: dict[str, Any], keys: set[str], *, context: str) -> None:
     missing = keys - data.keys()
     if missing:
-        joined = "、".join(sorted(missing))
+        joined = ",".join(sorted(missing))
         raise ValueError(f"{context} 缺少必需字段: {joined}")
 
 
 def forbid_keys(data: dict[str, Any], keys: set[str], *, context: str) -> None:
     present = keys & data.keys()
     if present:
-        joined = "、".join(sorted(present))
+        joined = ",".join(sorted(present))
         raise ValueError(f"{context} 包含禁止字段: {joined}")
 
 
@@ -77,13 +77,13 @@ def parse_condition(raw: dict[str, Any], *, context: str) -> tuple[str, str | da
     require_keys(raw, {"type", "content"}, context=context)
     extra = set(raw.keys()) - {"type", "content"}
     if extra:
-        joined = "、".join(sorted(extra))
-        raise ValueError(f"{context} 只能包含 type 和 content，多余字段: {joined}")
+        joined = ",".join(sorted(extra))
+        raise ValueError(f"{context} 只能包含 type 和 content,多余字段: {joined}")
 
     cond_type = raw["type"]
     if cond_type not in ALLOWED_CONDITION_TYPES:
         raise ValueError(
-            f"{context}.type 只能是 time 或 text，实际为: {cond_type!r}"
+            f"{context}.type 只能是 time 或 text,实际为: {cond_type!r}"
         )
 
     content = raw["content"]

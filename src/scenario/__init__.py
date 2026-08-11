@@ -1,4 +1,4 @@
-"""场景领域模型与加载入口。"""
+"""场景领域模型与加载入口."""
 
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-"""场景包加载：从目录构造 Scenario 及下属对象。"""
+"""场景包加载:从目录构造 Scenario 及下属对象."""
 
 from __future__ import annotations
 
@@ -25,17 +25,17 @@ from scenario.venue import Agenda, SessionPhase, Venue
 
 
 def load_scenario(path: str | Path) -> Scenario:
-    """从场景包目录加载并返回 Scenario。"""
+    """从场景包目录加载并返回 Scenario."""
     scenario = Scenario()
     populate_scenario(scenario, path)
     return scenario
 
 
 def populate_scenario(scenario: Scenario, scenario_path: str | Path) -> None:
-    """将场景包目录内容填入已有 Scenario 实例。
+    """将场景包目录内容填入已有 Scenario 实例.
 
-    仅加载声明式场景内容；不创建推演目录或 FileSystem。
-    推演运行时请调用 ``scenario.initialize()``。
+    仅加载声明式场景内容;不创建推演目录或 FileSystem.
+    推演运行时请调用 ``scenario.initialize()``.
     """
     root = Path(scenario_path).resolve()
     validate_scenario_layout(root)
@@ -95,7 +95,7 @@ def _load_index(scenario: Scenario, index: dict[str, Any]) -> None:
     schema_version = index["schema_version"]
     if schema_version != SCHEMA_VERSION:
         raise ValueError(
-            f"{context}.schema_version 须为 {SCHEMA_VERSION!r}，实际为 {schema_version!r}"
+            f"{context}.schema_version 须为 {SCHEMA_VERSION!r},实际为 {schema_version!r}"
         )
 
     scenario.title = _require_str(index["title"], field=f"{context}.title")
@@ -151,8 +151,8 @@ def _load_storyline(scenario: Scenario, storyline: dict[str, Any]) -> None:
         forbid_keys(event, EVENT_FORBIDDEN_KEYS, context=event_context)
         extra = set(event.keys()) - {"id", "condition", "content"}
         if extra:
-            joined = "、".join(sorted(extra))
-            raise ValueError(f"{event_context} 只能包含 id、condition 和 content，多余字段: {joined}")
+            joined = ",".join(sorted(extra))
+            raise ValueError(f"{event_context} 只能包含 id,condition 和 content,多余字段: {joined}")
 
         event_id = _require_str(event["id"], field=f"{event_context}.id")
         if event_id in seen_event_ids:
@@ -405,12 +405,12 @@ def _validate_cross_references(
     }
     missing_reps = all_seated - rep_ids
     if missing_reps:
-        joined = "、".join(sorted(missing_reps))
+        joined = ",".join(sorted(missing_reps))
         raise ValueError(f"venue.seats 中的代表缺少角色文件: {joined}")
 
     unused_reps = rep_ids - all_seated
     if unused_reps:
-        joined = "、".join(sorted(unused_reps))
+        joined = ",".join(sorted(unused_reps))
         raise ValueError(f"角色文件存在但未出现在任何 venue.seats 中: {joined}")
 
 
@@ -427,8 +427,8 @@ def _parse_session_phase(value: Any, *, field: str) -> SessionPhase:
     try:
         return SessionPhase(normalized)
     except ValueError as exc:
-        allowed = "、".join(sorted(phase.value for phase in SessionPhase))
-        raise ValueError(f"{field} 只能是 {allowed}，实际为: {normalized!r}") from exc
+        allowed = ",".join(sorted(phase.value for phase in SessionPhase))
+        raise ValueError(f"{field} 只能是 {allowed},实际为: {normalized!r}") from exc
 
 
 def _parse_str_list(value: Any, *, field: str) -> list[str]:

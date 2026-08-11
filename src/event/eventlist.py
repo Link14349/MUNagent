@@ -11,12 +11,12 @@ if TYPE_CHECKING:
 
 
 class EventList:
-    """推演事件表。
+    """推演事件表.
 
-    事件对象构造时 ``time`` / ``id`` 为 ``None``；``submit_event`` 用当前表时钟盖戳并分配
-    ``id``。仍为 ``PENDING`` 的事件会进入 pending 队列；``Event.status`` 离开
-    ``PENDING`` 时经 ``_event_updated`` 出队。剧情时钟由 ``update_time`` /
-    ``time_pass`` 推进；到期的 ``PullUpEvent`` 会落成 ``SystemEvent`` 再入表。
+    事件对象构造时 ``time`` / ``id`` 为 ``None``;``submit_event`` 用当前表时钟盖戳并分配
+    ``id``.仍为 ``PENDING`` 的事件会进入 pending 队列;``Event.status`` 离开
+    ``PENDING`` 时经 ``_event_updated`` 出队.剧情时钟由 ``update_time`` /
+    ``time_pass`` 推进;到期的 ``PullUpEvent`` 会落成 ``SystemEvent`` 再入表.
     """
 
     scenario: Scenario
@@ -40,12 +40,12 @@ class EventList:
 
     @property
     def pending_event_ids(self) -> list[int]:
-        """当前仍为 PENDING 的已入表事件 id(按入队顺序的副本)。"""
+        """当前仍为 PENDING 的已入表事件 id(按入队顺序的副本)."""
         return list(self.__pending_events)
 
     @property
     def pending_events(self) -> list[Event]:
-        """当前仍为 PENDING 的已入表事件(按入队顺序的浅拷贝列表，不影响内部队列)。"""
+        """当前仍为 PENDING 的已入表事件(按入队顺序的浅拷贝列表,不影响内部队列)."""
         return [self.__events[event_id] for event_id in self.__pending_events]
 
     def pull_up_event(self, pullup: PullUpEvent):
@@ -56,7 +56,7 @@ class EventList:
         self.pullup_events.append(pullup)
 
     def update_time(self, time: datetime):
-        """将剧情时钟推进到绝对时刻 ``time``(不可倒退)。"""
+        """将剧情时钟推进到绝对时刻 ``time``(不可倒退)."""
         if time < self.__time:
             raise ValueError("Wrong time order error")
         self.__time = time
@@ -80,20 +80,20 @@ class EventList:
         self.pullup_events = [pullup for pullup in self.pullup_events if pullup not in due_set]
 
     def time_pass(self, delta_time: timedelta) -> None:
-        """相对当前时钟推进 ``delta_time``，内部委托 ``update_time``。"""
+        """相对当前时钟推进 ``delta_time``,内部委托 ``update_time``."""
         if delta_time < timedelta(0):
-            raise ValueError(f"delta_time 不可为负，实际为 {delta_time!r}")
+            raise ValueError(f"delta_time 不可为负,实际为 {delta_time!r}")
         self.update_time(self.__time + delta_time)
 
     def submit_event(self, event: Event):
-        """将事件登记入表：盖上当前剧情时间并分配 ``id``。"""
+        """将事件登记入表:盖上当前剧情时间并分配 ``id``."""
         if event.time is not None:
             raise ValueError(
-                f"事件 time 应由 EventList.submit_event 设定，当前已为 {event.time!r}"
+                f"事件 time 应由 EventList.submit_event 设定,当前已为 {event.time!r}"
             )
         if event.id is not None:
             raise ValueError(
-                f"事件 id 应由 EventList.submit_event 设定，当前已为 {event.id!r}"
+                f"事件 id 应由 EventList.submit_event 设定,当前已为 {event.id!r}"
             )
         event.time = self.__time
         event.id = len(self.__events)
@@ -102,23 +102,23 @@ class EventList:
             self.__pending_events.append(event.id)
 
     def _event_updated(self, event: Event) -> None:
-        """由 ``Event.status`` setter 在离开 PENDING 时回调；校验归属后移出 pending。
+        """由 ``Event.status`` setter 在离开 PENDING 时回调;校验归属后移出 pending.
 
-        约定仅供 Event 调用，不作为对外 API。
+        约定仅供 Event 调用,不作为对外 API.
         """
         if event.id is None:
-            raise ValueError("事件尚未入表，不能更新 pending")
+            raise ValueError("事件尚未入表,不能更新 pending")
         if (
             event.id < 0
             or event.id >= len(self.__events)
             or self.__events[event.id] is not event
         ):
             raise ValueError(
-                f"事件(id={event.id!r}) 不属于本 EventList，不能更新 pending"
+                f"事件(id={event.id!r}) 不属于本 EventList,不能更新 pending"
             )
         if event.status == EventStatus.PENDING:
             raise ValueError(
-                f"事件(id={event.id}) 仍为 PENDING，不应移出 pending 队列"
+                f"事件(id={event.id}) 仍为 PENDING,不应移出 pending 队列"
             )
         try:
             self.__pending_events.remove(event.id)
@@ -128,10 +128,10 @@ class EventList:
             ) from exc
 
     def get_events(self, rep: str) -> list[Event]:
-        """返回对 ``rep`` 可见的事件。
+        """返回对 ``rep`` 可见的事件.
 
-        代表获知 submission 文件的唯一正规途径：可见事件(如 Instruction / Resolution)
-        上绑定的 ``File`` 引用；不得依赖 FileSystem 对 submissions/ 的直接枚举。
+        代表获知 submission 文件的唯一正规途径:可见事件(如 Instruction / Resolution)
+        上绑定的 ``File`` 引用;不得依赖 FileSystem 对 submissions/ 的直接枚举.
         """
         if rep == "__GOD__":
             return [event for event in self.__events]

@@ -32,7 +32,7 @@ class EventStatus(StrEnum):
 
 
 class VotePassMode(StrEnum):
-    """投票通过门槛。"""
+    """投票通过门槛."""
 
     SIMPLE_MAJORITY = "simple_majority"  # 1/2 多数
     TWO_THIRDS = "two_thirds"  # 2/3 多数
@@ -40,15 +40,15 @@ class VotePassMode(StrEnum):
 
 
 class Event:
-    """事件基类。
+    """事件基类.
 
-    - ``time`` / ``id``：构造时为 ``None``，由 ``EventList.submit_event`` 赋一次后不可再改。
-    - ``type`` / ``venue``：一旦设定不可再改。
-    - 其余属性：仅当 ``status == PENDING`` 时可改。
-    - 通过 ``status`` setter 离开 ``PENDING`` 时，若事件已入表，会通知
-      ``EventList`` 将其从 pending 队列移除(约定仅由此路径回调)。
-    - 子类 ``__init__`` 应直接写入私有字段，并用 ``_set_type`` / ``_init_status``。
-    - 每个事件只属于一个会场(``venue`` 为会场 ID 字符串)。
+    - ``time`` / ``id``:构造时为 ``None``,由 ``EventList.submit_event`` 赋一次后不可再改.
+    - ``type`` / ``venue``:一旦设定不可再改.
+    - 其余属性:仅当 ``status == PENDING`` 时可改.
+    - 通过 ``status`` setter 离开 ``PENDING`` 时,若事件已入表,会通知
+      ``EventList`` 将其从 pending 队列移除(约定仅由此路径回调).
+    - 子类 ``__init__`` 应直接写入私有字段,并用 ``_set_type`` / ``_init_status``.
+    - 每个事件只属于一个会场(``venue`` 为会场 ID 字符串).
     """
 
     def __init__(
@@ -71,7 +71,7 @@ class Event:
         if self.__status != EventStatus.PENDING:
             raise PermissionError(
                 f"事件(id={self.__id!r}, type={self.__type}, venue={self.__venue!r}) 状态为 "
-                f"{self.__status.value}，不能修改 {field}"
+                f"{self.__status.value},不能修改 {field}"
             )
 
     def _set_type(self, event_type: EventType) -> None:
@@ -80,9 +80,9 @@ class Event:
         self.__type = event_type
 
     def _init_status(self, status: EventStatus) -> None:
-        """仅供子类构造时设定初始状态(可直接进入终态)。
+        """仅供子类构造时设定初始状态(可直接进入终态).
 
-        不走 ``status`` setter，也不通知 EventList(构造时尚未入表)。
+        不走 ``status`` setter,也不通知 EventList(构造时尚未入表).
         """
         self.__status = EventStatus(status)
 
@@ -105,7 +105,7 @@ class Event:
         if self.__id is not None:
             raise PermissionError("事件 id 不可修改")
         if value < 0:
-            raise ValueError(f"id 须为非负整数，实际为: {value!r}")
+            raise ValueError(f"id 须为非负整数,实际为: {value!r}")
         self.__id = value
 
     @property
@@ -136,7 +136,7 @@ class Event:
         event_list = self.__scenario.event_list
         if event_list is None:
             raise RuntimeError(
-                f"事件(id={self.__id}) 已入表，但 Scenario.event_list 为空，无法更新 pending"
+                f"事件(id={self.__id}) 已入表,但 Scenario.event_list 为空,无法更新 pending"
             )
         event_list._event_updated(self)
 
@@ -207,10 +207,10 @@ class MotionSwitchEvent(Event):
 
 
 class InstructionEvent(Event):
-    """指示类事件：``instruction`` 绑定一份 File(通常为 submission 副本)。
+    """指示类事件:``instruction`` 绑定一份 File(通常为 submission 副本).
 
-    事件落在代表 scope 内时，该代表可通过本事件索引得知并访问该文件；
-    不能通过 FileSystem.list_visible 直接发现 submissions/。
+    事件落在代表 scope 内时,该代表可通过本事件索引得知并访问该文件;
+    不能通过 FileSystem.list_visible 直接发现 submissions/.
     """
 
     def __init__(
@@ -246,9 +246,9 @@ class InstructionEvent(Event):
 
 
 class ResolutionEvent(Event):
-    """决议类事件：``resolution`` 绑定一份 File(通常为 submission 副本)。
+    """决议类事件:``resolution`` 绑定一份 File(通常为 submission 副本).
 
-    可见性语义同 :class:`InstructionEvent`：经 EventList 可见事件索引，而非文件系统枚举。
+    可见性语义同 :class:`InstructionEvent`:经 EventList 可见事件索引,而非文件系统枚举.
     """
 
     def __init__(
@@ -284,9 +284,11 @@ class ResolutionEvent(Event):
 
 
 class VoteEvent(Event):
-    """投票事件：对某次 Resolution 或 MotionSwitch 进行表决记录。
+    """投票事件:对某次 Resolution 或 MotionSwitch 进行表决记录.
 
-    ``remark`` 用于记录特殊规则，例如有权代表强制通过、安理会常任理事国一票否决等。
+    ``remark`` 用于记录特殊规则,例如有权代表强制通过,安理会常任理事国一票否决等.
+    ``named`` 为记名表决:仅记名时可经属性读取具体支持/反对/弃权名单(返回副本);
+    不记名时名单属性不可访问,但仍可通过人数属性得知票数.
     """
 
     def __init__(
@@ -304,9 +306,10 @@ class VoteEvent(Event):
         abstentions: list[str] | None = None,
         passed: bool | None = None,
         remark: str = "",
+        named: bool = True,
     ):
         if valid_votes < 0:
-            raise ValueError(f"valid_votes 须为非负整数，实际为: {valid_votes!r}")
+            raise ValueError(f"valid_votes 须为非负整数,实际为: {valid_votes!r}")
 
         mode = VotePassMode(pass_mode)
         support_list = _normalize_rep_list(supporters or [], field="supporters")
@@ -328,6 +331,7 @@ class VoteEvent(Event):
         self.__pass_mode = mode
         self.__passed = passed
         self.__remark = remark.strip()
+        self.__named = bool(named)
         if passed is True:
             self._init_status(EventStatus.COMPLETED)
         elif passed is False:
@@ -340,6 +344,13 @@ class VoteEvent(Event):
             self.__abstentions,
             self.__valid_votes,
         )
+
+    def _require_named_ballots(self, field: str) -> None:
+        if not self.__named:
+            raise PermissionError(
+                f"事件(id={self.id!r}, type={self.type}, venue={self.venue!r}) "
+                f"为不记名投票,不能访问 {field}"
+            )
 
     @property
     def target(self) -> ResolutionEvent | MotionSwitchEvent:
@@ -362,12 +373,34 @@ class VoteEvent(Event):
     def valid_votes(self, value: int) -> None:
         self._require_editable("valid_votes")
         if value < 0:
-            raise ValueError(f"valid_votes 须为非负整数，实际为: {value!r}")
+            raise ValueError(f"valid_votes 须为非负整数,实际为: {value!r}")
         self.__valid_votes = value
         self._revalidate_ballots()
 
     @property
+    def named(self) -> bool:
+        return self.__named
+
+    @named.setter
+    def named(self, value: bool) -> None:
+        self._require_editable("named")
+        self.__named = bool(value)
+
+    @property
+    def support_count(self) -> int:
+        return len(self.__supporters)
+
+    @property
+    def against_count(self) -> int:
+        return len(self.__against)
+
+    @property
+    def abstention_count(self) -> int:
+        return len(self.__abstentions)
+
+    @property
     def supporters(self) -> list[str]:
+        self._require_named_ballots("supporters")
         return list(self.__supporters)
 
     @supporters.setter
@@ -378,6 +411,7 @@ class VoteEvent(Event):
 
     @property
     def against(self) -> list[str]:
+        self._require_named_ballots("against")
         return list(self.__against)
 
     @against.setter
@@ -388,6 +422,7 @@ class VoteEvent(Event):
 
     @property
     def abstentions(self) -> list[str]:
+        self._require_named_ballots("abstentions")
         return list(self.__abstentions)
 
     @abstentions.setter
@@ -425,7 +460,7 @@ class VoteEvent(Event):
 
 
 class NoteEvent(Event):
-    """会议期间的传纸条私聊。"""
+    """会议期间的传纸条私聊."""
 
     def __init__(
         self,
@@ -463,7 +498,7 @@ class NoteEvent(Event):
 
 
 class MessageEvent(Event):
-    """会议期间的消息。"""
+    """会议期间的消息."""
 
     def __init__(
         self,
@@ -507,7 +542,7 @@ class MessageEvent(Event):
 
 
 class ChatEvent(Event):
-    """free discussion 环节的消息。"""
+    """free discussion 环节的消息."""
 
     def __init__(
         self,

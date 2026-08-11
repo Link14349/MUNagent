@@ -1,66 +1,66 @@
 schema_version: "0.1"
-title: 雅尔塔会议预备会：莫斯科“百分比协定”
+title: '雅尔塔会议预备会:莫斯科"百分比协定"'
 author: MUNagent
 version: 0.1.0
 language: zh-CN
 start_story_time: "1944-10-09T22:00:00+03:00"
 timezone: Europe/Moscow
 description: >-
-  1944年10月，丘吉尔率英国代表团抵达莫斯科，与斯大林就东南欧战后安排进行闭门谈判。
-  四名代表需要在罗马尼亚、希腊、南斯拉夫、匈牙利和保加利亚的影响比例、执行方式与文件命运上逐项拉锯。
+  1944年10月,丘吉尔率英国代表团抵达莫斯科,与斯大林就东南欧战后安排进行闭门谈判.
+  四名代表需要在罗马尼亚,希腊,南斯拉夫,匈牙利和保加利亚的影响比例,执行方式与文件命运上逐项拉锯.
 
 sources:
-  - title: Churchill Archive — The Cold War and Nuclear Weapons
+  - title: Churchill Archive - The Cold War and Nuclear Weapons
     url: https://www.churchillarchive.com/the-cold-war-and-nuclear-weapons
-    note: 说明 TOLSTOY 会谈、百分比协定及档案组 CHAR 20/181。
-  - title: Churchill Archive — Churchill and Roosevelt
+    note: 说明 TOLSTOY 会谈,百分比协定及档案组 CHAR 20/181.
+  - title: Churchill Archive - Churchill and Roosevelt
     url: https://www.churchillarchive.com/teaching-and-research/in-depth-guides/ChurchillandRoosevelt
-    note: 收录丘吉尔1944年10月11日向罗斯福报告巴尔干安排的档案索引。
+    note: 收录丘吉尔1944年10月11日向罗斯福报告巴尔干安排的档案索引.
   - title: FRUS 1944, Europe, Volume IV, Document 920
     url: https://history.state.gov/historicaldocuments/frus1944v04/d920
-    note: 哈里曼对英苏巴尔干安排、希腊、罗马尼亚及美国未被授权承诺的同期报告。
+    note: 哈里曼对英苏巴尔干安排,希腊,罗马尼亚及美国未被授权承诺的同期报告.
   - title: FRUS 1944, Europe, Volume IV, Document 926
     url: https://history.state.gov/historicaldocuments/frus1944v04/d926
-    note: 同期电报记录保加利亚、匈牙利80/20及南斯拉夫50/50等后续安排。
+    note: 同期电报记录保加利亚,匈牙利80/20及南斯拉夫50/50等后续安排.
   - title: FRUS 1944, Europe, Volume IV, Document 206
     url: https://history.state.gov/historicaldocuments/frus1944v04/d206
-    note: 罗马尼亚1944年8月23日新政府声明，列出民族民主集团的四个政党及其停战、民主承诺。
+    note: 罗马尼亚1944年8月23日新政府声明,列出民族民主集团的四个政党及其停战,民主承诺.
   - title: FRUS 1944, Europe, Volume IV, Document 260
     url: https://history.state.gov/historicaldocuments/frus1944v04/d260
-    note: 反映罗马尼亚盟国管制委员会中苏联现场主导及英美争取独立政治代表权的现实。
-  - title: FRUS 1944, Near East and Africa, Volume V, Documents 80–191
+    note: 反映罗马尼亚盟国管制委员会中苏联现场主导及英美争取独立政治代表权的现实.
+  - title: FRUS 1944, Near East and Africa, Volume V, Documents 80-191
     url: https://history.state.gov/historicaldocuments/frus1944v05/d80
-    note: 美国对希腊解放、民族团结、EAM/ELAS、王室问题及英国政策的同期往来文件组入口。
+    note: 美国对希腊解放,民族团结,EAM/ELAS,王室问题及英国政策的同期往来文件组入口.
   - title: FRUS 1944, Europe, Volume IV, Document 1284
     url: https://history.state.gov/historicaldocuments/frus1944v04/d1284
-    note: 记录铁托—舒巴希奇合作框架、游击队行政与军事现实及南斯拉夫未来联邦安排。
+    note: 记录铁托-舒巴希奇合作框架,游击队行政与军事现实及南斯拉夫未来联邦安排.
   - title: FRUS 1944, Europe, Volume IV, Document 1285
     url: https://history.state.gov/historicaldocuments/frus1944v04/d1285
-    note: 记录英美对铁托、切特尼克及南斯拉夫政治代表性的不同关切。
+    note: 记录英美对铁托,切特尼克及南斯拉夫政治代表性的不同关切.
   - title: FRUS 1944, British Commonwealth and Europe, Volume III, Document 826
     url: https://history.state.gov/historicaldocuments/frus1944v03/d826
-    note: 记录1944年10月初匈牙利使团抵达莫斯科、退出战争意向及三国停战安排问题。
+    note: 记录1944年10月初匈牙利使团抵达莫斯科,退出战争意向及三国停战安排问题.
   - title: FRUS 1944, British Commonwealth and Europe, Volume III, Document 348
     url: https://history.state.gov/historicaldocuments/frus1944v03/d348
-    note: 同期报告保加利亚1944年9月政局变化、对德转向及苏军进入后的局面。
+    note: 同期报告保加利亚1944年9月政局变化,对德转向及苏军进入后的局面.
   - title: FRUS 1944, British Commonwealth and Europe, Volume III, Document 379
     url: https://history.state.gov/historicaldocuments/frus1944v03/d379
-    note: 保加利亚停战草案，涉及撤军、财产返还、交通设施、盟国管制及英美苏权限争议。
-  - title: Library of Congress — Romania, a Country Study
+    note: 保加利亚停战草案,涉及撤军,财产返还,交通设施,盟国管制及英美苏权限争议.
+  - title: Library of Congress - Romania, a Country Study
     url: https://tile.loc.gov/storage-services/master/frd/frdcstdy/ro/romaniacountryst00bach_0/romaniacountryst00bach_0.pdf
-    note: 用于核对罗马尼亚地理、资源、交通和长期政治经济背景。
-  - title: Library of Congress — Yugoslavia, a Country Study
+    note: 用于核对罗马尼亚地理,资源,交通和长期政治经济背景.
+  - title: Library of Congress - Yugoslavia, a Country Study
     url: https://tile.loc.gov/storage-services/master/frd/frdcstdy/yu/yugoslaviacountr00curt_0/yugoslaviacountr00curt_0.pdf
-    note: 用于核对南斯拉夫地理、矿产、交通、民族结构和长期政治经济背景。
-  - title: Library of Congress — Hungary, a Country Study
+    note: 用于核对南斯拉夫地理,矿产,交通,民族结构和长期政治经济背景.
+  - title: Library of Congress - Hungary, a Country Study
     url: https://tile.loc.gov/storage-services/master/frd/frdcstdy/hu/hungarycountryst00bura_0/hungarycountryst00bura_0.pdf
-    note: 用于核对匈牙利地理、农业、矿产、工业和长期政治经济背景。
-  - title: Library of Congress — Bulgaria, a Country Study
+    note: 用于核对匈牙利地理,农业,矿产,工业和长期政治经济背景.
+  - title: Library of Congress - Bulgaria, a Country Study
     url: https://tile.loc.gov/storage-services/master/frd/frdcstdy/bu/bulgariacountrys00curt_0/bulgariacountrys00curt_0.pdf
-    note: 用于核对保加利亚地理、农业、资源、交通和长期政治经济背景。
-  - title: United States Holocaust Memorial Museum — Deportation of Hungarian Jews
+    note: 用于核对保加利亚地理,农业,资源,交通和长期政治经济背景.
+  - title: United States Holocaust Memorial Museum - Deportation of Hungarian Jews
     url: https://encyclopedia.ushmm.org/content/en/timeline-event/holocaust/1942-1945/deportation-of-hungarian-jews
-    note: 核对1944年匈牙利犹太人遭德国及匈牙利当局驱逐的时间、规模与开场时状态。
+    note: 核对1944年匈牙利犹太人遭德国及匈牙利当局驱逐的时间,规模与开场时状态.
   - title: 英国国家档案馆藏件 PREM 3/66/7 (169)
     url: https://discovery.nationalarchives.gov.uk/
-    note: 丘吉尔“百分比”纸条的档案出处；具体数值按公开影印件转录。
+    note: '丘吉尔"百分比"纸条的档案出处;具体数值按公开影印件转录.'

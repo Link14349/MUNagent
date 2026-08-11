@@ -1,4 +1,4 @@
-"""EventList：入表盖戳、可见性过滤、pull-up 触发与权限边界。"""
+"""EventList:入表盖戳,可见性过滤,pull-up 触发与权限边界."""
 
 from __future__ import annotations
 
@@ -299,14 +299,14 @@ def test_completed_note_and_message_cot_permissions(
 
     msg = MessageEvent(
         "公开发言",
-        "内心：试探斯大林底线",
+        "内心:试探斯大林底线",
         CHURCHILL,
         venue_id,
         scenario,
     )
     events.submit_event(msg)
     assert set(msg.scope) == {rep.id for rep in scenario.representatives}
-    assert msg.get_CoT(CHURCHILL) == "内心：试探斯大林底线"
+    assert msg.get_CoT(CHURCHILL) == "内心:试探斯大林底线"
     with pytest.raises(ValueError, match="Not the sender"):
         msg.get_CoT(STALIN)
     with pytest.raises(PermissionError, match="不能修改 CoT"):
@@ -338,7 +338,7 @@ def test_instruction_event_is_only_visible_via_scope(
     assert visible_to_eden[0].instruction is submitted
 
     assert events.get_events(STALIN) == []
-    # submission 本身仍不可被代表直接读取；只能经事件索引获知
+    # submission 本身仍不可被代表直接读取;只能经事件索引获知
     assert scenario.filesystem is not None
     rel = submitted.path.relative_to(scenario.filesystem.path).as_posix()
     with pytest.raises(PermissionError):

@@ -1,4 +1,4 @@
-"""事件属性编辑权限：PENDING 可改；time/id/type/venue 不可变。"""
+"""事件属性编辑权限:PENDING 可改;time/id/type/venue 不可变."""
 
 from __future__ import annotations
 
