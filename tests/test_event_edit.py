@@ -125,12 +125,12 @@ def test_event_list_add_stamps_time_and_id(scenario: Scenario, venue_id: str) ->
         {rep.id for rep in scenario.representatives},
         scenario,
     )
-    events.add_event(event)
+    events.submit_event(event)
     assert event.time == scenario.start_time == events.time
     assert event.id == 0
 
-    with pytest.raises(ValueError, match="应由 EventList.add_event 设定"):
-        events.add_event(event)
+    with pytest.raises(ValueError, match="应由 EventList.submit_event 设定"):
+        events.submit_event(event)
 
 
 def test_event_list_time_pass(scenario: Scenario) -> None:

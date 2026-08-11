@@ -76,8 +76,8 @@ def demo_eventlist(scenario: Scenario) -> None:
         due = pullup.condition.time.isoformat() if pullup.condition.time else "?"
         print(f"    - due={due}: {pullup.content[:40]}…")
 
-    _section("E2. add_event 盖戳 + get_events 按 scope 过滤")
-    events.add_event(
+    _section("E2. submit_event 盖戳 + get_events 按 scope 过滤")
+    events.submit_event(
         SystemEvent(
             "全员通报：会议正式开始",
             [],
@@ -86,8 +86,8 @@ def demo_eventlist(scenario: Scenario) -> None:
             scenario,
         )
     )
-    events.add_event(NoteEvent("仅丘艾可见的密信：试探希腊条款", CHURCHILL, {EDEN}, venue_id, scenario))
-    events.add_event(NoteEvent("仅丘斯可见的密信：罗马尼亚底线", CHURCHILL, {STALIN}, venue_id, scenario))
+    events.submit_event(NoteEvent("仅丘艾可见的密信：试探希腊条款", CHURCHILL, {EDEN}, venue_id, scenario))
+    events.submit_event(NoteEvent("仅丘斯可见的密信：罗马尼亚底线", CHURCHILL, {STALIN}, venue_id, scenario))
     _ok("已添加：全员通报 + 两封不同 scope 的纸条")
 
     for rep_id, label in (
@@ -118,7 +118,8 @@ def demo_eventlist(scenario: Scenario) -> None:
         {CHURCHILL, STALIN, EDEN, MOLOTOV},
         scenario,
     )
-    events.add_event(pending)
+    events.submit_event(pending)
+    _ok(f"PENDING 入表后 pending_event_ids={events.pending_event_ids}")
     pending.content = "动议说明已修订"
     _ok(f"PENDING 可改 content → {pending.content!r}")
 
@@ -132,6 +133,7 @@ def demo_eventlist(scenario: Scenario) -> None:
         _denied("改写已分配的 id", exc)
 
     pending.status = EventStatus.COMPLETED
+    _ok(f"离开 PENDING 后 pending_event_ids={events.pending_event_ids}")
     try:
         pending.content = "终态篡改"
     except PermissionError as exc:
@@ -148,7 +150,7 @@ def demo_eventlist(scenario: Scenario) -> None:
         venue_id,
         scenario,
     )
-    events.add_event(msg)
+    events.submit_event(msg)
     _ok(f"发送者可读 CoT: {msg.get_CoT(CHURCHILL)!r}")
     try:
         msg.get_CoT(STALIN)
@@ -174,7 +176,7 @@ def demo_eventlist(scenario: Scenario) -> None:
         venue_id,
         scenario,
     )
-    events.add_event(instruction)
+    events.submit_event(instruction)
     eden_events = events.get_events(EDEN)
     linked = [e for e in eden_events if isinstance(e, InstructionEvent)]
     _ok(f"艾登经事件看到 Instruction: {len(linked)} 条，文件={linked[0].instruction.path.name}")

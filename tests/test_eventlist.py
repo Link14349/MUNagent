@@ -59,7 +59,7 @@ def test_initialize_pulls_up_time_events_from_pool(scenario: Scenario, events: E
     assert events.get_events("__GOD__") == []
 
 
-def test_add_event_stamps_time_and_id(
+def test_submit_event_stamps_time_and_id(
     scenario: Scenario, events: EventList, venue_id: str
 ) -> None:
     motion = MotionSwitchEvent(
@@ -72,28 +72,28 @@ def test_add_event_stamps_time_and_id(
     assert motion.time is None
     assert motion.id is None
 
-    events.add_event(motion)
+    events.submit_event(motion)
     assert motion.time == scenario.start_time == events.time
     assert motion.id == 0
 
     note = NoteEvent("私下试探", CHURCHILL, {EDEN}, venue_id, scenario)
-    events.add_event(note)
+    events.submit_event(note)
     assert note.time == events.time
     assert note.id == 1
 
 
-def test_add_event_rejects_preassigned_time_or_id(
+def test_submit_event_rejects_preassigned_time_or_id(
     scenario: Scenario, events: EventList, venue_id: str
 ) -> None:
     stamped = SystemEvent("已盖戳", [], venue_id, {CHURCHILL}, scenario)
     stamped.time = events.time
-    with pytest.raises(ValueError, match="应由 EventList.add_event 设定"):
-        events.add_event(stamped)
+    with pytest.raises(ValueError, match="应由 EventList.submit_event 设定"):
+        events.submit_event(stamped)
 
     numbered = SystemEvent("已编号", [], venue_id, {CHURCHILL}, scenario)
     numbered.id = 99
-    with pytest.raises(ValueError, match="应由 EventList.add_event 设定"):
-        events.add_event(numbered)
+    with pytest.raises(ValueError, match="应由 EventList.submit_event 设定"):
+        events.submit_event(numbered)
 
 
 def test_get_events_filters_by_scope(
@@ -108,9 +108,9 @@ def test_get_events_filters_by_scope(
     )
     private = NoteEvent("仅丘艾可见", CHURCHILL, {EDEN}, venue_id, scenario)
     secret = NoteEvent("仅丘斯可见", CHURCHILL, {STALIN}, venue_id, scenario)
-    events.add_event(public)
-    events.add_event(private)
-    events.add_event(secret)
+    events.submit_event(public)
+    events.submit_event(private)
+    events.submit_event(secret)
 
     churchill = events.get_events(CHURCHILL)
     assert [e.content for e in churchill] == [
@@ -215,7 +215,8 @@ def test_event_edit_permissions_after_add(
         {CHURCHILL},
         scenario,
     )
-    events.add_event(pending)
+    events.submit_event(pending)
+    assert events.pending_event_ids == [pending.id]
     pending.content = "更新说明"
     pending.scope = {CHURCHILL, EDEN}
     assert pending.content == "更新说明"
@@ -227,17 +228,69 @@ def test_event_edit_permissions_after_add(
         pending.id = 99
 
     pending.status = EventStatus.COMPLETED
+    assert events.pending_event_ids == []
     with pytest.raises(PermissionError, match="不能修改 content"):
         pending.content = "终态再改"
     with pytest.raises(PermissionError, match="不能修改 scope"):
         pending.scope = {STALIN}
 
 
+def test_pending_queue_on_submit_and_status_leave(
+    scenario: Scenario, events: EventList, venue_id: str
+) -> None:
+    first = MotionSwitchEvent(
+        "动议一",
+        SessionPhase.FREE_DISCUSSION,
+        venue_id,
+        {CHURCHILL},
+        scenario,
+    )
+    second = MotionSwitchEvent(
+        "动议二",
+        SessionPhase.RECESS,
+        venue_id,
+        {STALIN},
+        scenario,
+    )
+    done = SystemEvent("系统广播", [], venue_id, {CHURCHILL, STALIN}, scenario)
+
+    events.submit_event(first)
+    events.submit_event(second)
+    events.submit_event(done)
+    assert events.pending_event_ids == [first.id, second.id]
+    pending_snapshot = events.pending_events
+    assert pending_snapshot == [first, second]
+    pending_snapshot.clear()
+    assert events.pending_event_ids == [first.id, second.id]
+    assert events.pending_events == [first, second]
+
+    first.status = EventStatus.ACCEPTED
+    assert events.pending_event_ids == [second.id]
+    assert events.pending_events == [second]
+
+    second.status = EventStatus.REJECTED
+    assert events.pending_event_ids == []
+
+    with pytest.raises(ValueError, match="不在 pending 队列中"):
+        events._event_updated(first)
+
+    outsider = MotionSwitchEvent(
+        "未入表动议",
+        SessionPhase.FREE_DISCUSSION,
+        venue_id,
+        {CHURCHILL},
+        scenario,
+    )
+    outsider.id = 0
+    with pytest.raises(ValueError, match="不属于本 EventList"):
+        events._event_updated(outsider)
+
+
 def test_completed_note_and_message_cot_permissions(
     scenario: Scenario, events: EventList, venue_id: str
 ) -> None:
     note = NoteEvent("密信", CHURCHILL, {EDEN}, venue_id, scenario)
-    events.add_event(note)
+    events.submit_event(note)
     assert note.status == EventStatus.COMPLETED
     with pytest.raises(PermissionError, match="不能修改 content"):
         note.content = "篡改密信"
@@ -251,7 +304,7 @@ def test_completed_note_and_message_cot_permissions(
         venue_id,
         scenario,
     )
-    events.add_event(msg)
+    events.submit_event(msg)
     assert set(msg.scope) == {rep.id for rep in scenario.representatives}
     assert msg.get_CoT(CHURCHILL) == "内心：试探斯大林底线"
     with pytest.raises(ValueError, match="Not the sender"):
@@ -277,7 +330,7 @@ def test_instruction_event_is_only_visible_via_scope(
         venue_id,
         scenario,
     )
-    events.add_event(instruction)
+    events.submit_event(instruction)
 
     visible_to_eden = events.get_events(EDEN)
     assert len(visible_to_eden) == 1

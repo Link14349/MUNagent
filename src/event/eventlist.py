@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 from typing import TYPE_CHECKING
 
 from condition.condition import Condition
-from event.event import Event, SystemEvent
+from event.event import Event, EventStatus, SystemEvent
 
 if TYPE_CHECKING:
     from scenario.scenario import Scenario
@@ -13,20 +13,23 @@ if TYPE_CHECKING:
 class EventList:
     """推演事件表。
 
-    事件对象构造时 ``time`` / ``id`` 为 ``None``；``add_event`` 用当前表时钟盖戳并分配
-    ``id``。剧情时钟由 ``update_time`` / ``time_pass`` 推进；到期的 ``PullUpEvent``
-    会落成 ``SystemEvent`` 再入表。
+    事件对象构造时 ``time`` / ``id`` 为 ``None``；``submit_event`` 用当前表时钟盖戳并分配
+    ``id``。仍为 ``PENDING`` 的事件会进入 pending 队列；``Event.status`` 离开
+    ``PENDING`` 时经 ``_event_updated`` 出队。剧情时钟由 ``update_time`` /
+    ``time_pass`` 推进；到期的 ``PullUpEvent`` 会落成 ``SystemEvent`` 再入表。
     """
 
     scenario: Scenario
     pullup_events: list[PullUpEvent]
     __events: list[Event]
+    __pending_events: list[int]
     __time: datetime
 
     def __init__(self, scenario: Scenario):
         self.scenario = scenario
         self.__events = []
         self.pullup_events = []
+        self.__pending_events: list[int] = []
         if scenario.start_time is None:
             raise ValueError("场景尚未初始化开场时间")
         self.__time = scenario.start_time
@@ -34,6 +37,16 @@ class EventList:
     @property
     def time(self) -> datetime:
         return self.__time
+
+    @property
+    def pending_event_ids(self) -> list[int]:
+        """当前仍为 PENDING 的已入表事件 id（按入队顺序的副本）。"""
+        return list(self.__pending_events)
+
+    @property
+    def pending_events(self) -> list[Event]:
+        """当前仍为 PENDING 的已入表事件（按入队顺序的浅拷贝列表，不影响内部队列）。"""
+        return [self.__events[event_id] for event_id in self.__pending_events]
 
     def pull_up_event(self, pullup: PullUpEvent):
         if pullup.condition.type != "time":
@@ -54,7 +67,7 @@ class EventList:
         ]
         for pullup in due:
             venue_id = self.scenario.venues[0].id
-            self.add_event(
+            self.submit_event(
                 SystemEvent(
                     pullup.content,
                     [],
@@ -76,19 +89,47 @@ class EventList:
             raise ValueError(f"delta_time 不可为负，实际为 {delta_time!r}")
         self.update_time(self.__time + delta_time)
 
-    def add_event(self, event: Event):
+    def submit_event(self, event: Event):
         """将事件登记入表：盖上当前剧情时间并分配 ``id``。"""
         if event.time is not None:
             raise ValueError(
-                f"事件 time 应由 EventList.add_event 设定，当前已为 {event.time!r}"
+                f"事件 time 应由 EventList.submit_event 设定，当前已为 {event.time!r}"
             )
         if event.id is not None:
             raise ValueError(
-                f"事件 id 应由 EventList.add_event 设定，当前已为 {event.id!r}"
+                f"事件 id 应由 EventList.submit_event 设定，当前已为 {event.id!r}"
             )
         event.time = self.__time
         event.id = len(self.__events)
         self.__events.append(event)
+        if event.status == EventStatus.PENDING:
+            self.__pending_events.append(event.id)
+
+    def _event_updated(self, event: Event) -> None:
+        """由 ``Event.status`` setter 在离开 PENDING 时回调；校验归属后移出 pending。
+
+        约定仅供 Event 调用，不作为对外 API。
+        """
+        if event.id is None:
+            raise ValueError("事件尚未入表，不能更新 pending")
+        if (
+            event.id < 0
+            or event.id >= len(self.__events)
+            or self.__events[event.id] is not event
+        ):
+            raise ValueError(
+                f"事件(id={event.id!r}) 不属于本 EventList，不能更新 pending"
+            )
+        if event.status == EventStatus.PENDING:
+            raise ValueError(
+                f"事件(id={event.id}) 仍为 PENDING，不应移出 pending 队列"
+            )
+        try:
+            self.__pending_events.remove(event.id)
+        except ValueError as exc:
+            raise ValueError(
+                f"事件(id={event.id}) 不在 pending 队列中"
+            ) from exc
 
     def get_events(self, rep: str) -> list[Event]:
         """返回对 ``rep`` 可见的事件。

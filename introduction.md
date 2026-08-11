@@ -36,7 +36,7 @@ scenario-template/
 
 角色卡分为 `public` 与 `private`。引擎必须在构建代表上下文前完成可见性过滤，不能把所有秘密交给 Agent 后再要求它“假装不知道”。
 
-运行时 `simulation/` 中的工作文件与提交副本同样受程序可见性约束：`reps/` 由 `scope`/`owner` 控制；`submissions/` 不对代表直接开放列表，代表只能通过 `EventList` 里对其可见、并绑定了对应 `File` 的事件间接获知 submission。运行时事件的剧情时间不在构造时传入，而由 `EventList.add_event` 按当前时钟盖戳。
+运行时 `simulation/` 中的工作文件与提交副本同样受程序可见性约束：`reps/` 由 `scope`/`owner` 控制；`submissions/` 不对代表直接开放列表，代表只能通过 `EventList` 里对其可见、并绑定了对应 `File` 的事件间接获知 submission。运行时事件的剧情时间不在构造时传入，而由 `EventList.submit_event` 按当前时钟盖戳。
 
 两个区块内都使用局部字段名 `target`，即 `public.target` 与 `private.target`。可见性已经由父级区块表达，不再使用 `public_target`、`private_target` 或 `priorities` 等重复命名。
 
