@@ -1,0 +1,545 @@
+"""RepresentativeAgent 可调用的工具:ToolSpec 定义 + 对 Representative 的分发执行."""
+
+from __future__ import annotations
+
+import json
+from typing import Any, Callable
+
+from agenda.agenda import Agenda
+from llm.types import ToolCall, ToolSpec
+from scenario.representative import Representative
+from scenario.venue import SessionPhase
+
+_PHASE_VALUES = [p.value for p in SessionPhase]
+
+Handler = Callable[[Representative, dict[str, Any]], Any]
+
+
+def _file_ref(file) -> dict[str, Any]:
+    fs = file._filesystem
+    rel = fs._relkey(file.path) if fs is not None else str(file.path)
+    return {
+        "path": rel,
+        "name": file.path.name,
+        "description": file.description,
+        "owners": sorted(file.owners),
+        "scope": sorted(file.scope),
+        "is_submission": file.is_submission,
+        "primary_owner": file.primary_owner,
+    }
+
+
+def _agenda_ref(agenda: Agenda) -> dict[str, Any]:
+    return {
+        "id": agenda.id,
+        "title": agenda.title,
+        "questions": list(agenda.questions),
+    }
+
+
+def _event_ref(event) -> dict[str, Any]:
+    return {
+        "id": event.id,
+        "type": event.type.value if event.type is not None else None,
+        "content": event.content,
+        "status": event.status.value,
+        "venue": event.venue,
+        "scope": sorted(event.scope),
+    }
+
+
+def _as_str_list(value: Any, *, field: str) -> list[str]:
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, list) and all(isinstance(item, str) for item in value):
+        return list(value)
+    raise ValueError(f"{field} 须为字符串或字符串列表")
+
+
+def _resolve_file(rep: Representative, path: str):
+    """按相对路径或本代表目录下文件名解析 File.
+
+    ``reps/`` 文件须对本代表可见;``submissions/`` 副本允许按路径引用
+    (用于 Instruction/Resolution 绑定,不经由 list_visible 发现).
+    """
+    raw = path.strip()
+    if not raw:
+        raise ValueError("path 不能为空")
+    fs = rep._require_filesystem()
+    candidates = [raw]
+    if "/" not in raw:
+        candidates.append(f"reps/{rep.id}/{raw}")
+    wanted: set[str] = set()
+    for key in candidates:
+        try:
+            wanted.add(fs._relkey(fs._resolve(key)))
+        except ValueError:
+            wanted.add(key.replace("\\", "/"))
+    for file in fs.list_all():
+        rel = fs._relkey(file.path)
+        if rel not in wanted and file.path.name != raw:
+            continue
+        if file.is_submission or file.visible_to(rep.id):
+            return file
+    raise ValueError(f"找不到可访问的文件: {path!r}")
+
+
+def _ok(result: Any = None) -> dict[str, Any]:
+    payload: dict[str, Any] = {"ok": True}
+    if result is not None:
+        payload["result"] = result
+    return payload
+
+
+def _err(exc: BaseException) -> dict[str, Any]:
+    return {"ok": False, "error": str(exc), "error_type": type(exc).__name__}
+
+
+# ---- handlers ----
+
+
+def _list_visible_files(rep: Representative, args: dict[str, Any]) -> dict[str, Any]:
+    return _ok([_file_ref(f) for f in rep.list_visible()])
+
+
+def _list_writable_files(rep: Representative, args: dict[str, Any]) -> dict[str, Any]:
+    return _ok([_file_ref(f) for f in rep.list_writable()])
+
+
+def _read_file(rep: Representative, args: dict[str, Any]) -> dict[str, Any]:
+    path = str(args["path"])
+    file = _resolve_file(rep, path)
+    return _ok({"path": _file_ref(file)["path"], "content": rep.read_file(file)})
+
+
+def _write_file(rep: Representative, args: dict[str, Any]) -> dict[str, Any]:
+    path = str(args["path"])
+    content = str(args["content"])
+    file = _resolve_file(rep, path)
+    rep.write_file(file, content)
+    return _ok({"path": _file_ref(file)["path"], "written": True})
+
+
+def _create_file(rep: Representative, args: dict[str, Any]) -> dict[str, Any]:
+    file = rep.create_file(
+        str(args["name"]),
+        str(args["content"]),
+        str(args["description"]),
+    )
+    return _ok(_file_ref(file))
+
+
+def _add_scope(rep: Representative, args: dict[str, Any]) -> dict[str, Any]:
+    file = _resolve_file(rep, str(args["path"]))
+    others = _as_str_list(args["others"], field="others")
+    rep.add_scope(file, set(others))
+    return _ok(_file_ref(file))
+
+
+def _add_owner(rep: Representative, args: dict[str, Any]) -> dict[str, Any]:
+    file = _resolve_file(rep, str(args["path"]))
+    others = _as_str_list(args["others"], field="others")
+    rep.add_owner(file, set(others))
+    return _ok(_file_ref(file))
+
+
+def _submit_file(rep: Representative, args: dict[str, Any]) -> dict[str, Any]:
+    file = _resolve_file(rep, str(args["path"]))
+    submitted = rep.submit_file(file)
+    return _ok(_file_ref(submitted))
+
+
+def _can_submit(rep: Representative, args: dict[str, Any]) -> dict[str, Any]:
+    file = _resolve_file(rep, str(args["path"]))
+    return _ok({"path": _file_ref(file)["path"], "can_submit": rep.can_submit(file)})
+
+
+def _set_description(rep: Representative, args: dict[str, Any]) -> dict[str, Any]:
+    file = _resolve_file(rep, str(args["path"]))
+    rep.set_description(file, str(args["description"]))
+    return _ok(_file_ref(file))
+
+
+def _send_message(rep: Representative, args: dict[str, Any]) -> dict[str, Any]:
+    event = rep.send_message(str(args["content"]))
+    return _ok(_event_ref(event))
+
+
+def _pass_note(rep: Representative, args: dict[str, Any]) -> dict[str, Any]:
+    to = _as_str_list(args["to"], field="to")
+    event = rep.pass_note(str(args["content"]), set(to))
+    return _ok(_event_ref(event))
+
+
+def _submit_motion_switch(rep: Representative, args: dict[str, Any]) -> dict[str, Any]:
+    event = rep.submit_motion_switch(
+        str(args["content"]),
+        str(args["target_phase"]),
+    )
+    return _ok(_event_ref(event))
+
+
+def _submit_phase_switch(rep: Representative, args: dict[str, Any]) -> dict[str, Any]:
+    event = rep.submit_phase_switch(
+        str(args["content"]),
+        str(args["target_phase"]),
+    )
+    return _ok(_event_ref(event))
+
+
+def _submit_instruction(rep: Representative, args: dict[str, Any]) -> dict[str, Any]:
+    fr = set(_as_str_list(args["fr"], field="fr"))
+    file = _resolve_file(rep, str(args["path"]))
+    event = rep.submit_instruction(str(args["content"]), fr, file)
+    return _ok(_event_ref(event))
+
+
+def _submit_resolution(rep: Representative, args: dict[str, Any]) -> dict[str, Any]:
+    fr = set(_as_str_list(args["fr"], field="fr"))
+    file = _resolve_file(rep, str(args["path"]))
+    event = rep.submit_resolution(str(args["content"]), fr, file)
+    return _ok(_event_ref(event))
+
+
+def _list_agendas(rep: Representative, args: dict[str, Any]) -> dict[str, Any]:
+    current = rep.current_agenda
+    return _ok(
+        {
+            "current": _agenda_ref(current) if current is not None else None,
+            "todo": [_agenda_ref(a) for a in rep.todo_agenda],
+            "finished": [_agenda_ref(a) for a in rep.finished_agenda],
+        }
+    )
+
+
+def _get_agenda(rep: Representative, args: dict[str, Any]) -> dict[str, Any]:
+    return _ok(_agenda_ref(rep.get_agenda(str(args["agenda_id"]))))
+
+
+def _set_current_agenda(rep: Representative, args: dict[str, Any]) -> dict[str, Any]:
+    agenda = rep.get_agenda(str(args["agenda_id"]))
+    finished = bool(args.get("finished", False))
+    rep.set_current_agenda(agenda, finished=finished)
+    current = rep.current_agenda
+    return _ok(
+        {
+            "current": _agenda_ref(current) if current is not None else None,
+            "finished_flag": finished,
+        }
+    )
+
+
+def _add_agenda(rep: Representative, args: dict[str, Any]) -> dict[str, Any]:
+    questions = args.get("questions", [])
+    if not isinstance(questions, list) or not all(isinstance(q, str) for q in questions):
+        raise ValueError("questions 须为字符串列表")
+    agenda = Agenda(str(args["agenda_id"]), str(args["title"]), list(questions))
+    rep.add_agenda(agenda)
+    return _ok(_agenda_ref(agenda))
+
+
+def _get_session_info(rep: Representative, args: dict[str, Any]) -> dict[str, Any]:
+    venue = rep._require_venue()
+    return _ok(
+        {
+            "rep_id": rep.id,
+            "is_chair": rep.is_chair,
+            "venue_id": venue.id,
+            "session_phase": (
+                venue.session_phase.value if venue.session_phase is not None else None
+            ),
+            "chair": venue.chair,
+            "seats": list(venue.seats),
+            "chair_power": {
+                power.value: bool(enabled)
+                for power, enabled in venue.chair_power.items()
+            },
+        }
+    )
+
+
+def _list_visible_events(rep: Representative, args: dict[str, Any]) -> dict[str, Any]:
+    events = rep._require_event_list().get_events(rep.id)
+    return _ok([_event_ref(e) for e in events])
+
+
+_HANDLERS: dict[str, Handler] = {
+    "list_visible_files": _list_visible_files,
+    "list_writable_files": _list_writable_files,
+    "read_file": _read_file,
+    "write_file": _write_file,
+    "create_file": _create_file,
+    "add_scope": _add_scope,
+    "add_owner": _add_owner,
+    "submit_file": _submit_file,
+    "can_submit": _can_submit,
+    "set_description": _set_description,
+    "send_message": _send_message,
+    "pass_note": _pass_note,
+    "submit_motion_switch": _submit_motion_switch,
+    "submit_phase_switch": _submit_phase_switch,
+    "submit_instruction": _submit_instruction,
+    "submit_resolution": _submit_resolution,
+    "list_agendas": _list_agendas,
+    "get_agenda": _get_agenda,
+    "set_current_agenda": _set_current_agenda,
+    "add_agenda": _add_agenda,
+    "get_session_info": _get_session_info,
+    "list_visible_events": _list_visible_events,
+}
+
+
+def _tool(
+    name: str,
+    description: str,
+    properties: dict[str, Any],
+    required: list[str] | None = None,
+) -> ToolSpec:
+    return ToolSpec(
+        name=name,
+        description=description,
+        parameters={
+            "type": "object",
+            "properties": properties,
+            "required": required or [],
+            "additionalProperties": False,
+        },
+    )
+
+
+_PATH_PROP = {
+    "type": "string",
+    "description": (
+        "文件路径:可用 FileSystem 相对路径"
+        "(如 reps/<rep_id>/draft.md 或 submissions/<venue_id>/...),"
+        "或本代表目录下的文件名"
+    ),
+}
+
+_PHASE_PROP = {
+    "type": "string",
+    "enum": _PHASE_VALUES,
+    "description": "目标会议阶段",
+}
+
+_OTHERS_PROP = {
+    "oneOf": [
+        {"type": "string"},
+        {"type": "array", "items": {"type": "string"}, "minItems": 1},
+    ],
+    "description": "一个或多个代表 ID",
+}
+
+REP_TOOL_SPECS: list[ToolSpec] = [
+    _tool(
+        "get_session_info",
+        "查看本代表身份、会场阶段、主席与席位等信息",
+        {},
+    ),
+    _tool(
+        "list_visible_events",
+        "列出对本代表可见的已入表事件",
+        {},
+    ),
+    _tool(
+        "list_agendas",
+        "列出当前/待审议/已结束议题",
+        {},
+    ),
+    _tool(
+        "get_agenda",
+        "按 ID 获取本会场议题详情",
+        {
+            "agenda_id": {"type": "string", "description": "议题 ID"},
+        },
+        ["agenda_id"],
+    ),
+    _tool(
+        "set_current_agenda",
+        "切换当前议题(须为主席)",
+        {
+            "agenda_id": {"type": "string", "description": "要设为当前的议题 ID"},
+            "finished": {
+                "type": "boolean",
+                "description": "是否将原当前议题记入 finished,默认 false",
+            },
+        },
+        ["agenda_id"],
+    ),
+    _tool(
+        "add_agenda",
+        "向 todo 追加新议题(须为主席)",
+        {
+            "agenda_id": {"type": "string", "description": "新议题 ID"},
+            "title": {"type": "string", "description": "议题标题"},
+            "questions": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "议题问题列表",
+            },
+        },
+        ["agenda_id", "title", "questions"],
+    ),
+    _tool("list_visible_files", "列出本代表可见的 reps/ 文件", {}),
+    _tool("list_writable_files", "列出本代表可写的 reps/ 文件", {}),
+    _tool(
+        "read_file",
+        "读取可见文件内容",
+        {"path": _PATH_PROP},
+        ["path"],
+    ),
+    _tool(
+        "write_file",
+        "覆盖写入已有文件(须为 owner)",
+        {
+            "path": _PATH_PROP,
+            "content": {"type": "string", "description": "新文件全文"},
+        },
+        ["path", "content"],
+    ),
+    _tool(
+        "create_file",
+        "在本代表目录下创建新文件",
+        {
+            "name": {
+                "type": "string",
+                "description": "文件名,如 draft.md(不要含目录)",
+            },
+            "content": {"type": "string", "description": "初始内容"},
+            "description": {
+                "type": "string",
+                "description": "不超过 20 字的简述",
+            },
+        },
+        ["name", "content", "description"],
+    ),
+    _tool(
+        "add_scope",
+        "扩大文件可见范围(须为 owner)",
+        {"path": _PATH_PROP, "others": _OTHERS_PROP},
+        ["path", "others"],
+    ),
+    _tool(
+        "add_owner",
+        "将已在 scope 中的代表提升为 owner(须为 owner)",
+        {"path": _PATH_PROP, "others": _OTHERS_PROP},
+        ["path", "others"],
+    ),
+    _tool(
+        "submit_file",
+        "将文件提交到 submissions/(须为 owner)",
+        {"path": _PATH_PROP},
+        ["path"],
+    ),
+    _tool(
+        "can_submit",
+        "判断当前是否可将该文件提交到 submissions/",
+        {"path": _PATH_PROP},
+        ["path"],
+    ),
+    _tool(
+        "set_description",
+        "修改文件简述(须为 owner)",
+        {
+            "path": _PATH_PROP,
+            "description": {"type": "string", "description": "不超过 20 字"},
+        },
+        ["path", "description"],
+    ),
+    _tool(
+        "send_message",
+        "会场公开发言(全会场可见)",
+        {"content": {"type": "string", "description": "发言正文"}},
+        ["content"],
+    ),
+    _tool(
+        "pass_note",
+        "传纸条(仅自己与收件人可见)",
+        {
+            "content": {"type": "string", "description": "纸条正文"},
+            "to": _OTHERS_PROP,
+        },
+        ["content", "to"],
+    ),
+    _tool(
+        "submit_motion_switch",
+        "提出阶段切换动议(不立即改阶段,PENDING)",
+        {
+            "content": {"type": "string", "description": "动议说明"},
+            "target_phase": _PHASE_PROP,
+        },
+        ["content", "target_phase"],
+    ),
+    _tool(
+        "submit_phase_switch",
+        "主席直接切换会议阶段(须具备 decide_switch_phase)",
+        {
+            "content": {"type": "string", "description": "裁定说明"},
+            "target_phase": _PHASE_PROP,
+        },
+        ["content", "target_phase"],
+    ),
+    _tool(
+        "submit_instruction",
+        "提交指示事件,绑定一份 submissions/ 文件;fr 为可见代表集合",
+        {
+            "content": {"type": "string", "description": "指示说明"},
+            "fr": {
+                "type": "array",
+                "items": {"type": "string"},
+                "minItems": 1,
+                "description": "可见/关联代表 ID 列表(含自己)",
+            },
+            "path": {
+                **_PATH_PROP,
+                "description": "须为 submissions/ 下已提交副本的路径",
+            },
+        },
+        ["content", "fr", "path"],
+    ),
+    _tool(
+        "submit_resolution",
+        "提交决议事件,绑定一份 submissions/ 文件;fr 为可见代表集合",
+        {
+            "content": {"type": "string", "description": "决议说明"},
+            "fr": {
+                "type": "array",
+                "items": {"type": "string"},
+                "minItems": 1,
+                "description": "可见/关联代表 ID 列表",
+            },
+            "path": {
+                **_PATH_PROP,
+                "description": "须为 submissions/ 下已提交副本的路径",
+            },
+        },
+        ["content", "fr", "path"],
+    ),
+]
+
+
+class RepresentativeToolExecutor:
+    """把 LLM ToolCall 分发到 ``Representative`` 方法,返回 JSON 字符串供 role=tool 回喂."""
+
+    def __init__(self, rep: Representative) -> None:
+        self.rep = rep
+
+    @property
+    def tool_specs(self) -> list[ToolSpec]:
+        return list(REP_TOOL_SPECS)
+
+    def execute(self, call: ToolCall) -> str:
+        handler = _HANDLERS.get(call.name)
+        if handler is None:
+            return json.dumps(
+                _err(ValueError(f"未知工具: {call.name!r}")),
+                ensure_ascii=False,
+            )
+        try:
+            args = json.loads(call.arguments or "{}")
+            if not isinstance(args, dict):
+                raise ValueError("工具参数必须是 JSON 对象")
+            payload = handler(self.rep, args)
+        except Exception as exc:
+            payload = _err(exc)
+        return json.dumps(payload, ensure_ascii=False)

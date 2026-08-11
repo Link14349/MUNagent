@@ -343,7 +343,7 @@ def test_pending_queue_on_submit_and_status_leave(
         events._event_updated(outsider)
 
 
-def test_completed_note_and_message_cot_permissions(
+def test_completed_note_and_message_permissions(
     scenario: Scenario, events: EventList, venue_id: str
 ) -> None:
     note = NoteEvent("密信", CHURCHILL, {EDEN}, venue_id, scenario)
@@ -356,18 +356,16 @@ def test_completed_note_and_message_cot_permissions(
 
     msg = MessageEvent(
         "公开发言",
-        "内心:试探斯大林底线",
         CHURCHILL,
         venue_id,
         scenario,
     )
     events.submit_event(msg)
     assert set(msg.scope) == {rep.id for rep in scenario.representatives}
-    assert msg.get_CoT(CHURCHILL) == "内心:试探斯大林底线"
-    with pytest.raises(ValueError, match="Not the sender"):
-        msg.get_CoT(STALIN)
-    with pytest.raises(PermissionError, match="不能修改 CoT"):
-        msg.CoT = "偷改思维链"
+    with pytest.raises(PermissionError, match="不能修改 content"):
+        msg.content = "篡改发言"
+    with pytest.raises(PermissionError, match="不能修改 from_rep"):
+        msg.from_rep = STALIN
 
 
 def test_instruction_event_is_only_visible_via_scope(

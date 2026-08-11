@@ -211,12 +211,12 @@ class Representative:
             )
 
     # 与 EventList 的交互通道
-    def send_message(self, content: str, cot: str) -> MessageEvent:
+    def send_message(self, content: str) -> MessageEvent:
         """以本代表身份公开发言,提交 ``MessageEvent``(全会场可见)."""
         from event.event import MessageEvent
 
         venue = self._require_venue()
-        event = MessageEvent(content, cot, self.id, venue.id, venue.scenario)
+        event = MessageEvent(content, self.id, venue.id, venue.scenario)
         self._require_event_list().submit_event(event)
         return event
 

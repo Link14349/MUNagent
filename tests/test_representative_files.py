@@ -159,16 +159,13 @@ def test_representative_send_message(scenario: Scenario) -> None:
     stalin = _rep(scenario, STALIN)
     assert scenario.event_list is not None
 
-    msg = churchill.send_message("希腊事务应交由伦敦主导", "先试探斯大林是否接受 90/10")
+    msg = churchill.send_message("希腊事务应交由伦敦主导")
     assert msg.id is not None
     assert msg.from_rep == CHURCHILL
     assert msg.content == "希腊事务应交由伦敦主导"
-    assert msg.get_CoT(CHURCHILL) == "先试探斯大林是否接受 90/10"
     assert churchill.venue is not None
     assert set(msg.scope) == set(churchill.venue.seats)
     assert msg in scenario.event_list.get_events(STALIN)
-    with pytest.raises(ValueError, match="Not the sender"):
-        msg.get_CoT(STALIN)
 
 
 def test_representative_pass_note(scenario: Scenario) -> None:

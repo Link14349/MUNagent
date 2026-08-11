@@ -15,7 +15,15 @@ import httpx
 from config.load import load_config
 from config.models import AppConfig
 from llm.stream import ChunkParser
-from llm.types import ChatMessage, StreamDelta, TextDelta, ThinkDelta, UsageDelta
+from llm.types import (
+    ChatMessage,
+    StreamDelta,
+    TextDelta,
+    ThinkDelta,
+    ToolChoice,
+    ToolSpec,
+    UsageDelta,
+)
 
 
 class LLMCancelledError(Exception):
@@ -72,6 +80,8 @@ class LLM:
         messages: list[ChatMessage],
         *,
         max_tokens: int,
+        tools: list[ToolSpec] | None = None,
+        tool_choice: ToolChoice | None = None,
     ) -> tuple[str, dict[str, str], dict[str, Any]]:
         base_url, api_key = self._resolve_provider()
         payload: dict[str, Any] = {
@@ -82,6 +92,12 @@ class LLM:
             "stream_options": {"include_usage": True},
             "thinking": {"type": "enabled" if self.thinking else "disabled"},
         }
+        if tools:
+            payload["tools"] = [tool.to_payload() for tool in tools]
+            if tool_choice is not None:
+                payload["tool_choice"] = tool_choice
+        elif tool_choice is not None:
+            raise ValueError("传入 tool_choice 时必须同时提供 tools")
         url = f"{self._normalize_base_url(base_url)}/chat/completions"
         headers = {
             "Authorization": f"Bearer {api_key}",
@@ -98,10 +114,21 @@ class LLM:
         messages: list[ChatMessage],
         *,
         max_tokens: int = 4096,
+        tools: list[ToolSpec] | None = None,
+        tool_choice: ToolChoice | None = None,
         on_delta: Callable[[StreamDelta], None] | None = None,
     ) -> AsyncIterator[StreamDelta]:
-        """流式 chat/completions; 首个增量产出前可静默重试."""
-        url, headers, payload = self._build_payload(messages, max_tokens=max_tokens)
+        """流式 chat/completions; 首个增量产出前可静默重试.
+
+        ``tools`` 为 OpenAI function tools 列表;流中会产出 ``ToolCallDelta`` 片段,
+        结束时若有完整调用再产出 ``ToolCallsDelta``.
+        """
+        url, headers, payload = self._build_payload(
+            messages,
+            max_tokens=max_tokens,
+            tools=tools,
+            tool_choice=tool_choice,
+        )
         timeout = httpx.Timeout(
             connect=10.0,
             read=self._stream_read_timeout_s,
@@ -158,11 +185,19 @@ class LLM:
         messages: list[ChatMessage],
         *,
         max_tokens: int = 4096,
+        tools: list[ToolSpec] | None = None,
+        tool_choice: ToolChoice | None = None,
         on_delta: Callable[[StreamDelta], None] | None = None,
     ) -> str:
-        """消费 stream 并拼接正文; thinking 内容不计入返回值."""
+        """消费 stream 并拼接正文; thinking / tool_call 增量不计入返回值."""
         parts: list[str] = []
-        async for delta in self.stream(messages, max_tokens=max_tokens, on_delta=on_delta):
+        async for delta in self.stream(
+            messages,
+            max_tokens=max_tokens,
+            tools=tools,
+            tool_choice=tool_choice,
+            on_delta=on_delta,
+        ):
             if isinstance(delta, TextDelta):
                 parts.append(delta.text)
         return "".join(parts)

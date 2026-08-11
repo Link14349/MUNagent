@@ -617,7 +617,6 @@ class MessageEvent(Event):
     def __init__(
         self,
         content: str,
-        CoT: str,
         fr: str,
         venue: str,
         scenario: Scenario,
@@ -626,7 +625,6 @@ class MessageEvent(Event):
         super().__init__(content, venue, set(seats), scenario)
         self._set_type(EventType.MESSAGE)
         self.__from = fr
-        self.__CoT = CoT
         self._init_status(EventStatus.COMPLETED)
 
     @property
@@ -639,20 +637,6 @@ class MessageEvent(Event):
         if not value.strip():
             raise ValueError("from_rep 须为非空字符串")
         self.__from = value.strip()
-
-    def get_CoT(self, rep: str) -> str:
-        if rep != self.__from:
-            raise ValueError("Not the sender of this message")
-        return self.__CoT
-
-    @property
-    def CoT(self) -> str:
-        return self.__CoT
-
-    @CoT.setter
-    def CoT(self, value: str) -> None:
-        self._require_editable("CoT")
-        self.__CoT = value
 
 
 class ChatEvent(Event):
@@ -662,7 +646,6 @@ class ChatEvent(Event):
         self,
         content: str,
         fr: str,
-        CoT: str,
         group: Group,
         venue: str,
         scenario: Scenario,
@@ -670,7 +653,6 @@ class ChatEvent(Event):
         super().__init__(content, venue, group.members, scenario)
         self._set_type(EventType.CHAT)
         self.__from = fr
-        self.__CoT = CoT
         self._init_status(EventStatus.COMPLETED)
 
     @property
@@ -683,20 +665,6 @@ class ChatEvent(Event):
         if not value.strip():
             raise ValueError("from_rep 须为非空字符串")
         self.__from = value.strip()
-
-    def get_CoT(self, rep: str) -> str:
-        if rep != self.__from:
-            raise ValueError("Not the sender of this message")
-        return self.__CoT
-
-    @property
-    def CoT(self) -> str:
-        return self.__CoT
-
-    @CoT.setter
-    def CoT(self, value: str) -> None:
-        self._require_editable("CoT")
-        self.__CoT = value
 
 
 def _normalize_venue_id(venue: str, scenario: Scenario) -> str:

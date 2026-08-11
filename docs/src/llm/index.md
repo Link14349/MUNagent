@@ -213,13 +213,14 @@ LLM(
 | `stream_read_timeout_s` | 相邻 SSE 行之间的读超时(秒) |
 | `transport` | 注入 `httpx` transport,用于 mock 测试 |
 
-#### `async stream(messages, *, max_tokens=4096, on_delta=None)`
+#### `async stream(messages, *, max_tokens=4096, tools=None, tool_choice=None, on_delta=None)`
 
 异步迭代 `StreamDelta`.请求始终带 `stream: true` 与 `stream_options.include_usage: true`.
+传入 `tools` 时写入请求体,并可选用 `tool_choice`(`auto` / `none` / `required` 或 OpenAI 对象形式).
 
-#### `async complete(messages, *, max_tokens=4096, on_delta=None) -> str`
+#### `async complete(messages, *, max_tokens=4096, tools=None, tool_choice=None, on_delta=None) -> str`
 
-消费 `stream()` 并返回拼接后的正文.
+消费 `stream()` 并返回拼接后的正文(不含 thinking / tool_call 增量).
 
 #### `stop() -> None`
 
@@ -231,10 +232,29 @@ LLM(
 ChatMessage(role="user", content="...")
 ChatMessage(role="system", content="...")
 ChatMessage(role="assistant", content="...")
-ChatMessage(role="tool", content="...", tool_call_id="call_xxx")
+ChatMessage(
+    role="assistant",
+    content="",
+    tool_calls=[ToolCall(id="call_1", name="send_message", arguments='{"content":"hi"}')],
+)
+ChatMessage(role="tool", content="执行结果", tool_call_id="call_1", name="send_message")
 ```
 
-当前模块只做基础消息封装,不包含 tool calling 拼装逻辑.
+### `ToolSpec`
+
+发给模型的 function tool 定义:
+
+```python
+ToolSpec(
+    name="send_message",
+    description="以本代表身份公开发言",
+    parameters={
+        "type": "object",
+        "properties": {"content": {"type": "string"}},
+        "required": ["content"],
+    },
+)
+```
 
 ### 流式增量类型
 
@@ -242,6 +262,8 @@ ChatMessage(role="tool", content="...", tool_call_id="call_xxx")
 |------|------|------|
 | `ThinkDelta` | `text` | 模型 reasoning 片段;仅展示,不回喂上下文 |
 | `TextDelta` | `text` | 可见回复正文 |
+| `ToolCallDelta` | `index`, `id`, `name`, `arguments` | 流式 tool_call 片段;`arguments` 为本次增量 |
+| `ToolCallsDelta` | `calls` | 流结束时组装出的完整 `ToolCall` 元组 |
 | `UsageDelta` | `prompt_tokens`, `completion_tokens`, `finish_reason` | 流结束时的用量汇总 |
 
 判断方式:
@@ -252,11 +274,39 @@ match delta:
         ...
     case TextDelta(text=t):
         ...
+    case ToolCallDelta() as tc:
+        ...
+    case ToolCallsDelta(calls=calls):
+        ...
     case UsageDelta() as u:
         ...
 ```
 
 或使用 `isinstance()`.
+
+### 工具调用流式示例
+
+```python
+tools = [
+    ToolSpec(
+        name="send_message",
+        description="公开发言",
+        parameters={
+            "type": "object",
+            "properties": {"content": {"type": "string"}},
+            "required": ["content"],
+        },
+    )
+]
+
+async for delta in llm.stream(messages, tools=tools, tool_choice="auto"):
+    if isinstance(delta, ToolCallsDelta):
+        for call in delta.calls:
+            # 执行工具后,把结果以 role=tool 的 ChatMessage 回喂下一轮
+            ...
+```
+
+`stream(..., tools=...)` 会把 tools 写入请求体;流中先产出零到多个 `ToolCallDelta`,结束时若拼出完整调用再产出 `ToolCallsDelta`.
 
 ## 请求体约定
 
@@ -269,9 +319,22 @@ match delta:
   "max_tokens": 4096,
   "stream": true,
   "stream_options": {"include_usage": true},
-  "thinking": {"type": "enabled"}
+  "thinking": {"type": "enabled"},
+  "tools": [
+    {
+      "type": "function",
+      "function": {
+        "name": "send_message",
+        "description": "...",
+        "parameters": {"type": "object", "properties": {}}
+      }
+    }
+  ],
+  "tool_choice": "auto"
 }
 ```
+
+`tools` / `tool_choice` 仅在调用方传入时写入.
 
 兼容 OpenAI Chat Completions 流式 SSE 格式:每行 `data: {...}`,结束为 `data: [DONE]`.
 
@@ -280,7 +343,7 @@ match delta:
 | 异常 | 典型原因 |
 |------|----------|
 | `KeyError` | `provider` 名在 config 中不存在 |
-| `ValueError` | 对应 provider 未配置 `api_key` |
+| `ValueError` | 对应 provider 未配置 `api_key`,或只传了 `tool_choice` 未传 `tools` |
 | `LLMCancelledError` | 调用了 `stop()` 或 CLI 收到中断信号 |
 | `RuntimeError` | HTTP 失败,读超时,或已开始吐字后的断流 |
 
@@ -317,9 +380,9 @@ llm = LLM(config=config, transport=httpx.MockTransport(handler))
 以下能力**尚未**实现,调用方请勿假设存在:
 
 - 非流式(一次性 JSON)请求模式
-- Function calling / tools 参数拼装
 - 多 provider 角色路由(如 chair,delegate 分模型)
 - Token 用量持久化与计费统计
 - 自动把 thinking 内容写回对话历史
+- Agent 层自动执行 tool 并回喂(本模块只负责请求/解析)
 
 如需上述能力,应在引擎层或扩展本模块时同步更新本文档.
