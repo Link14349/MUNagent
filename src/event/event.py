@@ -5,7 +5,7 @@ from enum import StrEnum
 from typing import TYPE_CHECKING
 
 from scenario.group import Group
-from scenario.venue import SessionPhase
+from scenario.venue import SessionPhase, Venue
 
 if TYPE_CHECKING:
     from filesystem.filesystem import File
@@ -15,6 +15,7 @@ if TYPE_CHECKING:
 class EventType(StrEnum):
     SYSTEM = "system"
     MOTION_SWITCH = "motion_switch"
+    PHASE_SWITCH = "phase_switch"
     INSTRUCTION = "instruction"
     RESOLUTION = "resolution"
     VOTE = "vote"
@@ -184,6 +185,12 @@ class SystemEvent(Event):
 
 
 class MotionSwitchEvent(Event):
+    """阶段切换动议:仅提案,不改变会场阶段.
+
+    初始为 ``PENDING``;是否通过取决于后续投票或主席裁定.
+    真正落地切换请使用 :class:`PhaseSwitchEvent`.
+    """
+
     def __init__(
         self,
         content: str,
@@ -204,6 +211,38 @@ class MotionSwitchEvent(Event):
     def target_phase(self, value: SessionPhase | str) -> None:
         self._require_editable("target_phase")
         self.__target_phase = SessionPhase(value)
+
+
+class PhaseSwitchEvent(Event):
+    """会场阶段切换事件:一经构造即切换对应会场的 ``session_phase``.
+
+    与 :class:`MotionSwitchEvent` 不同——后者只是动议,本事件才是真正的阶段变更记录.
+    构造时读取并保存切换前阶段,调用 ``Venue.switch_phase``,状态直接为 ``COMPLETED``.
+    """
+
+    def __init__(
+        self,
+        content: str,
+        target_phase: SessionPhase,
+        venue: str,
+        scope: set[str],
+        scenario: Scenario,
+    ):
+        super().__init__(content, venue, scope, scenario)
+        self._set_type(EventType.PHASE_SWITCH)
+        venue_obj = _find_venue(scenario, self.venue)
+        self.__previous_phase = venue_obj.session_phase
+        self.__target_phase = SessionPhase(target_phase)
+        venue_obj.switch_phase(self.__target_phase)
+        self._init_status(EventStatus.COMPLETED)
+
+    @property
+    def previous_phase(self) -> SessionPhase | None:
+        return self.__previous_phase
+
+    @property
+    def target_phase(self) -> SessionPhase:
+        return self.__target_phase
 
 
 class InstructionEvent(Event):
@@ -595,12 +634,16 @@ def _normalize_venue_id(venue: str, scenario: Scenario) -> str:
     return venue_id
 
 
-def _venue_seats(scenario: Scenario, venue: str) -> list[str]:
+def _find_venue(scenario: Scenario, venue: str) -> Venue:
     venue_id = _normalize_venue_id(venue, scenario)
     for item in scenario.venues:
         if item.id == venue_id:
-            return list(item.seats)
+            return item
     raise ValueError(f"未知会场 ID: {venue_id}")
+
+
+def _venue_seats(scenario: Scenario, venue: str) -> list[str]:
+    return list(_find_venue(scenario, venue).seats)
 
 
 def _normalize_rep_list(values: list[str], *, field: str) -> list[str]:

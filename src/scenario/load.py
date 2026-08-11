@@ -21,7 +21,8 @@ from scenario.load_helpers import (
 )
 from scenario.representative import PrivateTarget, Representative
 from scenario.scenario import Scenario
-from scenario.venue import Agenda, SessionPhase, Venue
+from agenda.agenda import Agenda, AgendaManager
+from scenario.venue import SessionPhase, Venue
 
 
 def load_scenario(path: str | Path) -> Scenario:
@@ -68,8 +69,13 @@ def populate_scenario(scenario: Scenario, scenario_path: str | Path) -> None:
             raise ValueError(f"重复的代表 ID: {rep.id}")
         representatives_by_id[rep.id] = rep
     scenario.representatives = list(representatives_by_id.values())
+    scenario.reps = dict(representatives_by_id)
 
     _validate_cross_references(scenario, venues_by_id, representatives_by_id)
+    for venue in scenario.venues:
+        venue.reps = {
+            seat_id: representatives_by_id[seat_id] for seat_id in venue.seats
+        }
     scenario.event_list = EventList(scenario)
 
 
@@ -209,7 +215,7 @@ def _load_venue(scenario: Scenario, venue_path: Path) -> Venue:
     venue.name = _require_str(data["name"], field=f"{context}.name")
     venue.timezone = _require_str(data["timezone"], field=f"{context}.timezone")
     venue.description = _require_str(data["description"], field=f"{context}.description")
-    venue.initial_agenda = _require_str(
+    initial_agenda_id = _require_str(
         data["initial_agenda"],
         field=f"{context}.initial_agenda",
     )
@@ -220,11 +226,6 @@ def _load_venue(scenario: Scenario, venue_path: Path) -> Venue:
         )
     )
 
-    chair = data["chair"]
-    if not isinstance(chair, str) or not chair.strip():
-        raise ValueError(f"{context}.chair 须为非空字符串")
-    venue.chair = chair.strip()
-
     seats = data["seats"]
     if not isinstance(seats, list) or not seats:
         raise ValueError(f"{context}.seats 须为非空列表")
@@ -234,11 +235,19 @@ def _load_venue(scenario: Scenario, venue_path: Path) -> Venue:
             raise ValueError(f"{context}.seats[{index}] 须为非空代表 ID 字符串")
         venue.seats.append(seat.strip())
 
+    chair = data["chair"]
+    if not isinstance(chair, str) or not chair.strip():
+        raise ValueError(f"{context}.chair 须为非空字符串")
+    # YAML 用 "none" 表示系统主席;引擎侧存为 None
+    chair_id = chair.strip()
+    venue.chair = None if chair_id == "none" else chair_id
+
     agenda_raw = data["agenda"]
     if not isinstance(agenda_raw, list) or not agenda_raw:
         raise ValueError(f"{context}.agenda 须为非空列表")
 
-    venue.agenda = []
+    agenda_list: list[Agenda] = []
+    agenda_ids: set[str] = set()
     for index, item in enumerate(agenda_raw):
         item_context = f"{context}.agenda[{index}]"
         if not isinstance(item, dict):
@@ -254,13 +263,29 @@ def _load_venue(scenario: Scenario, venue_path: Path) -> Venue:
                     f"{item_context}.questions[{q_index}] 须为非空字符串"
                 )
             parsed_questions.append(question.strip())
-        venue.agenda.append(
+        agenda_id = _require_str(item["id"], field=f"{item_context}.id")
+        if agenda_id in agenda_ids:
+            raise ValueError(f"{context}.agenda 存在重复议题 ID: {agenda_id}")
+        agenda_ids.add(agenda_id)
+        agenda_list.append(
             Agenda(
-                id=_require_str(item["id"], field=f"{item_context}.id"),
+                id=agenda_id,
                 title=_require_str(item["title"], field=f"{item_context}.title"),
                 questions=parsed_questions,
             )
         )
+    if initial_agenda_id not in agenda_ids:
+        raise ValueError(
+            f"{context}.initial_agenda 引用未知议题 ID: {initial_agenda_id}"
+        )
+    venue.initial_agenda = initial_agenda_id
+    venue._bind_agenda_manager(
+        AgendaManager(
+            agenda_list,
+            venue,
+            initial_agenda_id=initial_agenda_id,
+        )
+    )
     return venue
 
 
@@ -289,6 +314,8 @@ def _load_representative(
     if venue_id not in venues:
         raise ValueError(f"{context}.venue 引用未知会场: {venue_id}")
     rep.venue = venues[venue_id]
+    # chair 为 None 时表示系统中立主席，没有任何代表 is_chair=True
+    rep.is_chair = venues[venue_id].chair == rep_id
     rep.delegation = _require_str(data["delegation"], field=f"{context}.delegation")
     rep.role = _require_str(data["role"], field=f"{context}.role")
 
@@ -377,10 +404,10 @@ def _validate_cross_references(
 
     for venue in scenario.venues:
         context = f"会场 {venue.id}"
-        if venue.chair != "none" and venue.chair not in rep_ids:
+        if venue.chair is not None and venue.chair not in rep_ids:
             raise ValueError(f"{context}.chair 引用未知代表: {venue.chair}")
-        if venue.chair != "none" and venue.chair not in venue.seats:
-            raise ValueError(f"{context}.chair 必须是 none 或 seats 中的代表 ID")
+        if venue.chair is not None and venue.chair not in venue.seats:
+            raise ValueError(f"{context}.chair 必须是 None 或 seats 中的代表 ID")
 
         seat_ids = set(venue.seats)
         if len(seat_ids) != len(venue.seats):

@@ -14,9 +14,7 @@ seats:
   - anthony_eden
   - vyacheslav_molotov
 
-initial_agenda: >-
-  首先确定"百分比"究竟表示军事责任,政治影响还是磋商权重,随后逐国审议丘吉尔提出的数字,
-  最后处理执行权限,美国立场,复审期限和原始纸条的处置方式.
+initial_agenda: meaning_of_percentages
 agenda:
   - id: meaning_of_percentages
     title: 百分比的性质与适用边界

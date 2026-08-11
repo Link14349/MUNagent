@@ -127,7 +127,7 @@ venue 的 seats 和角色关系中使用的 `winston_churchill` 都指向该文�
 | `description` | `str` | 是 | 空间,保密程度和谈判形态 |
 | `chair` | `str` | 是 | `none` 或代表 ID |
 | `seats` | `list[rep_id]` | 是 | 参加会场的代表 ID 列表 |
-| `initial_agenda` | `str` | 是 | 开场正在处理的议题 |
+| `initial_agenda` | `agenda_id` | 是 | 开场议题 ID,必须引用本文件中的一个 `agenda[].id` |
 | `session_phase` | `session_phase` | 是 | 会场开场时的会议阶段 |
 | `agenda` | `list[agenda_item]` | 是 | 议题阶段和引导问题 |
 
@@ -147,12 +147,14 @@ venue 的 seats 和角色关系中使用的 `winston_churchill` 都指向该文�
 
 ### 6.3 `chair`
 
-`chair` 是单个字符串:
+场景包中 `chair` 是单个字符串:
 
 - `none`:使用系统提供的中立主席;
 - 代表 ID:由该代表担任会场主席,该 ID 必须同时出现在 `seats`.
 
 它不是对象,不包含 `type`,`id` 或 `role` 子字段.
+
+引擎侧 `Venue.chair` 为 `str | None`:`none` 加载为 `None`;赋值时会同步更新相关代表的 `is_chair`.
 
 ### 6.4 `seats[]`
 
@@ -165,7 +167,21 @@ seats:
   - joseph_stalin
 ```
 
-### 6.5 `agenda[]`
+### 6.5 `initial_agenda`
+
+`initial_agenda` 只保存开场议题的 ID,不重复保存标题或问题.该值必须引用同一 venue 文件中的一个 `agenda[].id`.
+加载后由引擎 `AgendaManager` 将其设为会场的 `current_agenda`,其余议题进入 `todo_agenda`:
+
+```yaml
+initial_agenda: meaning_of_percentages
+agenda:
+  - id: meaning_of_percentages
+    title: 百分比的性质与适用边界
+    questions:
+      - 百分比表示什么?
+```
+
+### 6.6 `agenda[]`
 
 | 字段 | 类型 | 说明 |
 |---|---|---|
@@ -331,7 +347,7 @@ end_conditions:
 2. `venues/` 和 `reps/` 中至少各有一个 YAML 文件,且加载器只扫描场景根目录内的这两个固定目录;
 3. 从角色文件名派生的代表 ID,venue 席位和角色文件一一对应;
 4. 每张角色卡包含 `public.target` 和 `private.target`,且不包含旧目标字段;
-5. venue 的 seats,角色关系引用有效代表 ID;chair 为 `none` 或 seats 中的代表 ID;`session_phase` 为合法枚举值;
+5. venue 的 seats,角色关系引用有效代表 ID;chair 为 `none`(引擎侧 `None`) 或 seats 中的代表 ID;`session_phase` 为合法枚举值;`initial_agenda` 引用同一文件内唯一存在的 `agenda[].id`;
 6. storyline 的事件 ID 唯一;event 顶层恰好只包含 `id`,`condition` 和 `content`,且 condition 只包含 `type` 和 `content`;
 7. 每个 `end_conditions[]` 元素恰好只包含 `type` 和 `content`;
 8. 所有 condition 的 `type` 只能是 `time` 或 `text`,前者 content 必须是带 UTC 偏移的 ISO 8601 时间;

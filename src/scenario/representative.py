@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from agenda.agenda import Agenda
     from filesystem.filesystem import File, FileSystem
     from scenario.venue import Venue
 
@@ -22,6 +23,7 @@ class Representative:
     id: str
     name: str
     venue: Venue | None
+    is_chair: bool
     delegation: str
     role: str
     title: str
@@ -41,6 +43,7 @@ class Representative:
         self.id = ""
         self.name = ""
         self.venue = None
+        self.is_chair = False
         self.delegation = ""
         self.role = ""
         self.title = ""
@@ -56,17 +59,48 @@ class Representative:
         self._persona = {}
         self._agent_directive = ""
 
-
-    # 与Filesystem的交互通道
-    def _require_filesystem(self) -> FileSystem:
+    def _require_venue(self) -> Venue:
         if not self.id:
             raise RuntimeError("代表尚未设置 id")
         if self.venue is None:
-            raise RuntimeError(f"代表 {self.id} 未绑定会场,无法访问 FileSystem")
-        filesystem = self.venue.scenario.filesystem
+            raise RuntimeError(f"代表 {self.id} 未绑定会场")
+        return self.venue
+
+    # 与 Agenda / Venue 的交互通道
+    @property
+    def current_agenda(self) -> Agenda | None:
+        """当前会场正在审议的议题."""
+        return self._require_venue().current_agenda
+
+    @property
+    def todo_agenda(self) -> list[Agenda]:
+        """待审议议题列表副本."""
+        return self._require_venue().todo_agenda
+
+    @property
+    def finished_agenda(self) -> list[Agenda]:
+        """已结束议题列表副本."""
+        return self._require_venue().finished_agenda
+
+    def get_agenda(self, agenda_id: str) -> Agenda:
+        """按 ID 获取本会场议题."""
+        return self._require_venue().get_agenda(agenda_id)
+
+    def set_current_agenda(self, agenda: Agenda, finished: bool = False) -> None:
+        """以本代表身份切换当前议题(须为主席)."""
+        self._require_venue().set_current_agenda(self.id, agenda, finished=finished)
+
+    def add_agenda(self, agenda: Agenda) -> None:
+        """以本代表身份向 todo 追加议题(须为主席)."""
+        self._require_venue().add_agenda(self.id, agenda)
+
+    # 与Filesystem的交互通道
+    def _require_filesystem(self) -> FileSystem:
+        venue = self._require_venue()
+        filesystem = venue.scenario.filesystem
         if filesystem is None:
             raise RuntimeError(
-                f"代表 {self.id} 所在 Scenario 尚未 initialize,FileSystem 不可用"
+                f"代表 {self.id} 所在 Scenario 尚未 initialize，FileSystem 不可用"
             )
         return filesystem
 
@@ -79,26 +113,26 @@ class Representative:
         return filesystem
 
     def list_visible(self) -> list[File]:
-        """列出本代表在 ``reps/`` 下可见的文件."""
+        """列出本代表在 ``reps/`` 下可见的文件。"""
         return self._require_filesystem().list_visible(self.id)
 
     def list_writable(self) -> list[File]:
-        """列出本代表在 ``reps/`` 下可写的文件."""
+        """列出本代表在 ``reps/`` 下可写的文件。"""
         return self._require_filesystem().list_writable(self.id)
 
     def read_file(self, file: File) -> str:
-        """以本代表身份读取 ``file`` 内容(须在其 scope 内)."""
+        """以本代表身份读取 ``file`` 内容(须在其 scope 内)。"""
         self._require_managed_file(file)
         return file.get_content(self.id)
 
     def write_file(self, file: File, content: str) -> None:
-        """以本代表身份写入 ``file`` 内容(须为其 owner)并落盘."""
+        """以本代表身份写入 ``file`` 内容(须为其 owner)并落盘。"""
         filesystem = self._require_managed_file(file)
         relative = filesystem._relkey(file.path)
         filesystem.write(relative, self.id, content)
 
     def create_file(self, name: str, content: str, description: str) -> File:
-        """在本代表目录下创建新文件;``description`` 为不超过 20 字的简述."""
+        """在本代表目录下创建新文件；``description`` 为不超过 20 字的简述。"""
         return self._require_filesystem().create_rep_file(
             self.id,
             name,
@@ -107,31 +141,31 @@ class Representative:
         )
 
     def add_scope(self, file: File, others: str | set[str]) -> None:
-        """以本代表身份扩大 ``file`` 的可见范围(须为其 owner)."""
+        """以本代表身份扩大 ``file`` 的可见范围(须为其 owner)。"""
         filesystem = self._require_managed_file(file)
         relative = filesystem._relkey(file.path)
         newcomers = {others} if isinstance(others, str) else others
         filesystem.add_scope(relative, self.id, newcomers)
 
     def add_owner(self, file: File, others: str | set[str]) -> None:
-        """以本代表身份将已在 scope 中的对象提升为 owner(须为其 owner)."""
+        """以本代表身份将已在 scope 中的对象提升为 owner(须为其 owner)。"""
         filesystem = self._require_managed_file(file)
         relative = filesystem._relkey(file.path)
         newcomers = {others} if isinstance(others, str) else others
         filesystem.add_owner(relative, self.id, newcomers)
 
     def submit_file(self, file: File) -> File:
-        """以本代表身份将 ``file`` 提交到 ``submissions/``(须为其 owner)."""
+        """以本代表身份将 ``file`` 提交到 ``submissions/``(须为其 owner)。"""
         self._require_managed_file(file)
         return file.submit(self.id)
 
     def can_submit(self, file: File) -> bool:
-        """判断本代表是否可将 ``file`` 提交到 ``submissions/``."""
+        """判断本代表是否可将 ``file`` 提交到 ``submissions/``。"""
         self._require_managed_file(file)
         return file.can_submit(self.id)
 
     def set_description(self, file: File, description: str) -> None:
-        """以本代表身份修改 ``file`` 简述(须为其 owner)并写入 manifest."""
+        """以本代表身份修改 ``file`` 简述(须为其 owner)并写入 manifest。"""
         filesystem = self._require_managed_file(file)
         relative = filesystem._relkey(file.path)
         filesystem.set_description(relative, self.id, description)

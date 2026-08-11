@@ -24,6 +24,7 @@ class Scenario:
     end_conditions: list[Condition]
     venues: list[Venue]
     representatives: list[Representative]
+    reps: dict[str, Representative]
     event_list: EventList | None
     root_path: Path | None
     filesystem: FileSystem | None
@@ -39,6 +40,7 @@ class Scenario:
         self.end_conditions = []
         self.venues = []
         self.representatives = []
+        self.reps = {}
         self.event_list = None
         self.root_path = None
         self.filesystem = None

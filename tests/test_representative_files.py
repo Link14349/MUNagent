@@ -32,6 +32,42 @@ def _rep(scenario: Scenario, rep_id: str):
     raise AssertionError(f"missing rep {rep_id}")
 
 
+def test_scenario_and_venue_reps_index(scenario: Scenario) -> None:
+    venue = scenario.venues[0]
+    assert venue.initial_agenda == "meaning_of_percentages"
+    assert venue.current_agenda is not None
+    assert venue.current_agenda.id == venue.initial_agenda
+    assert set(scenario.reps) == {rep.id for rep in scenario.representatives}
+    assert set(venue.reps) == set(venue.seats)
+    for rep_id, rep in scenario.reps.items():
+        assert rep is scenario.reps[rep_id]
+        assert rep.id == rep_id
+    for seat_id in venue.seats:
+        assert venue.reps[seat_id] is scenario.reps[seat_id]
+
+
+def test_representative_is_chair_from_venue(scenario: Scenario) -> None:
+    # 模板会场 chair: none → 引擎侧 None，全体代表均非主席
+    venue = scenario.venues[0]
+    assert venue.chair is None
+    assert all(not rep.is_chair for rep in scenario.representatives)
+    for rep in scenario.representatives:
+        assert rep.is_chair is (rep.venue is not None and rep.venue.chair == rep.id)
+
+    venue.chair = CHURCHILL
+    assert venue.chair == CHURCHILL
+    assert _rep(scenario, CHURCHILL).is_chair is True
+    assert _rep(scenario, STALIN).is_chair is False
+
+    venue.chair = STALIN
+    assert _rep(scenario, CHURCHILL).is_chair is False
+    assert _rep(scenario, STALIN).is_chair is True
+
+    venue.chair = None
+    assert venue.chair is None
+    assert all(not rep.is_chair for rep in scenario.representatives)
+
+
 def test_representative_file_api(scenario: Scenario) -> None:
     churchill = _rep(scenario, CHURCHILL)
     stalin = _rep(scenario, STALIN)
