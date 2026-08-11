@@ -46,7 +46,8 @@ class VotePassMode(StrEnum):
 class Event:
     """事件基类.
 
-    - ``time`` / ``id``:构造时为 ``None``,由 ``EventList.submit_event`` 赋一次后不可再改.
+    - ``time`` / ``id``:构造时为 ``None``,由 ``EventList.submit_event`` 赋一次后不可再改;
+      ``id`` 仅在事件所属会场的容器内唯一.
     - ``type`` / ``venue``:一旦设定不可再改.
     - 其余属性:仅当 ``status == PENDING`` 时可改.
     - 通过 ``status`` setter 离开 ``PENDING`` 时,若事件已入表,会通知

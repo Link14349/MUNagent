@@ -339,7 +339,7 @@ def test_pending_queue_on_submit_and_status_leave(
         scenario,
     )
     outsider.id = 0
-    with pytest.raises(ValueError, match="不属于本 EventList"):
+    with pytest.raises(ValueError, match="不属于会场"):
         events._event_updated(outsider)
 
 
@@ -402,3 +402,71 @@ def test_instruction_event_is_only_visible_via_scope(
         scenario.filesystem.read(rel, STALIN)
     with pytest.raises(PermissionError):
         scenario.filesystem.read(rel, EDEN)
+
+
+def test_eventlist_creates_store_per_venue(scenario: Scenario, events: EventList) -> None:
+    venue_ids = [venue.id for venue in scenario.venues]
+    assert venue_ids
+    for venue_id in venue_ids:
+        store = events.for_venue(venue_id)
+        assert store.venue_id == venue_id
+        assert store.events == []
+    with pytest.raises(ValueError, match="未知会场"):
+        events.for_venue("not_a_venue")
+
+
+def test_submit_event_routes_to_venue_store(
+    scenario: Scenario, events: EventList, venue_id: str
+) -> None:
+    from scenario.venue import Venue
+
+    other = Venue(scenario)
+    other.id = "side_chamber"
+    other.seats = list(scenario.venues[0].seats)
+    scenario.venues.append(other)
+    # 重建事件表以包含新会场容器,并挂回 scenario 供 Event.status 回调
+    isolated = EventList(scenario)
+    scenario.event_list = isolated
+
+    main_note = NoteEvent("主会场纸条", CHURCHILL, {EDEN}, venue_id, scenario)
+    side_note = NoteEvent(
+        "侧室纸条", CHURCHILL, {EDEN}, "side_chamber", scenario
+    )
+    isolated.submit_event(main_note)
+    isolated.submit_event(side_note)
+
+    main_store = isolated.for_venue(venue_id)
+    side_store = isolated.for_venue("side_chamber")
+    assert main_store.events == [main_note]
+    assert side_store.events == [side_note]
+    assert main_note.id == 0
+    assert side_note.id == 0  # id 仅在会场内唯一
+    assert isolated.get_events("__GOD__") == [main_note, side_note]
+    assert isolated.get_events(EDEN) == [main_note, side_note]
+
+    # pending 也按会场隔离
+    from scenario.venue import SessionPhase
+
+    main_motion = MotionSwitchEvent(
+        "主会场动议",
+        SessionPhase.FREE_DISCUSSION,
+        venue_id,
+        {CHURCHILL, EDEN},
+        scenario,
+    )
+    side_motion = MotionSwitchEvent(
+        "侧室动议",
+        SessionPhase.RECESS,
+        "side_chamber",
+        {CHURCHILL, EDEN},
+        scenario,
+    )
+    isolated.submit_event(main_motion)
+    isolated.submit_event(side_motion)
+    assert main_store.pending_events == [main_motion]
+    assert side_store.pending_events == [side_motion]
+    assert isolated.pending_events == [main_motion, side_motion]
+
+    main_motion.status = EventStatus.COMPLETED
+    assert main_store.pending_events == []
+    assert side_store.pending_events == [side_motion]
