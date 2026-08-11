@@ -101,6 +101,25 @@ def test_add_scope_allows_read_but_not_write(fs: FileSystem) -> None:
         fs.write(path, EDEN, "篡改")
 
 
+def test_get_access_owner_only(fs: FileSystem) -> None:
+    path = f"reps/{CHURCHILL}/draft.md"
+    file = fs.create_rep_file(CHURCHILL, "draft.md", "内容", description="草案")
+    access = file.get_access(CHURCHILL)
+    assert access["owners"] == frozenset({CHURCHILL})
+    assert access["scope"] == {CHURCHILL}
+    assert access["primary_owner"] == CHURCHILL
+
+    fs.add_scope(path, CHURCHILL, {EDEN})
+    with pytest.raises(PermissionError, match="不是文件 .* 的 owner") as denied:
+        file.get_access(EDEN)
+    assert "当前 owner" not in str(denied.value)
+
+    fs.add_owner(path, CHURCHILL, {EDEN})
+    shared = file.get_access(EDEN)
+    assert shared["owners"] == frozenset({CHURCHILL, EDEN})
+    assert shared["scope"] == {CHURCHILL, EDEN}
+
+
 def test_add_owner_requires_already_in_scope(fs: FileSystem) -> None:
     path = f"reps/{CHURCHILL}/draft.md"
     fs.create_rep_file(CHURCHILL, "draft.md", "草案")

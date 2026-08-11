@@ -157,6 +157,11 @@ class Representative:
             description=description,
         )
 
+    def get_file_access(self, file: File) -> dict[str, object]:
+        """查看 ``file`` 的 owners/scope/primary_owner(须为其 owner)。"""
+        self._require_managed_file(file)
+        return file.get_access(self.id)
+
     def add_scope(self, file: File, others: str | set[str]) -> None:
         """以本代表身份扩大 ``file`` 的可见范围(须为其 owner)。"""
         filesystem = self._require_managed_file(file)
@@ -201,14 +206,12 @@ class Representative:
             )
         return members
 
-    def _require_submission_file(self, file: File) -> None:
-        """校验 ``file`` 属于本 Scenario,且为 ``submissions/`` 下的提交副本."""
+    def _ensure_submission(self, file: File) -> File:
+        """将工作文件提交为 ``submissions/`` 副本;若已是提交副本则原样返回."""
         self._require_managed_file(file)
-        if not file.is_submission:
-            raise ValueError(
-                f"代表 {self.id} 提交 Instruction/Resolution 须绑定 submissions/ "
-                f"下的文件,实际为: {file.path}"
-            )
+        if file.is_submission:
+            return file
+        return self.submit_file(file)
 
     # 与 EventList 的交互通道
     def send_message(self, content: str) -> MessageEvent:
@@ -262,14 +265,18 @@ class Representative:
     def submit_instruction(
         self, content: str, fr: set[str], file: File
     ) -> InstructionEvent:
-        """以本代表身份提交 ``InstructionEvent``(``fr`` 即可见 scope / from_reps,PENDING)."""
+        """提交 ``InstructionEvent``(PENDING).
+
+        ``file`` 为 ``reps/`` 工作文件时会先 ``submit_file`` 再绑定副本;
+        若已是 ``submissions/`` 副本则直接绑定.``fr`` 即可见 scope / from_reps.
+        """
         from event.event import InstructionEvent
 
         venue = self._require_venue()
-        self._require_submission_file(file)
+        submitted = self._ensure_submission(file)
         from_reps = self._resolve_seat_ids(fr, field="fr")
         event = InstructionEvent(
-            content, from_reps, file, venue.id, venue.scenario
+            content, from_reps, submitted, venue.id, venue.scenario
         )
         self._require_event_list().submit_event(event)
         return event
@@ -277,14 +284,18 @@ class Representative:
     def submit_resolution(
         self, content: str, fr: set[str], file: File
     ) -> ResolutionEvent:
-        """以本代表身份提交 ``ResolutionEvent``(``fr`` 即可见 scope / from_reps,PENDING)."""
+        """提交 ``ResolutionEvent``(PENDING).
+
+        ``file`` 为 ``reps/`` 工作文件时会先 ``submit_file`` 再绑定副本;
+        若已是 ``submissions/`` 副本则直接绑定.``fr`` 即可见 scope / from_reps.
+        """
         from event.event import ResolutionEvent
 
         venue = self._require_venue()
-        self._require_submission_file(file)
+        submitted = self._ensure_submission(file)
         from_reps = self._resolve_seat_ids(fr, field="fr")
         event = ResolutionEvent(
-            content, from_reps, file, venue.id, venue.scenario
+            content, from_reps, submitted, venue.id, venue.scenario
         )
         self._require_event_list().submit_event(event)
         return event

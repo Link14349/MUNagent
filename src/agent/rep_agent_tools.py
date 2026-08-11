@@ -15,18 +15,21 @@ _PHASE_VALUES = [p.value for p in SessionPhase]
 Handler = Callable[[Representative, dict[str, Any]], Any]
 
 
-def _file_ref(file) -> dict[str, Any]:
+def _file_ref(file, *, actor: str | None = None) -> dict[str, Any]:
+    """文件摘要.owners/scope/primary_owner 仅在 ``actor`` 为 owner 时附带."""
     fs = file._filesystem
     rel = fs._relkey(file.path) if fs is not None else str(file.path)
-    return {
+    ref: dict[str, Any] = {
         "path": rel,
         "name": file.path.name,
         "description": file.description,
-        "owners": sorted(file.owners),
-        "scope": sorted(file.scope),
         "is_submission": file.is_submission,
-        "primary_owner": file.primary_owner,
     }
+    if actor is not None and actor in file.owners:
+        ref["owners"] = sorted(file.owners)
+        ref["scope"] = sorted(file.scope)
+        ref["primary_owner"] = file.primary_owner
+    return ref
 
 
 def _agenda_ref(agenda: Agenda) -> dict[str, Any]:
@@ -60,7 +63,7 @@ def _resolve_file(rep: Representative, path: str):
     """按相对路径或本代表目录下文件名解析 File.
 
     ``reps/`` 文件须对本代表可见;``submissions/`` 副本允许按路径引用
-    (用于 Instruction/Resolution 绑定,不经由 list_visible 发现).
+    (例如复用已有提交副本,不经由 list_visible 发现).
     """
     raw = path.strip()
     if not raw:
@@ -99,17 +102,19 @@ def _err(exc: BaseException) -> dict[str, Any]:
 
 
 def _list_visible_files(rep: Representative, args: dict[str, Any]) -> dict[str, Any]:
-    return _ok([_file_ref(f) for f in rep.list_visible()])
+    return _ok([_file_ref(f, actor=rep.id) for f in rep.list_visible()])
 
 
 def _list_writable_files(rep: Representative, args: dict[str, Any]) -> dict[str, Any]:
-    return _ok([_file_ref(f) for f in rep.list_writable()])
+    return _ok([_file_ref(f, actor=rep.id) for f in rep.list_writable()])
 
 
 def _read_file(rep: Representative, args: dict[str, Any]) -> dict[str, Any]:
     path = str(args["path"])
     file = _resolve_file(rep, path)
-    return _ok({"path": _file_ref(file)["path"], "content": rep.read_file(file)})
+    return _ok(
+        {"path": _file_ref(file, actor=rep.id)["path"], "content": rep.read_file(file)}
+    )
 
 
 def _write_file(rep: Representative, args: dict[str, Any]) -> dict[str, Any]:
@@ -117,7 +122,7 @@ def _write_file(rep: Representative, args: dict[str, Any]) -> dict[str, Any]:
     content = str(args["content"])
     file = _resolve_file(rep, path)
     rep.write_file(file, content)
-    return _ok({"path": _file_ref(file)["path"], "written": True})
+    return _ok({"path": _file_ref(file, actor=rep.id)["path"], "written": True})
 
 
 def _create_file(rep: Representative, args: dict[str, Any]) -> dict[str, Any]:
@@ -126,38 +131,50 @@ def _create_file(rep: Representative, args: dict[str, Any]) -> dict[str, Any]:
         str(args["content"]),
         str(args["description"]),
     )
-    return _ok(_file_ref(file))
+    return _ok(_file_ref(file, actor=rep.id))
+
+
+def _get_file_access(rep: Representative, args: dict[str, Any]) -> dict[str, Any]:
+    file = _resolve_file(rep, str(args["path"]))
+    access = rep.get_file_access(file)
+    return _ok(
+        {
+            "path": _file_ref(file, actor=rep.id)["path"],
+            "owners": sorted(access["owners"]),
+            "scope": sorted(access["scope"]),
+            "primary_owner": access["primary_owner"],
+        }
+    )
 
 
 def _add_scope(rep: Representative, args: dict[str, Any]) -> dict[str, Any]:
     file = _resolve_file(rep, str(args["path"]))
     others = _as_str_list(args["others"], field="others")
     rep.add_scope(file, set(others))
-    return _ok(_file_ref(file))
+    return _ok(_file_ref(file, actor=rep.id))
 
 
 def _add_owner(rep: Representative, args: dict[str, Any]) -> dict[str, Any]:
     file = _resolve_file(rep, str(args["path"]))
     others = _as_str_list(args["others"], field="others")
     rep.add_owner(file, set(others))
-    return _ok(_file_ref(file))
-
-
-def _submit_file(rep: Representative, args: dict[str, Any]) -> dict[str, Any]:
-    file = _resolve_file(rep, str(args["path"]))
-    submitted = rep.submit_file(file)
-    return _ok(_file_ref(submitted))
+    return _ok(_file_ref(file, actor=rep.id))
 
 
 def _can_submit(rep: Representative, args: dict[str, Any]) -> dict[str, Any]:
     file = _resolve_file(rep, str(args["path"]))
-    return _ok({"path": _file_ref(file)["path"], "can_submit": rep.can_submit(file)})
+    return _ok(
+        {
+            "path": _file_ref(file, actor=rep.id)["path"],
+            "can_submit": rep.can_submit(file),
+        }
+    )
 
 
 def _set_description(rep: Representative, args: dict[str, Any]) -> dict[str, Any]:
     file = _resolve_file(rep, str(args["path"]))
     rep.set_description(file, str(args["description"]))
-    return _ok(_file_ref(file))
+    return _ok(_file_ref(file, actor=rep.id))
 
 
 def _send_message(rep: Representative, args: dict[str, Any]) -> dict[str, Any]:
@@ -191,14 +208,18 @@ def _submit_instruction(rep: Representative, args: dict[str, Any]) -> dict[str, 
     fr = set(_as_str_list(args["fr"], field="fr"))
     file = _resolve_file(rep, str(args["path"]))
     event = rep.submit_instruction(str(args["content"]), fr, file)
-    return _ok(_event_ref(event))
+    payload = _event_ref(event)
+    payload["file"] = _file_ref(event.instruction, actor=rep.id)
+    return _ok(payload)
 
 
 def _submit_resolution(rep: Representative, args: dict[str, Any]) -> dict[str, Any]:
     fr = set(_as_str_list(args["fr"], field="fr"))
     file = _resolve_file(rep, str(args["path"]))
     event = rep.submit_resolution(str(args["content"]), fr, file)
-    return _ok(_event_ref(event))
+    payload = _event_ref(event)
+    payload["file"] = _file_ref(event.resolution, actor=rep.id)
+    return _ok(payload)
 
 
 def _list_agendas(rep: Representative, args: dict[str, Any]) -> dict[str, Any]:
@@ -269,9 +290,9 @@ _HANDLERS: dict[str, Handler] = {
     "read_file": _read_file,
     "write_file": _write_file,
     "create_file": _create_file,
+    "get_file_access": _get_file_access,
     "add_scope": _add_scope,
     "add_owner": _add_owner,
-    "submit_file": _submit_file,
     "can_submit": _can_submit,
     "set_description": _set_description,
     "send_message": _send_message,
@@ -414,6 +435,12 @@ REP_TOOL_SPECS: list[ToolSpec] = [
         ["name", "content", "description"],
     ),
     _tool(
+        "get_file_access",
+        "查看文件的 owners/scope(须为 owner;非 owner 会被拒绝)",
+        {"path": _PATH_PROP},
+        ["path"],
+    ),
+    _tool(
         "add_scope",
         "扩大文件可见范围(须为 owner)",
         {"path": _PATH_PROP, "others": _OTHERS_PROP},
@@ -426,14 +453,8 @@ REP_TOOL_SPECS: list[ToolSpec] = [
         ["path", "others"],
     ),
     _tool(
-        "submit_file",
-        "将文件提交到 submissions/(须为 owner)",
-        {"path": _PATH_PROP},
-        ["path"],
-    ),
-    _tool(
         "can_submit",
-        "判断当前是否可将该文件提交到 submissions/",
+        "判断当前是否可将该工作文件提交到 submissions/(内容相对最新版须有变化)",
         {"path": _PATH_PROP},
         ["path"],
     ),
@@ -481,7 +502,7 @@ REP_TOOL_SPECS: list[ToolSpec] = [
     ),
     _tool(
         "submit_instruction",
-        "提交指示事件,绑定一份 submissions/ 文件;fr 为可见代表集合",
+        "将 reps/ 工作文件提交到 submissions/ 并创建指示事件;fr 为可见代表集合",
         {
             "content": {"type": "string", "description": "指示说明"},
             "fr": {
@@ -492,14 +513,14 @@ REP_TOOL_SPECS: list[ToolSpec] = [
             },
             "path": {
                 **_PATH_PROP,
-                "description": "须为 submissions/ 下已提交副本的路径",
+                "description": "reps/ 下工作文件路径(须为 owner;会自动生成提交副本)",
             },
         },
         ["content", "fr", "path"],
     ),
     _tool(
         "submit_resolution",
-        "提交决议事件,绑定一份 submissions/ 文件;fr 为可见代表集合",
+        "将 reps/ 工作文件提交到 submissions/ 并创建决议事件;fr 为可见代表集合",
         {
             "content": {"type": "string", "description": "决议说明"},
             "fr": {
@@ -510,7 +531,7 @@ REP_TOOL_SPECS: list[ToolSpec] = [
             },
             "path": {
                 **_PATH_PROP,
-                "description": "须为 submissions/ 下已提交副本的路径",
+                "description": "reps/ 下工作文件路径(须为 owner;会自动生成提交副本)",
             },
         },
         ["content", "fr", "path"],

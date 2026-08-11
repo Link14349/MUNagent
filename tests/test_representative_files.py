@@ -124,6 +124,32 @@ def test_representative_add_scope_and_owner(scenario: Scenario) -> None:
     assert stalin.list_visible() == []
 
 
+def test_representative_get_file_access_owner_only(scenario: Scenario) -> None:
+    churchill = _rep(scenario, CHURCHILL)
+    eden = _rep(scenario, EDEN)
+    stalin = _rep(scenario, STALIN)
+
+    draft = churchill.create_file("draft.md", "百分比初稿", "百分比草案")
+    access = churchill.get_file_access(draft)
+    assert access["owners"] == frozenset({CHURCHILL})
+    assert access["scope"] == {CHURCHILL}
+    assert access["primary_owner"] == CHURCHILL
+
+    churchill.add_scope(draft, EDEN)
+    with pytest.raises(PermissionError, match="不是文件 .* 的 owner"):
+        eden.get_file_access(draft)
+    with pytest.raises(PermissionError, match="不是文件 .* 的 owner") as denied:
+        stalin.get_file_access(draft)
+    assert "当前 owner" not in str(denied.value)
+    assert EDEN not in str(denied.value)
+
+    churchill.add_owner(draft, EDEN)
+    shared = eden.get_file_access(draft)
+    assert shared["owners"] == frozenset({CHURCHILL, EDEN})
+    assert shared["scope"] == {CHURCHILL, EDEN}
+    assert shared["primary_owner"] == CHURCHILL
+
+
 def test_representative_submit_file(scenario: Scenario) -> None:
     churchill = _rep(scenario, CHURCHILL)
     stalin = _rep(scenario, STALIN)
@@ -258,17 +284,15 @@ def test_representative_submit_instruction(scenario: Scenario) -> None:
     assert scenario.event_list is not None
 
     draft = churchill.create_file("instruction.md", "请外长核对希腊条款", "外长指示")
-    with pytest.raises(ValueError, match="submissions/"):
-        churchill.submit_instruction("未提交的指示", {CHURCHILL, EDEN}, draft)
-
-    submitted = churchill.submit_file(draft)
     instruction = churchill.submit_instruction(
-        "外长指示已提交", {CHURCHILL, EDEN}, submitted
+        "外长指示已提交", {CHURCHILL, EDEN}, draft
     )
+    submitted = instruction.instruction
+    assert submitted.is_submission
+    assert submitted.path.name.startswith(f"{CHURCHILL}+instruction.md+v")
     assert instruction.id is not None
     assert instruction.type == EventType.INSTRUCTION
     assert instruction.status == EventStatus.PENDING
-    assert instruction.instruction is submitted
     assert instruction.from_reps == {CHURCHILL, EDEN}
     assert instruction.scope == {CHURCHILL, EDEN}
     assert instruction in scenario.event_list.get_events(EDEN)
@@ -280,6 +304,14 @@ def test_representative_submit_instruction(scenario: Scenario) -> None:
         if isinstance(e, InstructionEvent)
     ]
     assert linked[0].instruction is submitted
+
+    # 内容未变时再次从工作文件提交会被拒绝;已有 submission 可直接复用绑定
+    with pytest.raises(ValueError, match="内容相对最新提交未变化"):
+        churchill.submit_instruction("重复内容", {CHURCHILL, EDEN}, draft)
+    reused = churchill.submit_instruction(
+        "复用已有副本", {CHURCHILL, EDEN}, submitted
+    )
+    assert reused.instruction is submitted
 
     with pytest.raises(ValueError, match="fr 不能为空"):
         churchill.submit_instruction("空 fr", set(), submitted)
@@ -296,15 +328,14 @@ def test_representative_submit_resolution(scenario: Scenario) -> None:
     assert churchill.venue is not None
 
     draft = churchill.create_file("resolution.md", "百分比草案", "决议草案")
-    submitted = churchill.submit_file(draft)
-
     resolution = churchill.submit_resolution(
-        "提出百分比决议", set(churchill.venue.seats), submitted
+        "提出百分比决议", set(churchill.venue.seats), draft
     )
+    submitted = resolution.resolution
+    assert submitted.is_submission
     assert resolution.id is not None
     assert resolution.type == EventType.RESOLUTION
     assert resolution.status == EventStatus.PENDING
-    assert resolution.resolution is submitted
     assert resolution.from_reps == set(churchill.venue.seats)
     assert set(resolution.scope) == set(churchill.venue.seats)
     assert resolution in scenario.event_list.get_events(STALIN)
@@ -312,6 +343,7 @@ def test_representative_submit_resolution(scenario: Scenario) -> None:
     limited = churchill.submit_resolution(
         "仅英方可见草案", {CHURCHILL, EDEN}, submitted
     )
+    assert limited.resolution is submitted
     assert limited.from_reps == {CHURCHILL, EDEN}
     assert limited.scope == {CHURCHILL, EDEN}
     assert limited in scenario.event_list.get_events(EDEN)

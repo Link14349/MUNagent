@@ -44,7 +44,8 @@ def _call(tool_name: str, **args) -> ToolCall:
 def test_rep_tool_specs_cover_handlers() -> None:
     names = {spec.name for spec in REP_TOOL_SPECS}
     assert "send_message" in names
-    assert "submit_file" in names
+    assert "submit_instruction" in names
+    assert "submit_file" not in names
     assert "list_agendas" in names
     assert len(REP_TOOL_SPECS) == len(names)
 
@@ -85,11 +86,12 @@ def test_executor_files_submit_instruction(scenario: Scenario) -> None:
     )
     assert created["ok"] is True
     path = created["result"]["path"]
+    assert created["result"]["owners"] == [CHURCHILL]
 
-    submitted = json.loads(executor.execute(_call("submit_file", path=path)))
-    assert submitted["ok"] is True
-    sub_path = submitted["result"]["path"]
-    assert "submissions/" in sub_path
+    access = json.loads(executor.execute(_call("get_file_access", path=path)))
+    assert access["ok"] is True
+    assert access["result"]["owners"] == [CHURCHILL]
+    assert access["result"]["scope"] == [CHURCHILL]
 
     instruction = json.loads(
         executor.execute(
@@ -97,12 +99,47 @@ def test_executor_files_submit_instruction(scenario: Scenario) -> None:
                 "submit_instruction",
                 content="外长指示已提交",
                 fr=[CHURCHILL, EDEN],
-                path=sub_path,
+                path=path,
             )
         )
     )
     assert instruction["ok"] is True
     assert instruction["result"]["type"] == "instruction"
+    assert "submissions/" in instruction["result"]["file"]["path"]
+
+
+def test_executor_get_file_access_owner_only(scenario: Scenario) -> None:
+    churchill = _rep(scenario, CHURCHILL)
+    eden = _rep(scenario, EDEN)
+    owner_ex = RepresentativeToolExecutor(churchill)
+    reader_ex = RepresentativeToolExecutor(eden)
+
+    created = json.loads(
+        owner_ex.execute(
+            _call(
+                "create_file",
+                name="shared.md",
+                content="草案",
+                description="共享草案",
+            )
+        )
+    )
+    path = created["result"]["path"]
+    scoped = json.loads(
+        owner_ex.execute(_call("add_scope", path=path, others=EDEN))
+    )
+    assert scoped["ok"] is True
+
+    visible = json.loads(reader_ex.execute(_call("list_visible_files")))
+    assert visible["ok"] is True
+    assert len(visible["result"]) == 1
+    assert "owners" not in visible["result"][0]
+    assert "scope" not in visible["result"][0]
+
+    denied = json.loads(reader_ex.execute(_call("get_file_access", path=path)))
+    assert denied["ok"] is False
+    assert "不是文件" in denied["error"]
+    assert "当前 owner" not in denied["error"]
 
 
 def test_executor_agenda_and_phase_requires_chair(scenario: Scenario) -> None:

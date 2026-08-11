@@ -87,10 +87,7 @@ class File:
             raise PermissionError(f"提交副本不可修改 description: {self.path}")
         if not self.__owner:
             raise PermissionError(f"文件 {self.path} 的 owner 为空,不可修改 description")
-        if actor != SYSTEM_ACTOR and actor not in self.__owner:
-            raise PermissionError(
-                f"对象 {actor!r} 不是文件 {self.path} 的 owner(当前 owner={sorted(self.__owner)})"
-            )
+        self._require_owner(actor)
         self.__description = _normalize_description(value)
 
     def _restore_primary_owner(self, primary: str) -> None:
@@ -129,9 +126,17 @@ class File:
         if actor == SYSTEM_ACTOR:
             return
         if actor not in self.__owner:
-            raise PermissionError(
-                f"对象 {actor!r} 不是文件 {self.path} 的 owner(当前 owner={sorted(self.__owner)})"
-            )
+            # 拒绝时不回显 owner/scope,避免非 owner 借错误信息刺探权限名单.
+            raise PermissionError(f"对象 {actor!r} 不是文件 {self.path} 的 owner")
+
+    def get_access(self, actor: str) -> dict[str, object]:
+        """查看 owners/scope/primary_owner;仅 owner 或系统可查."""
+        self._require_owner(actor)
+        return {
+            "owners": frozenset(self.__owner),
+            "scope": set(self.scope),
+            "primary_owner": self.__primary_owner,
+        }
 
     def add_owner(self, actor: str, obj: set[str]) -> None:
         """由现有 owner(或系统)将已在 scope 中的对象提升为 owner."""
@@ -157,18 +162,13 @@ class File:
 
     def get_content(self, actor: str) -> str:
         if not self.visible_to(actor):
-            raise PermissionError(
-                f"对象 {actor!r} 无权读取文件 {self.path}(scope={sorted(self.scope)})"
-            )
+            raise PermissionError(f"对象 {actor!r} 无权读取文件 {self.path}")
         return self.__content
 
     def set_content(self, actor: str, content: str) -> None:
         if not self.__owner:
             raise PermissionError(f"文件 {self.path} 的 owner 为空,不可写入")
-        if actor != SYSTEM_ACTOR and actor not in self.__owner:
-            raise PermissionError(
-                f"对象 {actor!r} 不是文件 {self.path} 的 owner(当前 owner={sorted(self.__owner)})"
-            )
+        self._require_owner(actor)
         self.__content = content
 
     def visible_to(self, actor: str) -> bool:
