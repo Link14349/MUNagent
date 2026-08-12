@@ -1,0 +1,43 @@
+schema_version: "0.1"
+title: '尼克松辞职前夕：“谁在控制核按钮？”'
+author: MUNagent
+version: 0.1.0
+language: zh-CN
+start_story_time: "1974-08-07T19:30:00-04:00"
+timezone: America/New_York
+description: >-
+  1974年8月7日晚，水门事件已使尼克松政府接近终局。四名最高层官员以评估华约异常动向为名，
+  在白宫战情室举行由基辛格主持的核心磋商；他们真正必须处理的，是总统仍在任时的军事指挥安全、
+  宪法边界、外交连续性与可能到来的权力交接。
+
+sources:
+  - title: Richard Nixon Presidential Library - August 7, 1974
+    url: https://www.nixonlibrary.gov/research/almanac/august-7-1974
+    note: 核对8月7日共和党国会领袖会见尼克松、白宫活动及辞职决定逐渐成形的同期档案入口。
+  - title: Richard Nixon Presidential Library - President Nixon Timeline
+    url: https://www.nixonlibrary.gov/president-nixon
+    note: 核对最高法院判决、众议院司法委员会通过弹劾条款及8月8日至9日辞职时间线。
+  - title: Gerald R. Ford Presidential Library - The Establishment and First Uses of the 25th Amendment
+    url: https://www.fordlibrarymuseum.gov/digital-research-room/topic-guides/establishment-and-first-uses-25th-amendment
+    note: 核对福特就任副总统、海格8月1日提示准备交接及8月9日继任等时间节点。
+  - title: Gerald R. Ford Presidential Library - National Security Adviser, Presidential Transition File, 1974
+    url: https://www.fordlibrarymuseum.gov/digital-research-room/finding-aids/national-security-advisor-presidential-transition-file-1974
+    note: 说明基辛格在8月7日获知辞职临近后，秘密准备对外通知与外交连续性方案。
+  - title: U.S. Department of State, FRUS 1969–1976, Volume XXXV, Document 41
+    url: https://history.state.gov/historicaldocuments/frus1969-76v35/d41
+    note: 核对福特继任后立即接受国家安全与单一综合作战计划简报，以及文官统军的公开口径。
+  - title: U.S. Department of State, FRUS 1969–1976, Volume XXXIX, Document 242
+    url: https://history.state.gov/historicaldocuments/frus1969-76v39/d242
+    note: 核对总统交接后向苏联保证外交政策连续性的正式记录。
+  - title: Constitution Annotated - Twenty-Fifth Amendment
+    url: https://constitution.congress.gov/browse/amendment-25/
+    note: 核对第二十五修正案第3款与第4款的启动主体、书面声明和争议处理程序。
+  - title: U.S. Department of Defense - Richardson, Schlesinger, and Rumsfeld
+    url: https://history.defense.gov/Portals/70/Documents/secretaryofdefense/OSDSeries_Vol8_Chapter5.pdf
+    note: 国防部长办公室官方史，供核对施莱辛格任内的核政策、文官控制与尼克松政府末期背景。
+  - title: Gerald R. Ford Presidential Library - Gerald R. Ford Vice Presidential Papers, 1973–1974
+    url: https://www.fordlibrarymuseum.gov/digital-research-room/finding-aids/gerald-r-ford-vice-presidential-papers-1973-74
+    note: 说明福特在副总统任内接受情报、外交和国防简报，并有幕僚进行未告知本人的交接准备。
+  - title: Time - James Schlesinger
+    url: https://time.com/48002/james-schlesinger/
+    note: 记录关于施莱辛格在水门危机末期要求军方对异常白宫指令进行额外复核的后世主流叙述；具体范围仍按争议史实处理。

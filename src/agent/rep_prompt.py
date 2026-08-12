@@ -2,8 +2,15 @@
 
 from __future__ import annotations
 
+from agenda.agenda import Agenda
 from scenario.representative import Representative
-from scenario.venue import Venue
+from scenario.venue import SessionPhase, Venue
+
+
+_SESSION_PHASE_NAMES = {
+    SessionPhase.CHAIRED_CORE: "有主持核心磋商",
+    SessionPhase.UNCHAIRED_CORE: "无主持核心磋商",
+}
 
 
 def _bullet_list(items: list[str]) -> str:
@@ -35,12 +42,17 @@ def _format_venue_roster(venue: Venue) -> str:
     return "\n\n".join(blocks)
 
 
+def _format_agenda_titles(agendas: list[Agenda]) -> str:
+    if not agendas:
+        return "- 无"
+    return "\n".join(f"- {agenda.title}（{agenda.id}）" for agenda in agendas)
+
+
 def build_representative_system_prompt(rep: Representative) -> str:
     """根据已绑定会场的 ``Representative`` 生成首条 system prompt。
 
-    场景背景与完整角色卡在推演开始后保持不变；会议阶段、议题、事件和
-    文件等运行时信息应由 Agent 后续通过工具获取，避免在首条提示词中形成
-    过期状态。
+    场景背景与完整角色卡在推演开始后保持不变；会场状态是调用本函数时的
+    初始快照，之后应以 Agent 通过工具取得的运行时信息为准。
     """
     venue = rep._require_venue()
     scenario = venue.scenario
@@ -55,6 +67,25 @@ def build_representative_system_prompt(rep: Representative) -> str:
     )
     persona = rep._persona
     venue_roster = _format_venue_roster(venue)
+    session_phase = venue.session_phase
+    phase_value = session_phase.value if session_phase is not None else "未设置"
+    phase_name = _SESSION_PHASE_NAMES.get(session_phase, phase_value)
+    chair = "系统中立主席"
+    if venue.chair is not None:
+        chair_rep = venue.reps[venue.chair]
+        chair = f"{chair_rep.name}（{chair_rep.id}）"
+    chair_powers = "\n".join(
+        f"- {power.value}：{'开启' if enabled else '关闭'}"
+        for power, enabled in venue.chair_power.items()
+    )
+    current_agenda = venue.current_agenda
+    current_agenda_text = "无"
+    current_questions = "- 无"
+    if current_agenda is not None:
+        current_agenda_text = f"{current_agenda.title}（{current_agenda.id}）"
+        current_questions = _bullet_list(current_agenda.questions)
+    todo_agendas = _format_agenda_titles(venue.todo_agenda)
+    finished_agendas = _format_agenda_titles(venue.finished_agenda)
 
     return f"""你是 MUNagent 中的一名模拟联合国历史委员会代表 Agent。你必须始终以指定历史人物的身份思考、谈判和行动，而不是以旁观者、主持人或全知叙事者的身份回答。
 
@@ -66,9 +97,18 @@ def build_representative_system_prompt(rep: Representative) -> str:
 2. 始终遵守角色的正式权力与限制。你可以提出超出自身权限的建议或交换条件，但不得把愿望描述成已经生效的命令、协议或事实。
 3. 公开发言、私下纸条、文件共享、提案和其他行动具有不同的可见范围。私密目标、底线和情报默认不得公开；只有在符合角色利益时，才可有策略地披露其中必要部分。
 4. 根据当前议题和会议阶段推进谈判。发言应回应现场局势并促成下一步行动，避免重复背景、空泛表态或脱离议程的长篇演说。
-5. 需要改变会议状态或产生正式效果时，必须调用相应工具。文字声称自己已经发言、传递纸条、共享文件、提交文件或作出决定，不会代替工具调用。以工具返回的成功或失败结果为准，不得伪造结果。
+5. 在会议中，你的所有会议发言都必须调用 `send_message` 提交 `MessageEvent`；任何未提交为事件的普通文本都只是只有你自己能看到的内部思考，不会被主席或其他代表听见。所有与会场、其他代表或外部世界的交互都必须通过相应工具提交对应的 Event 才会实际发生，包括发言、纸条、动议、指示和决议。文字声称自己已经采取行动不能代替事件提交；始终以工具返回的成功或失败结果为准，不得伪造结果。
 6. 主席与引擎负责程序、权限、可见性和行动有效性的最终校验。若工具拒绝行动，应根据错误信息修正方案，不得绕过规则。
 7. 区分史实、角色判断、谈判主张和推演中新产生的结果；信息不足时可以试探、询问或附带条件，不要凭空补造关键事实。
+
+## 会议阶段说明
+
+当前闭环使用以下两种核心磋商形式：
+
+- **有主持核心磋商（`chaired_core`）**：由主席确定讨论主题、发言顺序与程序节奏。你应在获得发言机会时作简短、聚焦的公开发言，回应当前议题并提出明确立场或下一步方案；不要擅自替主席宣布轮次、切换议题或认定动议通过。需要定向沟通或共同起草时，可另用纸条和文件工具。
+- **无主持核心磋商（`unchaired_core`）**：暂不按主席主持的发言顺序逐一陈述，代表可更直接地磋商、交换条件、传递纸条和协作文件。公开发言仍对全会场可见，纸条和文件仍受各自可见范围约束；无主持不等于程序、权限或保密规则失效。
+
+会议阶段的切换必须通过相应动议或主席权限工具完成。不得仅在回复中宣称会议已经切换阶段；始终以工具结果和最新会场状态为准。
 
 # 二、文件与指示规则
 
@@ -95,6 +135,35 @@ def build_representative_system_prompt(rep: Representative) -> str:
 ## 背景文件
 
 {scenario.background}
+
+## 会场状态
+
+以下内容是生成本条 system prompt 时的会场状态快照。会议开始后，阶段、主席、议题和权限均可能因有效事件而改变；采取行动前若状态可能已经变化，应使用会场与议题工具取得最新信息，不得把本快照当作永久状态。
+
+- 会场：{venue.name}（{venue.id}）
+- 会场说明：{venue.description}
+- 当前阶段：{phase_name}（`{phase_value}`）
+- 主席：{chair}
+
+### 主席权力
+
+{chair_powers}
+
+### 当前议题
+
+{current_agenda_text}
+
+#### 当前议题引导问题
+
+{current_questions}
+
+### 待审议议题
+
+{todo_agendas}
+
+### 已结束议题
+
+{finished_agendas}
 
 ## 会场代表
 

@@ -7,6 +7,7 @@ import pytest
 from agent.rep_prompt import build_representative_system_prompt
 from scenario.representative import Representative
 from scenario.scenario import Scenario
+from scenario.venue import SessionPhase
 
 TEMPLATE = Path(__file__).resolve().parent.parent / "scenario-template"
 
@@ -61,6 +62,43 @@ def test_prompt_contains_venue_roster_public_fields_only() -> None:
             )
 
 
+def test_prompt_contains_venue_state_snapshot() -> None:
+    scenario = Scenario()
+    scenario.load(str(TEMPLATE))
+    rep = scenario.reps["winston_churchill"]
+    venue = rep._require_venue()
+
+    prompt = build_representative_system_prompt(rep)
+
+    assert "## 会场状态" in prompt
+    assert venue.name in prompt
+    assert venue.session_phase is not None
+    assert venue.session_phase.value in prompt
+    assert venue.current_agenda is not None
+    assert venue.current_agenda.id in prompt
+    assert all(question in prompt for question in venue.current_agenda.questions)
+    assert all(agenda.id in prompt for agenda in venue.todo_agenda)
+    assert "系统中立主席" in prompt
+    assert all(power.value in prompt for power in venue.chair_power)
+
+
+def test_prompt_explains_supported_core_session_phases() -> None:
+    scenario = Scenario()
+    scenario.load(str(TEMPLATE))
+
+    prompt = build_representative_system_prompt(
+        scenario.reps["winston_churchill"]
+    )
+
+    assert "有主持核心磋商" in prompt
+    assert SessionPhase.CHAIRED_CORE.value in prompt
+    assert "由主席确定讨论主题、发言顺序与程序节奏" in prompt
+    assert "无主持核心磋商" in prompt
+    assert SessionPhase.UNCHAIRED_CORE.value in prompt
+    assert "可更直接地磋商、交换条件" in prompt
+    assert "free_discussion" not in prompt
+
+
 def test_prompt_explains_file_submission_workflow() -> None:
     scenario = Scenario()
     scenario.load(str(TEMPLATE))
@@ -77,6 +115,20 @@ def test_prompt_explains_file_submission_workflow() -> None:
     assert "scope" in prompt
     assert "owner" in prompt
     assert "get_file_access" in prompt
+
+
+def test_prompt_requires_events_for_external_interactions() -> None:
+    scenario = Scenario()
+    scenario.load(str(TEMPLATE))
+
+    prompt = build_representative_system_prompt(
+        scenario.reps["winston_churchill"]
+    )
+
+    assert "所有会议发言都必须调用 `send_message` 提交 `MessageEvent`" in prompt
+    assert "只是只有你自己能看到的内部思考" in prompt
+    assert "所有与会场、其他代表或外部世界的交互" in prompt
+    assert "提交对应的 Event 才会实际发生" in prompt
 
 
 def test_prompt_requires_bound_venue() -> None:

@@ -1,0 +1,69 @@
+targets:
+  - id: separate_risk_from_power_grab
+    description: 迫使四人区分必要的军令核验、合法性审查与未经授权的总统权力剥夺
+  - id: preserve_constitutional_continuity
+    description: 在辞职、无能力与继续任职三种可能路径之间维持一条可审计的宪法权力链
+  - id: deter_without_escalation
+    description: 对华约异常情报作出足以维持威慑、又不因国内危机引发误判的反应
+  - id: force_personal_accountability
+    description: 让每名角色为自己愿意采取或拒绝采取的临时措施、法律风险和灾难后果负责
+
+events:
+  - id: intelligence_watch_update
+    condition:
+      type: time
+      content: "1974-08-07T20:05:00-04:00"
+    content: >-
+      国家军事指挥中心转来联合情报更新：华约通信量上升属实，但尚未观察到大规模部队离营、
+      战略航空兵前推或核力量状态变化。分析人员把“迫近进攻”的置信度评为低，仍建议继续加强观察。
+
+  - id: congressional_support_count
+    condition:
+      type: time
+      content: "1974-08-07T20:35:00-04:00"
+    content: >-
+      白宫立法联络团队汇总共和党领袖同总统会面后的判断：众议院通过弹劾条款已几乎不可避免，
+      参议院足以阻止定罪的票数也不存在。总统尚未签署辞职文件，幕僚仍收到相互矛盾的继续任职与准备交接信号。
+
+  - id: irregular_readiness_inquiry
+    condition:
+      type: time
+      content: "1974-08-07T21:10:00-04:00"
+    content: >-
+      五角大楼值班系统报告：一名能够说出部分白宫内部信息、但未完成正式身份认证的来电者，
+      询问欧洲方向战略部队从现态提高一级戒备需要多长时间。对方没有下达命令，在被要求转入正规渠道后挂断。
+      这是场景构造的异常联络，现阶段无法证明来自总统、海格或任何获授权官员。
+
+  - id: dobrynin_reassurance_request
+    condition:
+      type: time
+      content: "1974-08-07T22:00:00-04:00"
+    content: >-
+      苏联驻美大使多勃雷宁通过国务院寻求同基辛格通话。他表示莫斯科注意到华盛顿关于总统前途的公开混乱，
+      希望确认既有危机通信渠道仍然有效。来电没有提及华约部队，也没有提出威胁。
+
+  - id: president_requests_private_meeting
+    condition:
+      type: time
+      content: "1974-08-07T22:45:00-04:00"
+    content: >-
+      总统私人秘书通知海格和基辛格：尼克松希望尽快分别见到两人，讨论“国家不能显得软弱”以及明天的公开安排。
+      秘书称总统声音疲惫、情绪强烈，但拒绝对其是否饮酒或能否履职作进一步判断。
+
+  - id: second_intelligence_assessment
+    condition:
+      type: time
+      content: "1974-08-07T23:30:00-04:00"
+    content: >-
+      中央情报局与国防情报局联合复核认为，开场的华约异常最可能来自计划内演训与延长值班，
+      没有证据显示莫斯科准备立即攻击。分析同时警告：美国若突然改变战略戒备，苏联可能把它视为真实危机而采取对应措施。
+
+end_conditions:
+  - type: text
+    content: 四人已经签署同一版本的备忘录；文件分别写明对华约情报的响应、异常军令的认证与合法性步骤、总统能力或辞职时的宪法路径、执行责任、留痕方式和自动失效条件，且基辛格已宣布会议结束。
+  - type: text
+    content: 至少两名代表已经明确退出磋商，其余代表也确认无法形成共同程序或继续谈判。
+  - type: text
+    content: 总统已经依法辞职，或第二十五修正案第3款或第4款已经由法定主体正式启动，使本次会议设定的“总统仍完整履职”前提不再成立。
+  - type: time
+    content: "1974-08-08T04:00:00-04:00"
