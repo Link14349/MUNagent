@@ -46,12 +46,13 @@ class VotePassMode(StrEnum):
 class Event:
     """事件基类.
 
-    - ``time`` / ``id``:构造时为 ``None``,由 ``EventList.submit_event`` 赋一次后不可再改;
+    - ``time`` / ``id``:构造时为 ``None``;``time`` 由 Scenario 统一时钟盖戳,
+      ``id`` 由所属会场的 ``EventList.submit_event`` 赋值,两者均不可再改;
       ``id`` 仅在事件所属会场的容器内唯一.
     - ``type`` / ``venue``:一旦设定不可再改.
     - 其余属性:仅当 ``status == PENDING`` 时可改.
     - 通过 ``status`` setter 离开 ``PENDING`` 时,若事件已入表,会通知
-      ``EventList`` 将其从 pending 队列移除(约定仅由此路径回调).
+      所属会场的 ``EventList`` 将其从 pending 队列移除.
     - 子类 ``__init__`` 应直接写入私有字段,并用 ``_set_type`` / ``_init_status``.
     - 每个事件只属于一个会场(``venue`` 为会场 ID 字符串).
     """
@@ -138,12 +139,7 @@ class Event:
         self.__status = new_status
         if new_status == EventStatus.PENDING or self.__id is None:
             return
-        event_list = self.__scenario.event_list
-        if event_list is None:
-            raise RuntimeError(
-                f"事件(id={self.__id}) 已入表,但 Scenario.event_list 为空,无法更新 pending"
-            )
-        event_list._event_updated(self)
+        self.__scenario._event_updated(self)
 
     @property
     def content(self) -> str:

@@ -5,7 +5,8 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from agenda.agenda import Agenda, AgendaManager
-    from event.event import PhaseSwitchEvent
+    from event.event import Event, PhaseSwitchEvent
+    from event.eventlist import EventList
     from scenario.group import Group
     from scenario.representative import Representative
     from scenario.scenario import Scenario
@@ -36,6 +37,7 @@ class Venue:
     initial_agenda: str
     groups: list[Group]
     chair_power: dict[CHAIR_POWER, bool]
+    event_list: EventList | None
 
     def __init__(self, scenario: Scenario):
         self.id = ""
@@ -51,6 +53,7 @@ class Venue:
         self.groups = []
         self.__session_phase: SessionPhase | None = None
         self.chair_power = {power: False for power in CHAIR_POWER}
+        self.event_list = None
 
     def _find_rep(self, rep_id: str) -> Representative | None:
         return self.reps.get(rep_id) or self.scenario.reps.get(rep_id)
@@ -143,13 +146,27 @@ class Venue:
         return self._require_agenda_manager().get(agenda_id)
 
     def _require_event_list(self):
-        event_list = self.scenario.event_list
+        event_list = self.event_list
         if event_list is None:
             raise RuntimeError(
-                f"会场 {self.id or '<unset>'} 所在 Scenario 尚未创建 EventList,"
-                "无法提交议题事件"
+                f"会场 {self.id or '<unset>'} 尚未 initialize EventList,"
+                "无法访问事件"
             )
         return event_list
+
+    def submit_event(self, event: Event) -> None:
+        """接收会场事件并转交本会场事件表.
+
+        当前只建立代表与本会场 ``EventList`` 之间的边界；事件排队、排序、
+        校验和裁定留给后续的会场主循环实现。事件时间由 Scenario 统一盖戳。
+        """
+        if event.venue != self.id:
+            raise ValueError(
+                f"事件 venue={event.venue!r} 不能提交给会场 {self.id!r}"
+            )
+        event_list = self._require_event_list()
+        self.scenario._stamp_event(event)
+        event_list.submit_event(event)
 
     def _agenda_event_scope(self) -> set[str]:
         return set(self.seats)
@@ -169,7 +186,7 @@ class Venue:
         if agenda is previous:
             return
         manager.set_current_agenda(agenda, finished=finished)
-        self._require_event_list().submit_event(
+        self.submit_event(
             SetAgendaEvent(
                 f"主席 {rep_id} 将当前议题切换为 {agenda.id}",
                 agenda,
@@ -188,7 +205,7 @@ class Venue:
 
         self._require_chair_actor(rep_id)
         self._require_agenda_manager().add_todo(agenda)
-        self._require_event_list().submit_event(
+        self.submit_event(
             AddAgendaEvent(
                 f"主席 {rep_id} 追加议题 {agenda.id}",
                 agenda,
@@ -233,17 +250,22 @@ class Venue:
             set(self.seats),
             self.scenario,
         )
-        self._require_event_list().submit_event(event)
+        self.submit_event(event)
         return event
 
     def initialize(self) -> None:
-        """向 EventList 注册本会场对 PHASE_SWITCH 的监听."""
+        """创建本会场 EventList 并注册 PHASE_SWITCH listener."""
         from event.event import EventType
+        from event.eventlist import EventList
 
-        self._require_event_list().add_listener(
+        if self.event_list is not None:
+            raise RuntimeError(
+                f"会场 {self.id or '<unset>'} 已 initialize EventList,不能重复初始化"
+            )
+        self.event_list = EventList(self)
+        self.event_list.add_listener(
             EventType.PHASE_SWITCH,
             self._on_phase_switch,
-            self.id,
         )
 
     def _on_phase_switch(self, event: PhaseSwitchEvent) -> None:

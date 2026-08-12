@@ -17,9 +17,12 @@ STALIN = "joseph_stalin"
 
 
 @pytest.fixture
-def scenario() -> Scenario:
+def scenario(tmp_path: Path) -> Scenario:
     loaded = Scenario()
     loaded.load(str(TEMPLATE))
+    loaded.root_path = tmp_path
+    (tmp_path / "simulation").mkdir()
+    loaded.initialize()
     return loaded
 
 
@@ -49,9 +52,9 @@ def test_set_current_agenda_requires_chair(scenario: Scenario) -> None:
     assert venue.current_agenda is second
     assert first in venue.todo_agenda
     assert first not in venue.finished_agenda
-    assert scenario.event_list is not None
+    assert venue.event_list is not None
     set_events = [
-        e for e in scenario.event_list.get_events("__GOD__") if isinstance(e, SetAgendaEvent)
+        e for e in venue.event_list.get_events("__GOD__") if isinstance(e, SetAgendaEvent)
     ]
     assert len(set_events) == 1
     assert set_events[0].agenda is second
@@ -66,7 +69,7 @@ def test_set_current_agenda_requires_chair(scenario: Scenario) -> None:
     assert second in venue.finished_agenda
     assert second not in venue.todo_agenda
     set_events = [
-        e for e in scenario.event_list.get_events("__GOD__") if isinstance(e, SetAgendaEvent)
+        e for e in venue.event_list.get_events("__GOD__") if isinstance(e, SetAgendaEvent)
     ]
     assert len(set_events) == 2
     assert set_events[-1].finished is True
@@ -77,12 +80,12 @@ def test_set_current_rejects_unknown_and_allows_noop(scenario: Scenario) -> None
     venue = scenario.venues[0]
     venue.chair = CHURCHILL
     assert venue.current_agenda is not None
-    assert scenario.event_list is not None
-    before = len(scenario.event_list.get_events("__GOD__"))
+    assert venue.event_list is not None
+    before = len(venue.event_list.get_events("__GOD__"))
 
     venue.set_current_agenda(CHURCHILL, venue.current_agenda)
     assert venue.finished_agenda == []
-    assert len(scenario.event_list.get_events("__GOD__")) == before
+    assert len(venue.event_list.get_events("__GOD__")) == before
 
     outsider = Agenda("not_in_list", "外部议题", ["?"])
     with pytest.raises(ValueError, match="不在"):
@@ -105,9 +108,9 @@ def test_add_agenda_requires_chair_and_rejects_duplicate(
     venue.add_agenda(CHURCHILL, fresh)
     assert fresh in venue.todo_agenda
     assert venue.get_agenda("extra_topic") is fresh
-    assert scenario.event_list is not None
+    assert venue.event_list is not None
     add_events = [
-        e for e in scenario.event_list.get_events("__GOD__") if isinstance(e, AddAgendaEvent)
+        e for e in venue.event_list.get_events("__GOD__") if isinstance(e, AddAgendaEvent)
     ]
     assert len(add_events) == 1
     assert add_events[0].agenda is fresh

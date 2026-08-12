@@ -76,7 +76,6 @@ def test_phase_switch_applies_on_submit(
 ) -> None:
     venue = scenario.venues[0]
     before = venue.session_phase
-    assert scenario.event_list is not None
     event = PhaseSwitchEvent(
         "进入自由讨论",
         SessionPhase.FREE_DISCUSSION,
@@ -84,7 +83,7 @@ def test_phase_switch_applies_on_submit(
         {rep.id for rep in scenario.representatives},
         scenario,
     )
-    scenario.event_list.submit_event(event)
+    venue.submit_event(event)
     assert venue.session_phase == SessionPhase.FREE_DISCUSSION
     assert event.previous_phase == before
     assert event.id is not None
@@ -92,7 +91,6 @@ def test_phase_switch_applies_on_submit(
 
 def test_phase_switch_records_chain(scenario: Scenario, venue_id: str) -> None:
     venue = scenario.venues[0]
-    assert scenario.event_list is not None
     first = PhaseSwitchEvent(
         "进入自由讨论",
         SessionPhase.FREE_DISCUSSION,
@@ -100,7 +98,7 @@ def test_phase_switch_records_chain(scenario: Scenario, venue_id: str) -> None:
         {rep.id for rep in scenario.representatives},
         scenario,
     )
-    scenario.event_list.submit_event(first)
+    venue.submit_event(first)
     second = PhaseSwitchEvent(
         "休会",
         SessionPhase.RECESS,
@@ -108,7 +106,7 @@ def test_phase_switch_records_chain(scenario: Scenario, venue_id: str) -> None:
         {rep.id for rep in scenario.representatives},
         scenario,
     )
-    scenario.event_list.submit_event(second)
+    venue.submit_event(second)
     assert first.target_phase == SessionPhase.FREE_DISCUSSION
     assert second.previous_phase == SessionPhase.FREE_DISCUSSION
     assert second.target_phase == SessionPhase.RECESS

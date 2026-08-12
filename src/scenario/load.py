@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from condition.condition import Condition
-from event.eventlist import EventList, PullUpEvent
+from event.eventlist import PullUpEvent
 from scenario.load_helpers import (
     EVENT_FORBIDDEN_KEYS,
     INDEX_FORBIDDEN_KEYS,
@@ -76,7 +76,6 @@ def populate_scenario(scenario: Scenario, scenario_path: str | Path) -> None:
         venue.reps = {
             seat_id: representatives_by_id[seat_id] for seat_id in venue.seats
         }
-    scenario.event_list = EventList(scenario)
 
 
 def _load_index(scenario: Scenario, index: dict[str, Any]) -> None:

@@ -32,6 +32,12 @@ def _rep(scenario: Scenario, rep_id: str):
     raise AssertionError(f"missing rep {rep_id}")
 
 
+def _events(scenario: Scenario):
+    event_list = scenario.venues[0].event_list
+    assert event_list is not None
+    return event_list
+
+
 def test_scenario_and_venue_reps_index(scenario: Scenario) -> None:
     venue = scenario.venues[0]
     assert venue.initial_agenda == "meaning_of_percentages"
@@ -183,7 +189,7 @@ def test_representative_set_description(scenario: Scenario) -> None:
 def test_representative_send_message(scenario: Scenario) -> None:
     churchill = _rep(scenario, CHURCHILL)
     stalin = _rep(scenario, STALIN)
-    assert scenario.event_list is not None
+    events = _events(scenario)
 
     msg = churchill.send_message("希腊事务应交由伦敦主导")
     assert msg.id is not None
@@ -191,22 +197,22 @@ def test_representative_send_message(scenario: Scenario) -> None:
     assert msg.content == "希腊事务应交由伦敦主导"
     assert churchill.venue is not None
     assert set(msg.scope) == set(churchill.venue.seats)
-    assert msg in scenario.event_list.get_events(STALIN)
+    assert msg in events.get_events(STALIN)
 
 
 def test_representative_pass_note(scenario: Scenario) -> None:
     churchill = _rep(scenario, CHURCHILL)
     stalin = _rep(scenario, STALIN)
-    assert scenario.event_list is not None
+    events = _events(scenario)
 
     note = churchill.pass_note("试探希腊条款", EDEN)
     assert note.id is not None
     assert note.from_rep == CHURCHILL
     assert note.to_reps == {EDEN}
     assert note.scope == {CHURCHILL, EDEN}
-    assert note in scenario.event_list.get_events(EDEN)
-    assert note in scenario.event_list.get_events(CHURCHILL)
-    assert note not in scenario.event_list.get_events(STALIN)
+    assert note in events.get_events(EDEN)
+    assert note in events.get_events(CHURCHILL)
+    assert note not in events.get_events(STALIN)
 
     multi = churchill.pass_note("共同核对底线", {EDEN, STALIN})
     assert multi.to_reps == {EDEN, STALIN}
@@ -225,7 +231,7 @@ def test_representative_submit_phase_switch(scenario: Scenario) -> None:
     churchill = _rep(scenario, CHURCHILL)
     stalin = _rep(scenario, STALIN)
     venue = scenario.venues[0]
-    assert scenario.event_list is not None
+    events = _events(scenario)
     before = venue.session_phase
 
     with pytest.raises(PermissionError, match="系统主席"):
@@ -248,7 +254,7 @@ def test_representative_submit_phase_switch(scenario: Scenario) -> None:
     assert event.previous_phase == before
     assert event.target_phase == SessionPhase.FREE_DISCUSSION
     assert venue.session_phase == SessionPhase.FREE_DISCUSSION
-    assert event in scenario.event_list.get_events(STALIN)
+    assert event in events.get_events(STALIN)
 
 
 def test_representative_submit_motion_switch(scenario: Scenario) -> None:
@@ -257,7 +263,7 @@ def test_representative_submit_motion_switch(scenario: Scenario) -> None:
 
     churchill = _rep(scenario, CHURCHILL)
     stalin = _rep(scenario, STALIN)
-    assert scenario.event_list is not None
+    events = _events(scenario)
     assert churchill.venue is not None
     before_phase = churchill.venue.session_phase
 
@@ -270,8 +276,8 @@ def test_representative_submit_motion_switch(scenario: Scenario) -> None:
     assert motion.status == EventStatus.PENDING
     assert motion.target_phase == SessionPhase.FREE_DISCUSSION
     assert set(motion.scope) == set(churchill.venue.seats)
-    assert motion in scenario.event_list.get_events(STALIN)
-    assert motion.id in scenario.event_list.pending_event_ids
+    assert motion in events.get_events(STALIN)
+    assert motion.id in events.pending_event_ids
     # 动议不改变会场阶段
     assert churchill.venue.session_phase == before_phase
 
@@ -281,7 +287,7 @@ def test_representative_submit_instruction(scenario: Scenario) -> None:
 
     churchill = _rep(scenario, CHURCHILL)
     stalin = _rep(scenario, STALIN)
-    assert scenario.event_list is not None
+    events = _events(scenario)
 
     draft = churchill.create_file("instruction.md", "请外长核对希腊条款", "外长指示")
     instruction = churchill.submit_instruction(
@@ -295,12 +301,12 @@ def test_representative_submit_instruction(scenario: Scenario) -> None:
     assert instruction.status == EventStatus.PENDING
     assert instruction.from_reps == {CHURCHILL, EDEN}
     assert instruction.scope == {CHURCHILL, EDEN}
-    assert instruction in scenario.event_list.get_events(EDEN)
-    assert instruction in scenario.event_list.get_events(CHURCHILL)
-    assert instruction not in scenario.event_list.get_events(STALIN)
+    assert instruction in events.get_events(EDEN)
+    assert instruction in events.get_events(CHURCHILL)
+    assert instruction not in events.get_events(STALIN)
     linked = [
         e
-        for e in scenario.event_list.get_events(EDEN)
+        for e in events.get_events(EDEN)
         if isinstance(e, InstructionEvent)
     ]
     assert linked[0].instruction is submitted
@@ -324,7 +330,7 @@ def test_representative_submit_resolution(scenario: Scenario) -> None:
 
     churchill = _rep(scenario, CHURCHILL)
     stalin = _rep(scenario, STALIN)
-    assert scenario.event_list is not None
+    events = _events(scenario)
     assert churchill.venue is not None
 
     draft = churchill.create_file("resolution.md", "百分比草案", "决议草案")
@@ -338,7 +344,7 @@ def test_representative_submit_resolution(scenario: Scenario) -> None:
     assert resolution.status == EventStatus.PENDING
     assert resolution.from_reps == set(churchill.venue.seats)
     assert set(resolution.scope) == set(churchill.venue.seats)
-    assert resolution in scenario.event_list.get_events(STALIN)
+    assert resolution in events.get_events(STALIN)
 
     limited = churchill.submit_resolution(
         "仅英方可见草案", {CHURCHILL, EDEN}, submitted
@@ -346,6 +352,5 @@ def test_representative_submit_resolution(scenario: Scenario) -> None:
     assert limited.resolution is submitted
     assert limited.from_reps == {CHURCHILL, EDEN}
     assert limited.scope == {CHURCHILL, EDEN}
-    assert limited in scenario.event_list.get_events(EDEN)
-    assert limited not in scenario.event_list.get_events(STALIN)
-
+    assert limited in events.get_events(EDEN)
+    assert limited not in events.get_events(STALIN)

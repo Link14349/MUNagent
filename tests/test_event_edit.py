@@ -14,7 +14,6 @@ from event.event import (
     VoteEvent,
     VotePassMode,
 )
-from event.eventlist import EventList
 from scenario.scenario import Scenario
 from scenario.venue import SessionPhase
 
@@ -22,9 +21,12 @@ TEMPLATE = Path(__file__).resolve().parent.parent / "scenario-template"
 
 
 @pytest.fixture
-def scenario() -> Scenario:
+def scenario(tmp_path: Path) -> Scenario:
     loaded = Scenario()
     loaded.load(str(TEMPLATE))
+    loaded.root_path = tmp_path
+    (tmp_path / "simulation").mkdir()
+    loaded.initialize()
     return loaded
 
 
@@ -117,7 +119,8 @@ def test_time_type_venue_immutable_id_assign_once(scenario: Scenario, venue_id: 
 
 
 def test_event_list_add_stamps_time_and_id(scenario: Scenario, venue_id: str) -> None:
-    events = EventList(scenario)
+    venue = scenario.venues[0]
+    assert venue.event_list is not None
     event = MotionSwitchEvent(
         "动议",
         SessionPhase.FREE_DISCUSSION,
@@ -125,22 +128,21 @@ def test_event_list_add_stamps_time_and_id(scenario: Scenario, venue_id: str) ->
         {rep.id for rep in scenario.representatives},
         scenario,
     )
-    events.submit_event(event)
-    assert event.time == scenario.start_time == events.time
+    venue.submit_event(event)
+    assert event.time == scenario.start_time == scenario.time
     assert event.id == 0
 
     with pytest.raises(ValueError, match="应由 EventList.submit_event 设定"):
-        events.submit_event(event)
+        venue.event_list.submit_event(event)
 
 
 def test_event_list_time_pass(scenario: Scenario) -> None:
-    events = EventList(scenario)
     assert scenario.start_time is not None
     start = scenario.start_time
-    events.time_pass(timedelta(minutes=30))
-    assert events.time == start + timedelta(minutes=30)
+    scenario.time_pass(timedelta(minutes=30))
+    assert scenario.time == start + timedelta(minutes=30)
 
     with pytest.raises(ValueError, match="不可为负"):
-        events.time_pass(timedelta(seconds=-1))
+        scenario.time_pass(timedelta(seconds=-1))
     with pytest.raises(TypeError, match="timedelta"):
-        events.time_pass(30)  # type: ignore[arg-type]
+        scenario.time_pass(30)  # type: ignore[arg-type]

@@ -127,8 +127,9 @@ async def test_step_runs_tool_loop_then_final_text(
     assert agent.messages[4] == ChatMessage(
         role="assistant", content="已完成公开发言。"
     )
-    assert scenario.event_list is not None
-    events = scenario.event_list.get_events("winston_churchill")
+    event_list = scenario.venues[0].event_list
+    assert event_list is not None
+    events = event_list.get_events("winston_churchill")
     assert any(
         getattr(event, "from_rep", None) == "winston_churchill"
         for event in events

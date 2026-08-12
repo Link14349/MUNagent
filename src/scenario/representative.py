@@ -75,13 +75,7 @@ class Representative:
         return self.venue
 
     def _require_event_list(self):
-        venue = self._require_venue()
-        event_list = venue.scenario.event_list
-        if event_list is None:
-            raise RuntimeError(
-                f"代表 {self.id} 所在 Scenario 尚未创建 EventList,无法提交事件"
-            )
-        return event_list
+        return self._require_venue()._require_event_list()
 
     # 与 Agenda / Venue 的交互通道
     @property
@@ -213,14 +207,14 @@ class Representative:
             return file
         return self.submit_file(file)
 
-    # 与 EventList 的交互通道
+    # 通过 Venue 提交事件
     def send_message(self, content: str) -> MessageEvent:
         """以本代表身份公开发言,提交 ``MessageEvent``(全会场可见)."""
         from event.event import MessageEvent
 
         venue = self._require_venue()
         event = MessageEvent(content, self.id, venue.id, venue.scenario)
-        self._require_event_list().submit_event(event)
+        venue.submit_event(event)
         return event
 
     def pass_note(self, content: str, to: str | set[str]) -> NoteEvent:
@@ -230,7 +224,7 @@ class Representative:
         venue = self._require_venue()
         recipients = self._resolve_seat_ids(to, field="传纸条收件人")
         event = NoteEvent(content, self.id, recipients, venue.id, venue.scenario)
-        self._require_event_list().submit_event(event)
+        venue.submit_event(event)
         return event
 
     def submit_motion_switch(
@@ -247,7 +241,7 @@ class Representative:
             set(venue.seats),
             venue.scenario,
         )
-        self._require_event_list().submit_event(event)
+        venue.submit_event(event)
         return event
 
     def submit_phase_switch(
@@ -278,7 +272,7 @@ class Representative:
         event = InstructionEvent(
             content, from_reps, submitted, venue.id, venue.scenario
         )
-        self._require_event_list().submit_event(event)
+        venue.submit_event(event)
         return event
 
     def submit_resolution(
@@ -297,5 +291,5 @@ class Representative:
         event = ResolutionEvent(
             content, from_reps, submitted, venue.id, venue.scenario
         )
-        self._require_event_list().submit_event(event)
+        venue.submit_event(event)
         return event

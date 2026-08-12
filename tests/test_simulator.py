@@ -33,7 +33,7 @@ def test_simulator_run_starts_venue_and_agent_threads(scenario: Scenario) -> Non
     sim.run()
 
     assert scenario.filesystem is not None
-    assert scenario.event_list is not None
+    assert all(venue.event_list is not None for venue in scenario.venues)
     assert set(sim.venue_engines) == set(venue_ids)
     assert set(sim.venue_threads) == set(venue_ids)
     assert set(sim.agents) == set(rep_ids)

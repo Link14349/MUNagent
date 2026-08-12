@@ -43,14 +43,16 @@
 
 `background.md` 和 `storyline.yaml` 使用固定文件名.venue 和代表文件分别通过扫描 `venues/*.yaml`,`reps/*.yaml` 发现,因此 `index.yaml` 不需要 `files`,`venues` 或 `representatives` 字段.
 
-`simulation/` 由通用引擎在 `Scenario.initialize()` 时创建并绑定一个 `FileSystem`;场景包作者不在此目录写入声明式内容.`initialize` 同时新建 `EventList`,并将 `storyline.yaml` 载入的 `event_pool` 中所有 `type: time` 的外部事件经 `pull_up_event` 挂入待触发队列;`text` 条件事件暂不自动挂载.
+`simulation/` 由通用引擎在 `Scenario.initialize()` 时创建并绑定一个 `FileSystem`;场景包作者不在此目录写入声明式内容.`initialize` 同时初始化场景统一剧情时钟,为每个 `Venue` 新建独立的 `EventList`,并将 `storyline.yaml` 载入的 `event_pool` 中所有 `type: time` 的外部事件经 `Scenario.pull_up_event` 挂入场景级待触发队列;`text` 条件事件暂不自动挂载.
 
 运行时文件可见性由程序强制执行:
 
 - `reps/<rep_id>/`:工作文件,通过 `scope`/`owner` 控制读/写;`list_visible` / `list_writable` 只枚举该目录.查看某文件的 `owners`/`scope` 须通过 `Representative.get_file_access`(或 Agent 工具 `get_file_access`),且**仅 owner 可查**;仅在 scope 内的非 owner 不得获知权限名单.
 - `submissions/<venue_id>/`:仅存放经 `File.submit()` 复制的提交副本,命名为 `<primary_owner>+<原文件名>+v<版本号>`(`primary_owner` 为该文件 owner 集合中最先加入者);与同系列最新版内容 hash 相同则拒绝,否则递增版本.副本 `owner`/`scope` 为空,**不能**通过文件系统列表或直接路径被代表发现或改写.`Representative.submit_instruction` / `submit_resolution`(及对应 Agent 工具)在绑定 `reps/` 工作文件时会自动执行提交;Agent 不再单独暴露 `submit_file` 工具.
-- 代表若要得知某份 submission 的存在并读取其内容,只能经由 `EventList.get_events(rep_id)` 返回的,对该代表可见的事件(例如绑定了 `File` 的 `InstructionEvent` / `ResolutionEvent`)索引到该文件;引擎组装 Agent 上下文时不得把未被子事件引用的 submission 注入可见文件列表.
-- 运行时 `Event` 对象构造时不携带剧情时间(`time` 为 `None`);只有经 `EventList.submit_event` 入表时,才由事件表用当前时钟盖戳,并按 `event.venue` 写入对应会场的 `VenueEventList`(`id` 仅在该会场内唯一).仍为 `PENDING` 的事件进入该会场的 pending 队列;经 `Event.status` 离开 `PENDING` 时由事件回调 `EventList._event_updated` 路由到对应会场容器出队.剧情时钟由 `EventList.update_time`(绝对时刻)或 `EventList.time_pass`(相对时长)推进.按会场分桶是为后续「每会场一线程」推进时避免多会场争用同一事件列表.
+- 代表若要得知某份 submission 的存在并读取其内容,只能经由其所属 `Venue.event_list.get_events(rep_id)` 返回的,对该代表可见的事件(例如绑定了 `File` 的 `InstructionEvent` / `ResolutionEvent`)索引到该文件;引擎组装 Agent 上下文时不得把未被子事件引用的 submission 注入可见文件列表.
+- 运行时 `Event` 对象构造时不携带剧情时间(`time` 为 `None`).代表通过 `Venue.submit_event` 提交事件时,`Scenario` 用统一的当前剧情时间盖戳,再由该 `Venue` 的独立 `EventList` 赋予会场内唯一的 `id` 并入表.`EventList` 只负责事件存储,pending 队列,可见性查询与 listener,不推进时间;入表时要求 `time` 已由 Scenario 盖戳,否则拒绝.
+- 全场景剧情时钟由 `Scenario.update_time`(绝对时刻)或 `Scenario.time_pass`(相对时长)推进.时间条件外部事件到期后,`Scenario` 使用同一剧情时刻为每个会场分别生成并提交一份 `SystemEvent`.
+- 仍为 `PENDING` 的事件进入所属会场的 pending 队列;经 `Event.status` 离开 `PENDING` 时回调 `Scenario`,由 `Scenario` 按 `event.venue` 路由到对应的 `Venue.event_list` 出队.
 
 ## 3. 通用约定
 
