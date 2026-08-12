@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+import threading
 
 import pytest
 
@@ -17,12 +19,14 @@ EDEN = "anthony_eden"
 
 
 @pytest.fixture
-def scenario(tmp_path: Path) -> Scenario:
+def scenario(tmp_path: Path, venue_engine_runner) -> Scenario:
     loaded = Scenario()
     loaded.load(str(TEMPLATE))
     loaded.root_path = tmp_path
     (tmp_path / "simulation").mkdir()
     loaded.initialize()
+    for venue in loaded.venues:
+        venue_engine_runner.start(venue)
     return loaded
 
 
@@ -70,3 +74,45 @@ def test_representative_events_are_submitted_through_venue(
         EventType.RESOLUTION,
     ]
     assert all(event.id is not None for event in forwarded)
+
+
+def test_concurrent_submissions_are_committed_once_in_venue_engine(
+    scenario: Scenario,
+) -> None:
+    venue = scenario.venues[0]
+    assert venue.event_list is not None
+    commit_threads: list[str] = []
+    venue.event_list.add_listener(
+        EventType.MESSAGE,
+        lambda event: commit_threads.append(threading.current_thread().name),
+    )
+
+    events = [
+        MessageEvent(f"并发发言 {index}", CHURCHILL, venue.id, scenario)
+        for index in range(100)
+    ]
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        committed = list(executor.map(venue.submit_event, events))
+
+    assert committed == events
+    assert sorted(event.id for event in events if event.id is not None) == list(
+        range(100)
+    )
+    assert set(venue.event_list.events) == set(events)
+    assert len(commit_threads) == 100
+    assert set(commit_threads) == {f"test-venue:{venue.id}"}
+
+
+def test_submission_error_returns_to_caller_and_engine_continues(
+    scenario: Scenario,
+) -> None:
+    venue = scenario.venues[0]
+    invalid = MessageEvent("预设编号", CHURCHILL, venue.id, scenario)
+    invalid.id = 9
+
+    with pytest.raises(ValueError, match="应由 EventList._commit_event 设定"):
+        venue.submit_event(invalid)
+
+    valid = MessageEvent("错误后继续", CHURCHILL, venue.id, scenario)
+    assert venue.submit_event(valid) is valid
+    assert valid.id == 0

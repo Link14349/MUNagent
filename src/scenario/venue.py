@@ -1,6 +1,11 @@
 from __future__ import annotations
 
+from concurrent.futures import Future
+from dataclasses import dataclass
+from datetime import datetime
 from enum import StrEnum
+from queue import Queue
+import threading
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -26,6 +31,20 @@ class CHAIR_POWER(StrEnum):
     DECIDE_SWITCH_PHASE = "decide_switch_phase"
 
 
+@dataclass(frozen=True)
+class EventSubmission:
+    event: Event
+    time: datetime
+    result: Future[Event]
+
+
+class _StopEventProcessing:
+    pass
+
+
+_STOP_EVENT_PROCESSING = _StopEventProcessing()
+
+
 class Venue:
     id: str
     name: str
@@ -38,6 +57,9 @@ class Venue:
     groups: list[Group]
     chair_power: dict[CHAIR_POWER, bool]
     event_list: EventList | None
+    __event_queue: Queue[EventSubmission | _StopEventProcessing] | None
+    __event_processing: threading.Event
+    __event_submission_lock: threading.Lock
 
     def __init__(self, scenario: Scenario):
         self.id = ""
@@ -54,6 +76,9 @@ class Venue:
         self.__session_phase: SessionPhase | None = None
         self.chair_power = {power: False for power in CHAIR_POWER}
         self.event_list = None
+        self.__event_queue = None
+        self.__event_processing = threading.Event()
+        self.__event_submission_lock = threading.Lock()
 
     def _find_rep(self, rep_id: str) -> Representative | None:
         return self.reps.get(rep_id) or self.scenario.reps.get(rep_id)
@@ -154,19 +179,73 @@ class Venue:
             )
         return event_list
 
-    def submit_event(self, event: Event) -> None:
-        """接收会场事件并转交本会场事件表.
+    def _require_event_queue(
+        self,
+    ) -> Queue[EventSubmission | _StopEventProcessing]:
+        event_queue = self.__event_queue
+        if event_queue is None:
+            raise RuntimeError(
+                f"会场 {self.id or '<unset>'} 尚未 initialize 事件队列"
+            )
+        return event_queue
 
-        当前只建立代表与本会场 ``EventList`` 之间的边界；事件排队、排序、
-        校验和裁定留给后续的会场主循环实现。事件时间由 Scenario 统一盖戳。
+    def submit_event(self, event: Event) -> Event:
+        """提交事件并等待所属 VenueEngine 返回处理结果.
+
+        事件先进入本会场的线程安全队列；调用线程不会直接写入 ``EventList``。
         """
+        event_time = self.scenario._event_submission_time(event)
+        return self._submit_event(event, event_time)
+
+    def _submit_event(self, event: Event, event_time: datetime) -> Event:
+        """按指定剧情时间入队；仅供 Scenario 广播定时事件时使用."""
         if event.venue != self.id:
             raise ValueError(
                 f"事件 venue={event.venue!r} 不能提交给会场 {self.id!r}"
             )
-        event_list = self._require_event_list()
-        self.scenario._stamp_event(event)
-        event_list.submit_event(event)
+        self._require_event_list()
+        event_queue = self._require_event_queue()
+        result: Future[Event] = Future()
+        submission = EventSubmission(event, event_time, result)
+        with self.__event_submission_lock:
+            if not self.__event_processing.is_set():
+                raise RuntimeError(
+                    f"会场 {self.id!r} 的 VenueEngine 尚未运行或已经停止,"
+                    "不能提交事件"
+                )
+            event_queue.put(submission)
+        return result.result()
+
+    def _start_event_processing(self) -> None:
+        """标记 VenueEngine 已成为本会场事件队列的唯一消费者."""
+        self._require_event_list()
+        self._require_event_queue()
+        with self.__event_submission_lock:
+            if self.__event_processing.is_set():
+                raise RuntimeError(f"会场 {self.id!r} 的事件处理循环已运行")
+            self.__event_processing.set()
+
+    def _stop_event_processing(self) -> None:
+        """停止接受新事件，并让 VenueEngine 处理完已入队事件后退出."""
+        event_queue = self._require_event_queue()
+        with self.__event_submission_lock:
+            if not self.__event_processing.is_set():
+                return
+            self.__event_processing.clear()
+            event_queue.put(_STOP_EVENT_PROCESSING)
+
+    def _take_event_submission(
+        self,
+    ) -> EventSubmission | _StopEventProcessing:
+        return self._require_event_queue().get()
+
+    def _event_submission_done(self) -> None:
+        self._require_event_queue().task_done()
+
+    def _commit_event(self, submission: EventSubmission) -> None:
+        """由 VenueEngine 为事件盖戳并写入本会场 EventList."""
+        self.scenario._stamp_event(submission.event, submission.time)
+        self._require_event_list()._commit_event(submission.event)
 
     def _agenda_event_scope(self) -> set[str]:
         return set(self.seats)
@@ -254,7 +333,7 @@ class Venue:
         return event
 
     def initialize(self) -> None:
-        """创建本会场 EventList 并注册 PHASE_SWITCH listener."""
+        """创建本会场 EventList、提交队列并注册 PHASE_SWITCH listener."""
         from event.event import EventType
         from event.eventlist import EventList
 
@@ -263,6 +342,8 @@ class Venue:
                 f"会场 {self.id or '<unset>'} 已 initialize EventList,不能重复初始化"
             )
         self.event_list = EventList(self)
+        self.__event_queue = Queue()
+        self.__event_processing.clear()
         self.event_list.add_listener(
             EventType.PHASE_SWITCH,
             self._on_phase_switch,

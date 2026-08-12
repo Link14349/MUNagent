@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -32,12 +33,14 @@ MOLOTOV = "vyacheslav_molotov"
 
 
 @pytest.fixture
-def scenario(tmp_path: Path) -> Scenario:
+def scenario(tmp_path: Path, venue_engine_runner) -> Scenario:
     loaded = Scenario()
     loaded.load(str(TEMPLATE))
     loaded.root_path = tmp_path
     (tmp_path / "simulation").mkdir()
     loaded.initialize()
+    for venue in loaded.venues:
+        venue_engine_runner.start(venue)
     return loaded
 
 
@@ -64,17 +67,16 @@ def test_initialize_binds_time_and_event_list_per_venue(scenario: Scenario) -> N
         assert venue.event_list.events == []
 
 
-def test_event_list_rejects_unstamped_time_venue_path_stamps(
+def test_event_list_public_submit_uses_venue_queue(
     scenario: Scenario,
     venue: Venue,
     events: EventList,
 ) -> None:
-    unstamped = SystemEvent("直接入表", [], venue.id, {CHURCHILL}, scenario)
-    with pytest.raises(ValueError, match="应由 Scenario 盖戳后再入表"):
-        events.submit_event(unstamped)
+    submitted = MessageEvent("经事件表入口提交", CHURCHILL, venue.id, scenario)
 
-    submitted = MessageEvent("经会场提交", CHURCHILL, venue.id, scenario)
-    venue.submit_event(submitted)
+    result = events.submit_event(submitted)
+
+    assert result is submitted
     assert submitted.id == 0
     assert submitted.time == scenario.time == scenario.start_time
 
@@ -92,8 +94,8 @@ def test_venue_rejects_preassigned_time_and_event_list_rejects_id(
     numbered = SystemEvent("预设编号", [], venue.id, {CHURCHILL}, scenario)
     numbered.time = scenario.time
     numbered.id = 99
-    with pytest.raises(ValueError, match="应由 EventList.submit_event 设定"):
-        events.submit_event(numbered)
+    with pytest.raises(ValueError, match="应由 EventList._commit_event 设定"):
+        events._commit_event(numbered)
 
 
 def test_venue_initialize_rejects_reentry(venue: Venue) -> None:
@@ -122,11 +124,12 @@ def test_submit_event_notifies_local_listeners_in_order(
 def test_event_list_rejects_event_from_another_venue(
     scenario: Scenario,
     events: EventList,
+    venue_engine_runner,
 ) -> None:
-    side = _add_side_venue(scenario)
+    side = _add_side_venue(scenario, venue_engine_runner)
     foreign = MessageEvent("侧会场发言", CHURCHILL, side.id, scenario)
 
-    with pytest.raises(ValueError, match="与 EventList 所属会场"):
+    with pytest.raises(ValueError, match="不能提交给会场"):
         events.submit_event(foreign)
 
 
@@ -188,8 +191,9 @@ def test_scenario_pull_up_rejects_non_time_and_skips_past(
 def test_scenario_time_fires_due_events_into_each_venue(
     scenario: Scenario,
     venue: Venue,
+    venue_engine_runner,
 ) -> None:
-    side = _add_side_venue(scenario)
+    side = _add_side_venue(scenario, venue_engine_runner)
     moscow = ZoneInfo("Europe/Moscow")
     first_due = datetime(1944, 10, 9, 22, 45, tzinfo=moscow)
 
@@ -220,6 +224,15 @@ def test_scenario_time_cannot_go_backwards(scenario: Scenario) -> None:
         scenario.update_time(later - timedelta(seconds=1))
     with pytest.raises(ValueError, match="不可为负"):
         scenario.time_pass(timedelta(minutes=-5))
+
+
+def test_concurrent_relative_time_updates_are_not_lost(scenario: Scenario) -> None:
+    start = scenario.time
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        list(executor.map(lambda _: scenario.time_pass(timedelta(seconds=1)), range(20)))
+
+    assert scenario.time == start + timedelta(seconds=20)
 
 
 def test_event_edit_permissions_after_submit(
@@ -282,8 +295,9 @@ def test_pending_queue_is_local_and_status_callback_uses_venue_list(
     scenario: Scenario,
     venue: Venue,
     events: EventList,
+    venue_engine_runner,
 ) -> None:
-    side = _add_side_venue(scenario)
+    side = _add_side_venue(scenario, venue_engine_runner)
     assert side.event_list is not None
     main_motion = MotionSwitchEvent(
         "主会场动议",
@@ -371,8 +385,9 @@ def test_instruction_is_visible_only_through_venue_event_list(
 def test_venue_event_lists_have_independent_ids_and_shared_time(
     scenario: Scenario,
     venue: Venue,
+    venue_engine_runner,
 ) -> None:
-    side = _add_side_venue(scenario)
+    side = _add_side_venue(scenario, venue_engine_runner)
     main_note = NoteEvent("主会场纸条", CHURCHILL, {EDEN}, venue.id, scenario)
     side_note = NoteEvent("侧会场纸条", CHURCHILL, {EDEN}, side.id, scenario)
 
@@ -388,10 +403,11 @@ def test_venue_event_lists_have_independent_ids_and_shared_time(
     assert side.event_list.events == [side_note]
 
 
-def _add_side_venue(scenario: Scenario) -> Venue:
+def _add_side_venue(scenario: Scenario, venue_engine_runner) -> Venue:
     side = Venue(scenario)
     side.id = "side_chamber"
     side.seats = list(scenario.venues[0].seats)
     scenario.venues.append(side)
     side.initialize()
+    venue_engine_runner.start(side)
     return side

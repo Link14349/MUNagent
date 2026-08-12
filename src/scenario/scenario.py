@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 from pathlib import Path
+import threading
 from typing import TYPE_CHECKING
 
 from condition.condition import Condition
@@ -30,6 +31,8 @@ class Scenario:
     filesystem: FileSystem | None
     __time: datetime | None
     __pullup_events: list[PullUpEvent]
+    __time_lock: threading.RLock
+    __time_update_lock: threading.RLock
 
     def __init__(self) -> None:
         self.title = ""
@@ -47,6 +50,8 @@ class Scenario:
         self.filesystem = None
         self.__time = None
         self.__pullup_events = []
+        self.__time_lock = threading.RLock()
+        self.__time_update_lock = threading.RLock()
 
     def load(self, scenario_path: str) -> None:
         from scenario.load import populate_scenario
@@ -56,34 +61,55 @@ class Scenario:
     @property
     def time(self) -> datetime:
         """全场景统一的当前剧情时间."""
-        if self.__time is None:
-            raise RuntimeError("Scenario 尚未 initialize，剧情时间不可用")
-        return self.__time
+        with self.__time_lock:
+            if self.__time is None:
+                raise RuntimeError("Scenario 尚未 initialize，剧情时间不可用")
+            return self.__time
 
     @property
     def pullup_events(self) -> list[PullUpEvent]:
         """尚未到期的时间条件外部事件副本."""
-        return list(self.__pullup_events)
+        with self.__time_lock:
+            return list(self.__pullup_events)
 
     def pull_up_event(self, pullup: PullUpEvent) -> None:
         """将时间条件外部事件挂入场景级待触发队列."""
-        if pullup.scenario is not self:
-            raise ValueError("PullUpEvent 不属于当前 Scenario")
-        if pullup.condition.type != "time" or pullup.condition.time is None:
-            raise ValueError("Pull up event must be a time condition")
-        if pullup.condition.time < self.time:
-            return
-        self.__pullup_events.append(pullup)
+        with self.__time_lock:
+            if pullup.scenario is not self:
+                raise ValueError("PullUpEvent 不属于当前 Scenario")
+            if pullup.condition.type != "time" or pullup.condition.time is None:
+                raise ValueError("Pull up event must be a time condition")
+            if pullup.condition.time < self.time:
+                return
+            self.__pullup_events.append(pullup)
 
-    def _stamp_event(self, event: Event) -> None:
+    def _event_submission_time(self, event: Event) -> datetime:
+        """校验事件归属并取得提交瞬间的统一剧情时间."""
+        with self.__time_lock:
+            if event.scenario is not self:
+                raise ValueError("事件不属于当前 Scenario,不能使用本场景时间盖戳")
+            if event.time is not None:
+                raise ValueError(
+                    f"事件 time 应由 Scenario 设定,当前已为 {event.time!r}"
+                )
+            return self.time
+
+    def _stamp_event(self, event: Event, event_time: datetime) -> None:
         """按场景统一时钟为尚未入表的事件盖戳."""
-        if event.scenario is not self:
-            raise ValueError("事件不属于当前 Scenario,不能使用本场景时间盖戳")
-        if event.time is not None:
-            raise ValueError(
-                f"事件 time 应由 Scenario 设定,当前已为 {event.time!r}"
-            )
-        event.time = self.time
+        with self.__time_lock:
+            if event.scenario is not self:
+                raise ValueError("事件不属于当前 Scenario,不能使用本场景时间盖戳")
+            if event.time is not None:
+                raise ValueError(
+                    f"事件 time 应由 Scenario 设定,当前已为 {event.time!r}"
+                )
+            if self.__time is None:
+                raise RuntimeError("Scenario 尚未 initialize，无法为事件盖戳")
+            if event_time > self.__time:
+                raise ValueError(
+                    f"事件提交时间 {event_time!r} 晚于当前剧情时间 {self.__time!r}"
+                )
+            event.time = event_time
 
     def _event_updated(self, event: Event) -> None:
         """将事件状态更新路由到其所属会场的 EventList."""
@@ -102,43 +128,48 @@ class Scenario:
 
     def update_time(self, new_time: datetime) -> None:
         """将全场景剧情时钟推进到绝对时刻 ``new_time``，不可倒退."""
-        if new_time < self.time:
-            raise ValueError("剧情时间不可倒退")
-        self.__time = new_time
+        with self.__time_update_lock:
+            with self.__time_lock:
+                if new_time < self.time:
+                    raise ValueError("剧情时间不可倒退")
+                self.__time = new_time
 
-        due = [
-            pullup
-            for pullup in self.__pullup_events
-            if pullup.condition.time is not None
-            and pullup.condition.time <= self.time
-        ]
-        if not due:
-            return
+                due = [
+                    pullup
+                    for pullup in self.__pullup_events
+                    if pullup.condition.time is not None
+                    and pullup.condition.time <= new_time
+                ]
+                due_set = set(due)
+                self.__pullup_events = [
+                    pullup
+                    for pullup in self.__pullup_events
+                    if pullup not in due_set
+                ]
+            if not due:
+                return
 
-        from event.event import SystemEvent
+            from event.event import SystemEvent
 
-        for pullup in due:
-            for venue in self.venues:
-                venue.submit_event(
-                    SystemEvent(
-                        pullup.content,
-                        [],
-                        venue.id,
-                        set(venue.seats),
-                        self,
+            for pullup in due:
+                for venue in self.venues:
+                    venue._submit_event(
+                        SystemEvent(
+                            pullup.content,
+                            [],
+                            venue.id,
+                            set(venue.seats),
+                            self,
+                        ),
+                        new_time,
                     )
-                )
-
-        due_set = set(due)
-        self.__pullup_events = [
-            pullup for pullup in self.__pullup_events if pullup not in due_set
-        ]
 
     def time_pass(self, delta_time: timedelta) -> None:
         """让全场景剧情时钟相对推进 ``delta_time``."""
         if delta_time < timedelta(0):
             raise ValueError(f"delta_time 不可为负,实际为 {delta_time!r}")
-        self.update_time(self.time + delta_time)
+        with self.__time_update_lock:
+            self.update_time(self.time + delta_time)
 
     def initialize(self) -> None:
         """准备一次推演运行:统一时钟、定时事件、各会场事件表和文件系统."""
@@ -150,8 +181,9 @@ class Scenario:
         if self.start_time is None:
             raise RuntimeError("Scenario 尚未加载 start_time,不能 initialize")
 
-        self.__time = self.start_time
-        self.__pullup_events = []
+        with self.__time_lock:
+            self.__time = self.start_time
+            self.__pullup_events = []
         for pullup in self.event_pool:
             if pullup.condition.type == "time":
                 self.pull_up_event(pullup)

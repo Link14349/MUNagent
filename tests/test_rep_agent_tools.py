@@ -20,12 +20,14 @@ STALIN = "joseph_stalin"
 
 
 @pytest.fixture
-def scenario(tmp_path: Path) -> Scenario:
+def scenario(tmp_path: Path, venue_engine_runner) -> Scenario:
     loaded = Scenario()
     loaded.load(str(TEMPLATE))
     loaded.root_path = tmp_path
     (tmp_path / "simulation").mkdir()
     loaded.initialize()
+    for venue in loaded.venues:
+        venue_engine_runner.start(venue)
     return loaded
 
 

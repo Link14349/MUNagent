@@ -21,12 +21,14 @@ TEMPLATE = Path(__file__).resolve().parent.parent / "scenario-template"
 
 
 @pytest.fixture
-def scenario(tmp_path: Path) -> Scenario:
+def scenario(tmp_path: Path, venue_engine_runner) -> Scenario:
     loaded = Scenario()
     loaded.load(str(TEMPLATE))
     loaded.root_path = tmp_path
     (tmp_path / "simulation").mkdir()
     loaded.initialize()
+    for venue in loaded.venues:
+        venue_engine_runner.start(venue)
     return loaded
 
 
@@ -132,8 +134,8 @@ def test_event_list_add_stamps_time_and_id(scenario: Scenario, venue_id: str) ->
     assert event.time == scenario.start_time == scenario.time
     assert event.id == 0
 
-    with pytest.raises(ValueError, match="应由 EventList.submit_event 设定"):
-        venue.event_list.submit_event(event)
+    with pytest.raises(ValueError, match="应由 EventList._commit_event 设定"):
+        venue.event_list._commit_event(event)
 
 
 def test_event_list_time_pass(scenario: Scenario) -> None:

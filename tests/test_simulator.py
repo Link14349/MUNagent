@@ -62,6 +62,30 @@ def test_simulator_start_join_separate(scenario: Scenario) -> None:
     assert all(not t.is_alive() for t in sim.agent_threads.values())
 
 
+def test_simulator_agents_submit_through_running_venue_engine(
+    scenario: Scenario,
+) -> None:
+    sim = Simulator(scenario)
+
+    def submit_message(self: RepresentativeAgent) -> None:
+        self.rep.send_message(f"{self.rep.id} 线程发言")
+
+    original = RepresentativeAgent.run
+    RepresentativeAgent.run = submit_message  # type: ignore[method-assign]
+    try:
+        sim.run()
+    finally:
+        RepresentativeAgent.run = original  # type: ignore[method-assign]
+
+    event_list = scenario.venues[0].event_list
+    assert event_list is not None
+    events = event_list.get_events("__GOD__")
+    assert len(events) == len(scenario.representatives)
+    assert sorted(event.id for event in events if event.id is not None) == list(
+        range(len(scenario.representatives))
+    )
+
+
 def test_simulator_rejects_double_start(scenario: Scenario) -> None:
     sim = Simulator(scenario)
     sim.start()

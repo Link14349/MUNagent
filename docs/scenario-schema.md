@@ -50,7 +50,8 @@
 - `reps/<rep_id>/`:工作文件,通过 `scope`/`owner` 控制读/写;`list_visible` / `list_writable` 只枚举该目录.查看某文件的 `owners`/`scope` 须通过 `Representative.get_file_access`(或 Agent 工具 `get_file_access`),且**仅 owner 可查**;仅在 scope 内的非 owner 不得获知权限名单.
 - `submissions/<venue_id>/`:仅存放经 `File.submit()` 复制的提交副本,命名为 `<primary_owner>+<原文件名>+v<版本号>`(`primary_owner` 为该文件 owner 集合中最先加入者);与同系列最新版内容 hash 相同则拒绝,否则递增版本.副本 `owner`/`scope` 为空,**不能**通过文件系统列表或直接路径被代表发现或改写.`Representative.submit_instruction` / `submit_resolution`(及对应 Agent 工具)在绑定 `reps/` 工作文件时会自动执行提交;Agent 不再单独暴露 `submit_file` 工具.
 - 代表若要得知某份 submission 的存在并读取其内容,只能经由其所属 `Venue.event_list.get_events(rep_id)` 返回的,对该代表可见的事件(例如绑定了 `File` 的 `InstructionEvent` / `ResolutionEvent`)索引到该文件;引擎组装 Agent 上下文时不得把未被子事件引用的 submission 注入可见文件列表.
-- 运行时 `Event` 对象构造时不携带剧情时间(`time` 为 `None`).代表通过 `Venue.submit_event` 提交事件时,`Scenario` 用统一的当前剧情时间盖戳,再由该 `Venue` 的独立 `EventList` 赋予会场内唯一的 `id` 并入表.`EventList` 只负责事件存储,pending 队列,可见性查询与 listener,不推进时间;入表时要求 `time` 已由 Scenario 盖戳,否则拒绝.
+- 运行时 `Event` 对象构造时不携带剧情时间(`time` 为 `None`).代表通过 `Venue.submit_event` 提交事件时,提交会先进入该会场的线程安全队列,由对应 `VenueEngine` 作为唯一消费者顺序处理.`Scenario` 使用提交瞬间的统一剧情时间盖戳,再由该 `Venue` 的独立 `EventList` 赋予会场内唯一的 `id` 并入表.提交线程同步等待处理结果;入表异常会原样回传.`EventList.submit_event` 同样委托给所属 `Venue` 的队列,不允许绕过 `VenueEngine` 直接写入.
+- `EventList` 只负责事件编号与存储,pending 队列,可见性查询与 listener,不推进时间.listener 在所属 `VenueEngine` 线程中同步执行,不得阻塞等待同一会场队列或调用 LLM.
 - 全场景剧情时钟由 `Scenario.update_time`(绝对时刻)或 `Scenario.time_pass`(相对时长)推进.时间条件外部事件到期后,`Scenario` 使用同一剧情时刻为每个会场分别生成并提交一份 `SystemEvent`.
 - 仍为 `PENDING` 的事件进入所属会场的 pending 队列;经 `Event.status` 离开 `PENDING` 时回调 `Scenario`,由 `Scenario` 按 `event.venue` 路由到对应的 `Venue.event_list` 出队.
 

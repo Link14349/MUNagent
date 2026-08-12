@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 from typing import TYPE_CHECKING, Callable
 
 from event.event import Event, EventStatus, EventType
@@ -22,6 +23,7 @@ class EventList:
     __events: list[Event]
     __pending_events: list[int]
     __listeners: dict[EventType, list[Callable[[Event], None]]]
+    __lock: threading.RLock
 
     def __init__(self, venue: Venue) -> None:
         if not venue.id:
@@ -30,6 +32,7 @@ class EventList:
         self.__events = []
         self.__pending_events = []
         self.__listeners = {}
+        self.__lock = threading.RLock()
 
     @property
     def venue_id(self) -> str:
@@ -38,17 +41,20 @@ class EventList:
     @property
     def events(self) -> list[Event]:
         """已入表事件的浅拷贝列表."""
-        return list(self.__events)
+        with self.__lock:
+            return list(self.__events)
 
     @property
     def pending_event_ids(self) -> list[int]:
         """仍为 ``PENDING`` 的事件 id，按入队顺序返回."""
-        return list(self.__pending_events)
+        with self.__lock:
+            return list(self.__pending_events)
 
     @property
     def pending_events(self) -> list[Event]:
         """仍为 ``PENDING`` 的事件，按入队顺序返回."""
-        return [self.__events[event_id] for event_id in self.__pending_events]
+        with self.__lock:
+            return [self.__events[event_id] for event_id in self.__pending_events]
 
     def add_listener(
         self,
@@ -56,62 +62,71 @@ class EventList:
         listener: Callable[[Event], None],
     ) -> None:
         """按事件类型注册本会场入表回调."""
-        self.__listeners.setdefault(event_type, []).append(listener)
+        with self.__lock:
+            self.__listeners.setdefault(event_type, []).append(listener)
 
-    def submit_event(self, event: Event) -> None:
+    def submit_event(self, event: Event) -> Event:
+        """经所属 Venue 的队列提交事件并等待处理结果."""
+        return self.venue.submit_event(event)
+
+    def _commit_event(self, event: Event) -> None:
         """为已由 Scenario 盖戳的会场事件编号、入表并通知 listener."""
-        if event.venue != self.venue.id:
-            raise ValueError(
-                f"事件 venue={event.venue!r} 与 EventList 所属会场 "
-                f"{self.venue.id!r} 不一致"
-            )
-        if event.time is None:
-            raise ValueError(
-                "事件 time 应由 Scenario 盖戳后再入表,当前为 None"
-            )
-        if event.id is not None:
-            raise ValueError(
-                f"事件 id 应由 EventList.submit_event 设定,当前已为 {event.id!r}"
-            )
+        with self.__lock:
+            if event.venue != self.venue.id:
+                raise ValueError(
+                    f"事件 venue={event.venue!r} 与 EventList 所属会场 "
+                    f"{self.venue.id!r} 不一致"
+                )
+            if event.time is None:
+                raise ValueError(
+                    "事件 time 应由 Scenario 盖戳后再入表,当前为 None"
+                )
+            if event.id is not None:
+                raise ValueError(
+                    f"事件 id 应由 EventList._commit_event 设定,当前已为 {event.id!r}"
+                )
 
-        event.id = len(self.__events)
-        self.__events.append(event)
-        if event.status == EventStatus.PENDING:
-            self.__pending_events.append(event.id)
+            event.id = len(self.__events)
+            self.__events.append(event)
+            if event.status == EventStatus.PENDING:
+                self.__pending_events.append(event.id)
+            listeners = list(self.__listeners.get(event.type, ()))
 
-        for listener in self.__listeners.get(event.type, ()):
+        for listener in listeners:
             listener(event)
 
     def _event_updated(self, event: Event) -> None:
         """事件离开 ``PENDING`` 时将其移出 pending 队列."""
-        if event.id is None:
-            raise ValueError("事件尚未入表,不能更新 pending")
-        if (
-            event.id < 0
-            or event.id >= len(self.__events)
-            or self.__events[event.id] is not event
-        ):
-            raise ValueError(
-                f"事件(id={event.id!r}, venue={event.venue!r}) 不属于会场 "
-                f"{self.venue.id!r} 的 EventList,不能更新 pending"
-            )
-        if event.status == EventStatus.PENDING:
-            raise ValueError(
-                f"事件(id={event.id}, venue={event.venue!r}) 仍为 PENDING,"
-                "不应移出 pending 队列"
-            )
-        try:
-            self.__pending_events.remove(event.id)
-        except ValueError as exc:
-            raise ValueError(
-                f"事件(id={event.id}, venue={event.venue!r}) 不在 pending 队列中"
-            ) from exc
+        with self.__lock:
+            if event.id is None:
+                raise ValueError("事件尚未入表,不能更新 pending")
+            if (
+                event.id < 0
+                or event.id >= len(self.__events)
+                or self.__events[event.id] is not event
+            ):
+                raise ValueError(
+                    f"事件(id={event.id!r}, venue={event.venue!r}) 不属于会场 "
+                    f"{self.venue.id!r} 的 EventList,不能更新 pending"
+                )
+            if event.status == EventStatus.PENDING:
+                raise ValueError(
+                    f"事件(id={event.id}, venue={event.venue!r}) 仍为 PENDING,"
+                    "不应移出 pending 队列"
+                )
+            try:
+                self.__pending_events.remove(event.id)
+            except ValueError as exc:
+                raise ValueError(
+                    f"事件(id={event.id}, venue={event.venue!r}) 不在 pending 队列中"
+                ) from exc
 
     def get_events(self, rep: str) -> list[Event]:
         """返回本会场内对 ``rep`` 可见的事件."""
-        if rep == "__GOD__":
-            return list(self.__events)
-        return [event for event in self.__events if rep in event.scope]
+        with self.__lock:
+            if rep == "__GOD__":
+                return list(self.__events)
+            return [event for event in self.__events if rep in event.scope]
 
 
 class PullUpEvent:

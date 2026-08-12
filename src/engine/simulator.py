@@ -94,8 +94,10 @@ class Simulator:
             raise RuntimeError("Simulator 尚未 start/run,没有可 join 的线程")
 
         deadline = None if timeout is None else time.monotonic() + timeout
-        self._join_threads(self.__venue_threads, kind="venue", deadline=deadline)
         self._join_threads(self.__agent_threads, kind="rep", deadline=deadline)
+        for engine in self.__venue_engines.values():
+            engine.stop()
+        self._join_threads(self.__venue_threads, kind="venue", deadline=deadline)
 
         if self.__venue_errors:
             venue_id, exc = next(iter(self.__venue_errors.items()))
@@ -139,6 +141,21 @@ class Simulator:
         self.__venue_engines[venue.id] = engine
         self.__venue_threads[venue.id] = thread
         thread.start()
+        deadline = time.monotonic() + 5.0
+        while not engine.wait_until_started(timeout=0.01):
+            if not thread.is_alive():
+                exc = self.__venue_errors.get(venue.id)
+                if exc is not None:
+                    raise RuntimeError(
+                        f"会场 {venue.id!r} 的 VenueEngine 线程异常退出"
+                    ) from exc
+                raise RuntimeError(
+                    f"会场 {venue.id!r} 的 VenueEngine 未启动即退出"
+                )
+            if time.monotonic() >= deadline:
+                raise TimeoutError(
+                    f"会场 {venue.id!r} 的 VenueEngine 未能在期限内启动"
+                )
 
     def _start_agent_thread(self, rep: Representative) -> None:
         if rep.id in self.__agent_threads:
