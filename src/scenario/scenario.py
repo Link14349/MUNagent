@@ -10,7 +10,7 @@ from scenario.representative import Representative
 from scenario.venue import Venue
 
 if TYPE_CHECKING:
-    from event.event import Event
+    from event.event import Event, EventStatus
     from event.eventlist import PullUpEvent
     from filesystem.filesystem import FileSystem
 
@@ -111,8 +111,12 @@ class Scenario:
                 )
             event.time = event_time
 
-    def _event_updated(self, event: Event) -> None:
-        """将事件状态更新路由到其所属会场的 EventList."""
+    def _update_event_status(
+        self,
+        event: Event,
+        status: EventStatus,
+    ) -> EventStatus:
+        """将已入表事件的状态命令路由到所属 VenueEngine."""
         if event.scenario is not self:
             raise ValueError("事件不属于当前 Scenario,不能更新 pending")
         venue = next((item for item in self.venues if item.id == event.venue), None)
@@ -124,7 +128,22 @@ class Scenario:
                 f"事件(id={event.id}, venue={event.venue!r}) 已入表,"
                 "但所属 Venue.event_list 为空,无法更新 pending"
             )
-        event_list._event_updated(event)
+        return venue._update_event_status(event, status)
+
+    def _edit_event(
+        self,
+        event: Event,
+        field: str,
+        attribute: str,
+        value: object,
+    ) -> None:
+        """将已提交事件的字段修改路由到所属 VenueEngine."""
+        if event.scenario is not self:
+            raise ValueError("事件不属于当前 Scenario,不能编辑")
+        venue = next((item for item in self.venues if item.id == event.venue), None)
+        if venue is None:
+            raise ValueError(f"事件所属会场不存在: {event.venue!r}")
+        venue._edit_event(event, field, attribute, value)
 
     def update_time(self, new_time: datetime) -> None:
         """将全场景剧情时钟推进到绝对时刻 ``new_time``，不可倒退."""

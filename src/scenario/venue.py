@@ -1,16 +1,20 @@
 from __future__ import annotations
 
-from concurrent.futures import Future
+from concurrent.futures import (
+    Future,
+    InvalidStateError,
+    TimeoutError as FutureTimeoutError,
+)
 from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
 from queue import Queue
 import threading
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypeVar, cast
 
 if TYPE_CHECKING:
     from agenda.agenda import Agenda, AgendaManager
-    from event.event import Event, PhaseSwitchEvent
+    from event.event import Event, EventStatus, PhaseSwitchEvent
     from event.eventlist import EventList
     from scenario.group import Group
     from scenario.representative import Representative
@@ -38,11 +42,101 @@ class EventSubmission:
     result: Future[Event]
 
 
+@dataclass(frozen=True)
+class EventStatusUpdate:
+    event: Event
+    status: EventStatus
+    result: Future[EventStatus]
+
+
+@dataclass(frozen=True)
+class EventEdit:
+    event: Event
+    field: str
+    attribute: str
+    value: object
+    result: Future[None]
+
+
+@dataclass(frozen=True)
+class AgendaSwitch:
+    rep_id: str
+    agenda: Agenda
+    finished: bool
+    time: datetime
+    result: Future[None]
+
+
+@dataclass(frozen=True)
+class AgendaAddition:
+    rep_id: str
+    agenda: Agenda
+    time: datetime
+    result: Future[None]
+
+
+VenueCommand = (
+    EventSubmission
+    | EventStatusUpdate
+    | EventEdit
+    | AgendaSwitch
+    | AgendaAddition
+)
+
+
+class VenueEngineReentryError(RuntimeError):
+    """VenueEngine listener 不能同步等待自己的命令队列."""
+
+
+class VenueCommandTimeoutError(TimeoutError):
+    """Venue 命令超过等待期限，所属引擎已被封闭."""
+
+    venue_id: str
+    command_name: str
+    timeout_s: float
+
+    def __init__(self, venue_id: str, command_name: str, timeout_s: float) -> None:
+        self.venue_id = venue_id
+        self.command_name = command_name
+        self.timeout_s = timeout_s
+        super().__init__(
+            f"会场 {venue_id!r} 的 {command_name} 命令在 {timeout_s:g} 秒内未完成，"
+            "VenueEngine 已停止接受新命令"
+        )
+
+
+class VenueEngineStoppedError(RuntimeError):
+    """VenueEngine 已停止，提交线程不能再等待对应命令."""
+
+    venue_id: str
+    engine_failure: BaseException | None
+
+    def __init__(
+        self,
+        venue_id: str,
+        engine_failure: BaseException | None = None,
+    ) -> None:
+        self.venue_id = venue_id
+        self.engine_failure = engine_failure
+        if engine_failure is None:
+            detail = "VenueEngine 已停止"
+        else:
+            detail = (
+                "VenueEngine 异常退出: "
+                f"{type(engine_failure).__name__}: {engine_failure}"
+            )
+        super().__init__(f"会场 {venue_id!r} 的 {detail}，命令未能完成")
+        if engine_failure is not None:
+            self.__cause__ = engine_failure
+
+
 class _StopEventProcessing:
     pass
 
 
 _STOP_EVENT_PROCESSING = _StopEventProcessing()
+
+_T = TypeVar("_T")
 
 
 class Venue:
@@ -57,9 +151,13 @@ class Venue:
     groups: list[Group]
     chair_power: dict[CHAIR_POWER, bool]
     event_list: EventList | None
-    __event_queue: Queue[EventSubmission | _StopEventProcessing] | None
+    __event_queue: Queue[VenueCommand | _StopEventProcessing] | None
     __event_processing: threading.Event
-    __event_submission_lock: threading.Lock
+    __event_submission_lock: threading.RLock
+    __pending_results: set[Future[object]]
+    __event_failure: BaseException | None
+    __event_thread_id: int | None
+    command_timeout_s: float
 
     def __init__(self, scenario: Scenario):
         self.id = ""
@@ -78,7 +176,11 @@ class Venue:
         self.event_list = None
         self.__event_queue = None
         self.__event_processing = threading.Event()
-        self.__event_submission_lock = threading.Lock()
+        self.__event_submission_lock = threading.RLock()
+        self.__pending_results = set()
+        self.__event_failure = None
+        self.__event_thread_id = None
+        self.command_timeout_s = 30.0
 
     def _find_rep(self, rep_id: str) -> Representative | None:
         return self.reps.get(rep_id) or self.scenario.reps.get(rep_id)
@@ -181,7 +283,7 @@ class Venue:
 
     def _require_event_queue(
         self,
-    ) -> Queue[EventSubmission | _StopEventProcessing]:
+    ) -> Queue[VenueCommand | _StopEventProcessing]:
         event_queue = self.__event_queue
         if event_queue is None:
             raise RuntimeError(
@@ -192,7 +294,7 @@ class Venue:
     def submit_event(self, event: Event) -> Event:
         """提交事件并等待所属 VenueEngine 返回处理结果.
 
-        事件先进入本会场的线程安全队列；调用线程不会直接写入 ``EventList``。
+        事件先进入本会场的线程安全命令队列；调用线程不会直接写入 ``EventList``。
         """
         event_time = self.scenario._event_submission_time(event)
         return self._submit_event(event, event_time)
@@ -204,29 +306,112 @@ class Venue:
                 f"事件 venue={event.venue!r} 不能提交给会场 {self.id!r}"
             )
         self._require_event_list()
-        event_queue = self._require_event_queue()
+        self._require_event_queue()
         result: Future[Event] = Future()
         submission = EventSubmission(event, event_time, result)
+        self._submit_command(submission)
+        return self._wait_command_result(result, "event_submission")
+
+    def _submit_command(self, command: VenueCommand) -> None:
+        """将状态命令放入队列；所有调用方均在各自的 Future 上等待结果."""
         with self.__event_submission_lock:
-            if not self.__event_processing.is_set():
-                raise RuntimeError(
-                    f"会场 {self.id!r} 的 VenueEngine 尚未运行或已经停止,"
-                    "不能提交事件"
-                )
-            event_queue.put(submission)
-        return result.result()
+            self._require_command_submission_locked()
+            if isinstance(command, EventSubmission):
+                command.event._claim_submission()
+                try:
+                    self._queue_command_locked(command)
+                except BaseException:
+                    command.event._release_submission_claim()
+                    raise
+            else:
+                self._queue_command_locked(command)
+
+    def _require_command_submission_locked(self) -> None:
+        if self.__event_thread_id == threading.get_ident():
+            raise VenueEngineReentryError(
+                f"会场 {self.id!r} 的 VenueEngine listener/命令处理器不能同步"
+                "提交同一会场命令"
+            )
+        if not self.__event_processing.is_set():
+            raise VenueEngineStoppedError(self.id, self.__event_failure)
+
+    def _queue_command_locked(self, command: VenueCommand) -> None:
+        result = cast(Future[object], command.result)
+        self.__pending_results.add(result)
+        result.add_done_callback(self._discard_pending_result)
+        self._require_event_queue().put(command)
+
+    def _wait_command_result(
+        self,
+        result: Future[_T],
+        command_name: str,
+    ) -> _T:
+        """限时等待命令；超时即封闭 Venue，避免其他 Agent 永久等待."""
+        try:
+            return result.result(timeout=self.command_timeout_s)
+        except FutureTimeoutError:
+            if result.done():
+                return result.result()
+            failure = VenueCommandTimeoutError(
+                self.id,
+                command_name,
+                self.command_timeout_s,
+            )
+            self._finish_event_processing(failure)
+            raise failure
+
+    def _discard_pending_result(self, result: Future[object]) -> None:
+        with self.__event_submission_lock:
+            self.__pending_results.discard(result)
+
+    @property
+    def event_failure(self) -> BaseException | None:
+        """命令处理失败原因；供 Simulator 监督线程读取."""
+        with self.__event_submission_lock:
+            return self.__event_failure
+
+    def _update_event_status(self, event: Event, status: EventStatus) -> EventStatus:
+        """将已入表事件的状态变更交给本会场 VenueEngine 顺序执行."""
+        if event.venue != self.id:
+            raise ValueError(
+                f"事件 venue={event.venue!r} 不能由会场 {self.id!r} 更新状态"
+            )
+        self._require_event_list()
+        result: Future[EventStatus] = Future()
+        self._submit_command(EventStatusUpdate(event, status, result))
+        return self._wait_command_result(result, "event_status_update")
+
+    def _edit_event(
+        self,
+        event: Event,
+        field: str,
+        attribute: str,
+        value: object,
+    ) -> None:
+        """将已提交事件的字段修改交给本会场 VenueEngine 顺序执行."""
+        if event.venue != self.id:
+            raise ValueError(
+                f"事件 venue={event.venue!r} 不能由会场 {self.id!r} 编辑"
+            )
+        self._require_event_list()
+        result: Future[None] = Future()
+        self._submit_command(EventEdit(event, field, attribute, value, result))
+        self._wait_command_result(result, f"event_edit:{field}")
 
     def _start_event_processing(self) -> None:
-        """标记 VenueEngine 已成为本会场事件队列的唯一消费者."""
+        """标记 VenueEngine 已成为本会场命令队列的唯一消费者."""
         self._require_event_list()
         self._require_event_queue()
         with self.__event_submission_lock:
             if self.__event_processing.is_set():
                 raise RuntimeError(f"会场 {self.id!r} 的事件处理循环已运行")
+            if self.__event_failure is not None:
+                raise VenueEngineStoppedError(self.id, self.__event_failure)
+            self.__event_thread_id = threading.get_ident()
             self.__event_processing.set()
 
     def _stop_event_processing(self) -> None:
-        """停止接受新事件，并让 VenueEngine 处理完已入队事件后退出."""
+        """停止接受新命令，并让 VenueEngine 处理完已入队命令后退出."""
         event_queue = self._require_event_queue()
         with self.__event_submission_lock:
             if not self.__event_processing.is_set():
@@ -234,18 +419,57 @@ class Venue:
             self.__event_processing.clear()
             event_queue.put(_STOP_EVENT_PROCESSING)
 
-    def _take_event_submission(
+    def _finish_event_processing(self, failure: BaseException | None) -> None:
+        """结束消费循环并让所有未完成命令立即失败."""
+        with self.__event_submission_lock:
+            was_processing = self.__event_processing.is_set()
+            self.__event_processing.clear()
+            self.__event_thread_id = None
+            if failure is not None and self.__event_failure is None:
+                self.__event_failure = failure
+            pending = list(self.__pending_results)
+            self.__pending_results.clear()
+            if failure is not None and was_processing:
+                self._require_event_queue().put(_STOP_EVENT_PROCESSING)
+
+        for result in pending:
+            if result.done():
+                continue
+            try:
+                result.set_exception(
+                    VenueEngineStoppedError(self.id, self.__event_failure)
+                )
+            except InvalidStateError:
+                pass
+
+    def _take_command(
         self,
-    ) -> EventSubmission | _StopEventProcessing:
+    ) -> VenueCommand | _StopEventProcessing:
         return self._require_event_queue().get()
 
-    def _event_submission_done(self) -> None:
+    def _command_done(self) -> None:
         self._require_event_queue().task_done()
 
     def _commit_event(self, submission: EventSubmission) -> None:
         """由 VenueEngine 为事件盖戳并写入本会场 EventList."""
         self.scenario._stamp_event(submission.event, submission.time)
         self._require_event_list()._commit_event(submission.event)
+
+    def _commit_event_status(self, update: EventStatusUpdate) -> EventStatus:
+        """由 VenueEngine 原子更新事件状态及 EventList.pending."""
+        return self._require_event_list()._update_event_status(
+            update.event,
+            update.status,
+        )
+
+    def _commit_event_edit(self, edit: EventEdit) -> None:
+        """由 VenueEngine 原子校验事件归属并修改 PENDING 字段."""
+        self._require_event_list()._edit_event(
+            edit.event,
+            edit.field,
+            edit.attribute,
+            edit.value,
+        )
 
     def _agenda_event_scope(self) -> set[str]:
         return set(self.seats)
@@ -256,44 +480,71 @@ class Venue:
         agenda: Agenda,
         finished: bool = False,
     ) -> None:
-        """由主席将 ``agenda`` 设为当前议题;非主席拒绝;成功后提交 SetAgendaEvent."""
+        """将主席的议题切换命令交给 VenueEngine 顺序执行并记录事件."""
+        result: Future[None] = Future()
+        self._submit_command(
+            AgendaSwitch(
+                rep_id,
+                agenda,
+                finished,
+                self.scenario.time,
+                result,
+            )
+        )
+        self._wait_command_result(result, "agenda_switch")
+
+    def _commit_agenda_switch(self, command: AgendaSwitch) -> None:
+        """由 VenueEngine 修改议题状态并提交对应 SetAgendaEvent."""
         from event.event import SetAgendaEvent
 
-        self._require_chair_actor(rep_id)
+        self._require_chair_actor(command.rep_id)
         manager = self._require_agenda_manager()
         previous = manager.current_agenda
-        if agenda is previous:
+        if command.agenda is previous:
             return
-        manager.set_current_agenda(agenda, finished=finished)
-        self.submit_event(
-            SetAgendaEvent(
-                f"主席 {rep_id} 将当前议题切换为 {agenda.id}",
-                agenda,
-                rep_id,
-                self.id,
-                self._agenda_event_scope(),
-                self.scenario,
-                finished=finished,
-                previous=previous,
-            )
+        manager.set_current_agenda(command.agenda, finished=command.finished)
+        event = SetAgendaEvent(
+            f"主席 {command.rep_id} 将当前议题切换为 {command.agenda.id}",
+            command.agenda,
+            command.rep_id,
+            self.id,
+            self._agenda_event_scope(),
+            self.scenario,
+            finished=command.finished,
+            previous=previous,
         )
+        self.scenario._stamp_event(event, command.time)
+        self._require_event_list()._commit_event(event)
 
     def add_agenda(self, rep_id: str, agenda: Agenda) -> None:
-        """由主席向 todo 追加议题;非主席拒绝;成功后提交 AddAgendaEvent."""
-        from event.event import AddAgendaEvent
-
-        self._require_chair_actor(rep_id)
-        self._require_agenda_manager().add_todo(agenda)
-        self.submit_event(
-            AddAgendaEvent(
-                f"主席 {rep_id} 追加议题 {agenda.id}",
-                agenda,
+        """将主席的议题新增命令交给 VenueEngine 顺序执行并记录事件."""
+        result: Future[None] = Future()
+        self._submit_command(
+            AgendaAddition(
                 rep_id,
-                self.id,
-                self._agenda_event_scope(),
-                self.scenario,
+                agenda,
+                self.scenario.time,
+                result,
             )
         )
+        self._wait_command_result(result, "agenda_addition")
+
+    def _commit_agenda_addition(self, command: AgendaAddition) -> None:
+        """由 VenueEngine 修改议题状态并提交对应 AddAgendaEvent."""
+        from event.event import AddAgendaEvent
+
+        self._require_chair_actor(command.rep_id)
+        self._require_agenda_manager().add_todo(command.agenda)
+        event = AddAgendaEvent(
+            f"主席 {command.rep_id} 追加议题 {command.agenda.id}",
+            command.agenda,
+            command.rep_id,
+            self.id,
+            self._agenda_event_scope(),
+            self.scenario,
+        )
+        self.scenario._stamp_event(event, command.time)
+        self._require_event_list()._commit_event(event)
 
     @property
     def session_phase(self) -> SessionPhase | None:
@@ -333,7 +584,7 @@ class Venue:
         return event
 
     def initialize(self) -> None:
-        """创建本会场 EventList、提交队列并注册 PHASE_SWITCH listener."""
+        """创建本会场 EventList、命令队列并注册 PHASE_SWITCH listener."""
         from event.event import EventType
         from event.eventlist import EventList
 
@@ -344,6 +595,9 @@ class Venue:
         self.event_list = EventList(self)
         self.__event_queue = Queue()
         self.__event_processing.clear()
+        self.__pending_results = set()
+        self.__event_failure = None
+        self.__event_thread_id = None
         self.event_list.add_listener(
             EventType.PHASE_SWITCH,
             self._on_phase_switch,

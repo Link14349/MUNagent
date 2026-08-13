@@ -95,8 +95,12 @@ class EventList:
         for listener in listeners:
             listener(event)
 
-    def _event_updated(self, event: Event) -> None:
-        """事件离开 ``PENDING`` 时将其移出 pending 队列."""
+    def _update_event_status(
+        self,
+        event: Event,
+        status: EventStatus,
+    ) -> EventStatus:
+        """在同一临界区更新事件状态及 pending 队列."""
         with self.__lock:
             if event.id is None:
                 raise ValueError("事件尚未入表,不能更新 pending")
@@ -109,17 +113,38 @@ class EventList:
                     f"事件(id={event.id!r}, venue={event.venue!r}) 不属于会场 "
                     f"{self.venue.id!r} 的 EventList,不能更新 pending"
                 )
-            if event.status == EventStatus.PENDING:
-                raise ValueError(
-                    f"事件(id={event.id}, venue={event.venue!r}) 仍为 PENDING,"
-                    "不应移出 pending 队列"
-                )
+            event._apply_status(status)
+            if status == EventStatus.PENDING:
+                return status
             try:
                 self.__pending_events.remove(event.id)
             except ValueError as exc:
                 raise ValueError(
                     f"事件(id={event.id}, venue={event.venue!r}) 不在 pending 队列中"
                 ) from exc
+            return status
+
+    def _edit_event(
+        self,
+        event: Event,
+        field: str,
+        attribute: str,
+        value: object,
+    ) -> None:
+        """在 EventList 临界区内校验归属并编辑 PENDING 事件字段."""
+        with self.__lock:
+            if event.id is None:
+                raise ValueError("事件尚未入表,不能通过 VenueEngine 编辑")
+            if (
+                event.id < 0
+                or event.id >= len(self.__events)
+                or self.__events[event.id] is not event
+            ):
+                raise ValueError(
+                    f"事件(id={event.id!r}, venue={event.venue!r}) 不属于会场 "
+                    f"{self.venue.id!r} 的 EventList,不能编辑 {field}"
+                )
+            event._apply_edit(field, attribute, value)
 
     def get_events(self, rep: str) -> list[Event]:
         """返回本会场内对 ``rep`` 可见的事件."""

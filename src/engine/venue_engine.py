@@ -1,9 +1,18 @@
 from __future__ import annotations
 
+from concurrent.futures import Future, InvalidStateError
 import threading
 from typing import TYPE_CHECKING
 
-from scenario.venue import EventSubmission, _StopEventProcessing
+from scenario.venue import (
+    AgendaAddition,
+    AgendaSwitch,
+    EventEdit,
+    EventStatusUpdate,
+    EventSubmission,
+    VenueCommand,
+    _StopEventProcessing,
+)
 
 if TYPE_CHECKING:
     from engine.simulator import Simulator
@@ -31,24 +40,110 @@ class VenueEngine:
         self.venue._stop_event_processing()
 
     def run(self) -> None:
-        """顺序处理本会场的事件提交队列，直到收到停止命令."""
-        self.venue._start_event_processing()
-        self.__started.set()
-        while True:
-            submission = self.venue._take_event_submission()
-            try:
-                if isinstance(submission, _StopEventProcessing):
-                    return
-                self._process_submission(submission)
-            finally:
-                self.venue._event_submission_done()
+        """顺序处理本会场的命令队列，直到收到停止命令."""
+        failure: BaseException | None = None
+        try:
+            self.venue._start_event_processing()
+            self.__started.set()
+            while True:
+                command = self.venue._take_command()
+                try:
+                    if isinstance(command, _StopEventProcessing):
+                        return
+                    self._process_command(command)
+                finally:
+                    self.venue._command_done()
+        except BaseException as exc:
+            failure = exc
+            raise
+        finally:
+            self.venue._finish_event_processing(failure)
 
-    def _process_submission(self, submission: EventSubmission) -> None:
-        if not submission.result.set_running_or_notify_cancel():
+    def _process_command(self, command: VenueCommand) -> None:
+        if isinstance(command, EventSubmission):
+            self._process_event_submission(command)
+        elif isinstance(command, EventStatusUpdate):
+            self._process_event_status(command)
+        elif isinstance(command, EventEdit):
+            self._process_event_edit(command)
+        elif isinstance(command, AgendaSwitch):
+            self._process_agenda_switch(command)
+        elif isinstance(command, AgendaAddition):
+            self._process_agenda_addition(command)
+        else:
+            raise TypeError(f"VenueEngine 收到未知命令: {type(command).__name__}")
+
+    def _process_event_submission(self, submission: EventSubmission) -> None:
+        if not self._start_result(submission.result):
             return
         try:
             self.venue._commit_event(submission)
         except Exception as exc:
-            submission.result.set_exception(exc)
+            self._set_exception(submission.result, exc)
         else:
-            submission.result.set_result(submission.event)
+            self._set_result(submission.result, submission.event)
+
+    def _process_event_status(self, update: EventStatusUpdate) -> None:
+        if not self._start_result(update.result):
+            return
+        try:
+            status = self.venue._commit_event_status(update)
+        except Exception as exc:
+            self._set_exception(update.result, exc)
+        else:
+            self._set_result(update.result, status)
+
+    def _process_event_edit(self, edit: EventEdit) -> None:
+        if not self._start_result(edit.result):
+            return
+        try:
+            self.venue._commit_event_edit(edit)
+        except Exception as exc:
+            self._set_exception(edit.result, exc)
+        else:
+            self._set_result(edit.result, None)
+
+    def _process_agenda_switch(self, command: AgendaSwitch) -> None:
+        if not self._start_result(command.result):
+            return
+        try:
+            self.venue._commit_agenda_switch(command)
+        except Exception as exc:
+            self._set_exception(command.result, exc)
+        else:
+            self._set_result(command.result, None)
+
+    def _process_agenda_addition(self, command: AgendaAddition) -> None:
+        if not self._start_result(command.result):
+            return
+        try:
+            self.venue._commit_agenda_addition(command)
+        except Exception as exc:
+            self._set_exception(command.result, exc)
+        else:
+            self._set_result(command.result, None)
+
+    @staticmethod
+    def _start_result(result: Future[object]) -> bool:
+        if result.done():
+            return False
+        try:
+            return result.set_running_or_notify_cancel()
+        except RuntimeError:
+            if result.done():
+                return False
+            raise
+
+    @staticmethod
+    def _set_result(result: Future[object], value: object) -> None:
+        try:
+            result.set_result(value)
+        except InvalidStateError:
+            pass
+
+    @staticmethod
+    def _set_exception(result: Future[object], exc: Exception) -> None:
+        try:
+            result.set_exception(exc)
+        except InvalidStateError:
+            pass

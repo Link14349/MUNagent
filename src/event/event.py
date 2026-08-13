@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import StrEnum
-from typing import TYPE_CHECKING
+import threading
+from typing import TYPE_CHECKING, cast
 
 from scenario.group import Group
 from scenario.venue import SessionPhase, Venue
@@ -51,11 +52,16 @@ class Event:
       ``id`` 仅在事件所属会场的容器内唯一.
     - ``type`` / ``venue``:一旦设定不可再改.
     - 其余属性:仅当 ``status == PENDING`` 时可改.
-    - 通过 ``status`` setter 离开 ``PENDING`` 时,若事件已入表,会通知
-      所属会场的 ``EventList`` 将其从 pending 队列移除.
+    - 已入表事件通过 ``status`` setter 离开 ``PENDING`` 时,状态命令由所属
+      ``VenueEngine`` 顺序执行,并与 ``EventList`` 的 pending 队列一起更新.
     - 子类 ``__init__`` 应直接写入私有字段,并用 ``_set_type`` / ``_init_status``.
     - 每个事件只属于一个会场(``venue`` 为会场 ID 字符串).
     """
+
+    _EDITABLE_FIELDS = {
+        "content": "_Event__content",
+        "scope": "_Event__scope",
+    }
 
     def __init__(
         self,
@@ -72,6 +78,8 @@ class Event:
         self.__scope = set(scope)
         self.__status = EventStatus.PENDING
         self.__type: EventType | None = None
+        self.__submission_claimed = False
+        self.__lock = threading.RLock()
 
     def _require_editable(self, field: str) -> None:
         if self.__status != EventStatus.PENDING:
@@ -79,6 +87,49 @@ class Event:
                 f"事件(id={self.__id!r}, type={self.__type}, venue={self.__venue!r}) 状态为 "
                 f"{self.__status.value},不能修改 {field}"
             )
+
+    def _editable_attribute(self, field: str) -> str:
+        for event_class in type(self).__mro__:
+            fields = event_class.__dict__.get("_EDITABLE_FIELDS")
+            if fields is not None and field in fields:
+                return fields[field]
+        raise AttributeError(f"事件类型 {type(self).__name__} 不支持编辑字段 {field!r}")
+
+    def _validate_edit(self, field: str, value: object) -> None:
+        """在 VenueEngine 实际执行字段修改时复核跨字段约束."""
+
+    def _edit(self, field: str, value: object) -> None:
+        attribute = self._editable_attribute(field)
+        with self.__lock:
+            if not self.__submission_claimed:
+                self._apply_edit(field, attribute, value)
+                return
+        self.__scenario._edit_event(self, field, attribute, value)
+
+    def _apply_edit(self, field: str, attribute: str, value: object) -> None:
+        """仅供构造线程或所属 VenueEngine 原子落实字段修改."""
+        with self.__lock:
+            expected = self._editable_attribute(field)
+            if attribute != expected:
+                raise ValueError(
+                    f"事件字段 {field!r} 的内部属性应为 {expected!r},"
+                    f"实际为 {attribute!r}"
+                )
+            self._require_editable(field)
+            self._validate_edit(field, value)
+            object.__setattr__(self, attribute, value)
+
+    def _claim_submission(self) -> None:
+        """由 Venue 在入队临界区声明该事件已进入串行写入生命周期."""
+        with self.__lock:
+            if self.__submission_claimed:
+                raise PermissionError("同一事件不能重复提交")
+            self.__submission_claimed = True
+
+    def _release_submission_claim(self) -> None:
+        """仅在命令尚未入队时回滚提交声明."""
+        with self.__lock:
+            self.__submission_claimed = False
 
     def _set_type(self, event_type: EventType) -> None:
         if self.__type is not None:
@@ -92,27 +143,37 @@ class Event:
         """
         self.__status = EventStatus(status)
 
+    def _apply_status(self, status: EventStatus) -> None:
+        """仅供所属 EventList 在 VenueEngine 线程中落实状态命令."""
+        with self.__lock:
+            self._require_editable("status")
+            self.__status = status
+
     @property
     def time(self) -> datetime | None:
-        return self.__time
+        with self.__lock:
+            return self.__time
 
     @time.setter
     def time(self, value: datetime) -> None:
-        if self.__time is not None:
-            raise PermissionError("事件 time 不可修改")
-        self.__time = value
+        with self.__lock:
+            if self.__time is not None:
+                raise PermissionError("事件 time 不可修改")
+            self.__time = value
 
     @property
     def id(self) -> int | None:
-        return self.__id
+        with self.__lock:
+            return self.__id
 
     @id.setter
     def id(self, value: int) -> None:
-        if self.__id is not None:
-            raise PermissionError("事件 id 不可修改")
-        if value < 0:
-            raise ValueError(f"id 须为非负整数,实际为: {value!r}")
-        self.__id = value
+        with self.__lock:
+            if self.__id is not None:
+                raise PermissionError("事件 id 不可修改")
+            if value < 0:
+                raise ValueError(f"id 须为非负整数,实际为: {value!r}")
+            self.__id = value
 
     @property
     def type(self) -> EventType:
@@ -130,37 +191,40 @@ class Event:
 
     @property
     def status(self) -> EventStatus:
-        return self.__status
+        with self.__lock:
+            return self.__status
 
     @status.setter
     def status(self, value: EventStatus | str) -> None:
-        self._require_editable("status")
         new_status = EventStatus(value)
-        self.__status = new_status
-        if new_status == EventStatus.PENDING or self.__id is None:
-            return
-        self.__scenario._event_updated(self)
+        with self.__lock:
+            if not self.__submission_claimed:
+                self._apply_status(new_status)
+                return
+        self.__scenario._update_event_status(self, new_status)
 
     @property
     def content(self) -> str:
-        return self.__content
+        with self.__lock:
+            return self.__content
 
     @content.setter
     def content(self, value: str) -> None:
-        self._require_editable("content")
-        self.__content = value
+        self._edit("content", value)
 
     @property
     def scope(self) -> set[str]:
-        return set(self.__scope)
+        with self.__lock:
+            return set(self.__scope)
 
     @scope.setter
     def scope(self, value: set[str]) -> None:
-        self._require_editable("scope")
-        self.__scope = set(value)
+        self._edit("scope", set(value))
 
 
 class SystemEvent(Event):
+    _EDITABLE_FIELDS = {"action": "_SystemEvent__action"}
+
     def __init__(
         self,
         content: str,
@@ -180,8 +244,7 @@ class SystemEvent(Event):
 
     @action.setter
     def action(self, value: list[str]) -> None:
-        self._require_editable("action")
-        self.__action = list(value)
+        self._edit("action", list(value))
 
 
 class MotionSwitchEvent(Event):
@@ -190,6 +253,8 @@ class MotionSwitchEvent(Event):
     初始为 ``PENDING``;是否通过取决于后续投票或主席裁定.
     真正落地切换请使用 :class:`PhaseSwitchEvent`.
     """
+
+    _EDITABLE_FIELDS = {"target_phase": "_MotionSwitchEvent__target_phase"}
 
     def __init__(
         self,
@@ -209,8 +274,7 @@ class MotionSwitchEvent(Event):
 
     @target_phase.setter
     def target_phase(self, value: SessionPhase | str) -> None:
-        self._require_editable("target_phase")
-        self.__target_phase = SessionPhase(value)
+        self._edit("target_phase", SessionPhase(value))
 
 
 class PhaseSwitchEvent(Event):
@@ -323,6 +387,11 @@ class InstructionEvent(Event):
     不能通过 FileSystem.list_visible 直接发现 submissions/.
     """
 
+    _EDITABLE_FIELDS = {
+        "instruction": "_InstructionEvent__instruction",
+        "from_reps": "_InstructionEvent__from",
+    }
+
     def __init__(
         self,
         content: str,
@@ -342,8 +411,7 @@ class InstructionEvent(Event):
 
     @instruction.setter
     def instruction(self, value: File) -> None:
-        self._require_editable("instruction")
-        self.__instruction = value
+        self._edit("instruction", value)
 
     @property
     def from_reps(self) -> set[str]:
@@ -351,8 +419,7 @@ class InstructionEvent(Event):
 
     @from_reps.setter
     def from_reps(self, value: set[str]) -> None:
-        self._require_editable("from_reps")
-        self.__from = set(value)
+        self._edit("from_reps", set(value))
 
 
 class ResolutionEvent(Event):
@@ -360,6 +427,11 @@ class ResolutionEvent(Event):
 
     可见性语义同 :class:`InstructionEvent`:经 EventList 可见事件索引,而非文件系统枚举.
     """
+
+    _EDITABLE_FIELDS = {
+        "resolution": "_ResolutionEvent__resolution",
+        "from_reps": "_ResolutionEvent__from",
+    }
 
     def __init__(
         self,
@@ -380,8 +452,7 @@ class ResolutionEvent(Event):
 
     @resolution.setter
     def resolution(self, value: File) -> None:
-        self._require_editable("resolution")
-        self.__resolution = value
+        self._edit("resolution", value)
 
     @property
     def from_reps(self) -> set[str]:
@@ -389,8 +460,7 @@ class ResolutionEvent(Event):
 
     @from_reps.setter
     def from_reps(self, value: set[str]) -> None:
-        self._require_editable("from_reps")
-        self.__from = set(value)
+        self._edit("from_reps", set(value))
 
 
 class VoteEvent(Event):
@@ -400,6 +470,18 @@ class VoteEvent(Event):
     ``named`` 为记名表决:仅记名时可经属性读取具体支持/反对/弃权名单(返回副本);
     不记名时名单属性不可访问,但仍可通过人数属性得知票数.
     """
+
+    _EDITABLE_FIELDS = {
+        "target": "_VoteEvent__target",
+        "valid_votes": "_VoteEvent__valid_votes",
+        "named": "_VoteEvent__named",
+        "supporters": "_VoteEvent__supporters",
+        "against": "_VoteEvent__against",
+        "abstentions": "_VoteEvent__abstentions",
+        "pass_mode": "_VoteEvent__pass_mode",
+        "passed": "_VoteEvent__passed",
+        "remark": "_VoteEvent__remark",
+    }
 
     def __init__(
         self,
@@ -447,13 +529,42 @@ class VoteEvent(Event):
         elif passed is False:
             self._init_status(EventStatus.REJECTED)
 
-    def _revalidate_ballots(self) -> None:
-        _validate_vote_ballots(
-            self.__supporters,
-            self.__against,
-            self.__abstentions,
-            self.__valid_votes,
-        )
+    def _validate_edit(self, field: str, value: object) -> None:
+        if field == "target":
+            target = cast("ResolutionEvent | MotionSwitchEvent", value)
+            if target.venue != self.venue:
+                raise ValueError(
+                    f"VoteEvent.venue={self.venue!r} 与 target.venue="
+                    f"{target.venue!r} 不一致"
+                )
+        elif field == "valid_votes":
+            _validate_vote_ballots(
+                self.__supporters,
+                self.__against,
+                self.__abstentions,
+                cast(int, value),
+            )
+        elif field == "supporters":
+            _validate_vote_ballots(
+                cast(list[str], value),
+                self.__against,
+                self.__abstentions,
+                self.__valid_votes,
+            )
+        elif field == "against":
+            _validate_vote_ballots(
+                self.__supporters,
+                cast(list[str], value),
+                self.__abstentions,
+                self.__valid_votes,
+            )
+        elif field == "abstentions":
+            _validate_vote_ballots(
+                self.__supporters,
+                self.__against,
+                cast(list[str], value),
+                self.__valid_votes,
+            )
 
     def _require_named_ballots(self, field: str) -> None:
         if not self.__named:
@@ -468,12 +579,7 @@ class VoteEvent(Event):
 
     @target.setter
     def target(self, value: ResolutionEvent | MotionSwitchEvent) -> None:
-        self._require_editable("target")
-        if value.venue != self.venue:
-            raise ValueError(
-                f"VoteEvent.venue={self.venue!r} 与 target.venue={value.venue!r} 不一致"
-            )
-        self.__target = value
+        self._edit("target", value)
 
     @property
     def valid_votes(self) -> int:
@@ -481,11 +587,9 @@ class VoteEvent(Event):
 
     @valid_votes.setter
     def valid_votes(self, value: int) -> None:
-        self._require_editable("valid_votes")
         if value < 0:
             raise ValueError(f"valid_votes 须为非负整数,实际为: {value!r}")
-        self.__valid_votes = value
-        self._revalidate_ballots()
+        self._edit("valid_votes", value)
 
     @property
     def named(self) -> bool:
@@ -493,8 +597,7 @@ class VoteEvent(Event):
 
     @named.setter
     def named(self, value: bool) -> None:
-        self._require_editable("named")
-        self.__named = bool(value)
+        self._edit("named", bool(value))
 
     @property
     def support_count(self) -> int:
@@ -515,9 +618,10 @@ class VoteEvent(Event):
 
     @supporters.setter
     def supporters(self, value: list[str]) -> None:
-        self._require_editable("supporters")
-        self.__supporters = _normalize_rep_list(value, field="supporters")
-        self._revalidate_ballots()
+        self._edit(
+            "supporters",
+            _normalize_rep_list(value, field="supporters"),
+        )
 
     @property
     def against(self) -> list[str]:
@@ -526,9 +630,7 @@ class VoteEvent(Event):
 
     @against.setter
     def against(self, value: list[str]) -> None:
-        self._require_editable("against")
-        self.__against = _normalize_rep_list(value, field="against")
-        self._revalidate_ballots()
+        self._edit("against", _normalize_rep_list(value, field="against"))
 
     @property
     def abstentions(self) -> list[str]:
@@ -537,9 +639,10 @@ class VoteEvent(Event):
 
     @abstentions.setter
     def abstentions(self, value: list[str]) -> None:
-        self._require_editable("abstentions")
-        self.__abstentions = _normalize_rep_list(value, field="abstentions")
-        self._revalidate_ballots()
+        self._edit(
+            "abstentions",
+            _normalize_rep_list(value, field="abstentions"),
+        )
 
     @property
     def pass_mode(self) -> VotePassMode:
@@ -547,8 +650,7 @@ class VoteEvent(Event):
 
     @pass_mode.setter
     def pass_mode(self, value: VotePassMode | str) -> None:
-        self._require_editable("pass_mode")
-        self.__pass_mode = VotePassMode(value)
+        self._edit("pass_mode", VotePassMode(value))
 
     @property
     def passed(self) -> bool | None:
@@ -556,8 +658,7 @@ class VoteEvent(Event):
 
     @passed.setter
     def passed(self, value: bool | None) -> None:
-        self._require_editable("passed")
-        self.__passed = value
+        self._edit("passed", value)
 
     @property
     def remark(self) -> str:
@@ -565,12 +666,16 @@ class VoteEvent(Event):
 
     @remark.setter
     def remark(self, value: str) -> None:
-        self._require_editable("remark")
-        self.__remark = value.strip()
+        self._edit("remark", value.strip())
 
 
 class NoteEvent(Event):
     """会议期间的传纸条私聊."""
+
+    _EDITABLE_FIELDS = {
+        "from_rep": "_NoteEvent__from",
+        "to_reps": "_NoteEvent__to",
+    }
 
     def __init__(
         self,
@@ -592,10 +697,9 @@ class NoteEvent(Event):
 
     @from_rep.setter
     def from_rep(self, value: str) -> None:
-        self._require_editable("from_rep")
         if not value.strip():
             raise ValueError("from_rep 须为非空字符串")
-        self.__from = value.strip()
+        self._edit("from_rep", value.strip())
 
     @property
     def to_reps(self) -> set[str]:
@@ -603,12 +707,13 @@ class NoteEvent(Event):
 
     @to_reps.setter
     def to_reps(self, value: set[str]) -> None:
-        self._require_editable("to_reps")
-        self.__to = set(value)
+        self._edit("to_reps", set(value))
 
 
 class MessageEvent(Event):
     """会议期间的消息."""
+
+    _EDITABLE_FIELDS = {"from_rep": "_MessageEvent__from"}
 
     def __init__(
         self,
@@ -629,14 +734,15 @@ class MessageEvent(Event):
 
     @from_rep.setter
     def from_rep(self, value: str) -> None:
-        self._require_editable("from_rep")
         if not value.strip():
             raise ValueError("from_rep 须为非空字符串")
-        self.__from = value.strip()
+        self._edit("from_rep", value.strip())
 
 
 class ChatEvent(Event):
     """free discussion 环节的消息."""
+
+    _EDITABLE_FIELDS = {"from_rep": "_ChatEvent__from"}
 
     def __init__(
         self,
@@ -657,10 +763,9 @@ class ChatEvent(Event):
 
     @from_rep.setter
     def from_rep(self, value: str) -> None:
-        self._require_editable("from_rep")
         if not value.strip():
             raise ValueError("from_rep 须为非空字符串")
-        self.__from = value.strip()
+        self._edit("from_rep", value.strip())
 
 
 def _normalize_venue_id(venue: str, scenario: Scenario) -> str:

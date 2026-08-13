@@ -5,6 +5,7 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 from pathlib import Path
+import threading
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -266,6 +267,53 @@ def test_event_edit_permissions_after_submit(
         pending.content = "终态再改"
     with pytest.raises(PermissionError, match="不能修改 scope"):
         pending.scope = {STALIN}
+
+
+def test_concurrent_status_updates_are_serialized_by_venue_engine(
+    scenario: Scenario,
+    venue: Venue,
+    events: EventList,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pending = MotionSwitchEvent(
+        "并发裁定",
+        SessionPhase.FREE_DISCUSSION,
+        venue.id,
+        {CHURCHILL},
+        scenario,
+    )
+    venue.submit_event(pending)
+    apply_threads: list[str] = []
+    original_apply = pending._apply_status
+
+    def record_apply(status: EventStatus) -> None:
+        apply_threads.append(threading.current_thread().name)
+        original_apply(status)
+
+    monkeypatch.setattr(pending, "_apply_status", record_apply)
+    statuses = [
+        EventStatus.ACCEPTED,
+        EventStatus.REJECTED,
+        EventStatus.FAILED,
+        EventStatus.COMPLETED,
+    ] * 2
+    barrier = threading.Barrier(len(statuses))
+
+    def update(status: EventStatus) -> bool:
+        barrier.wait()
+        try:
+            pending.status = status
+        except PermissionError:
+            return False
+        return True
+
+    with ThreadPoolExecutor(max_workers=len(statuses)) as executor:
+        results = list(executor.map(update, statuses))
+
+    assert sum(results) == 1
+    assert pending.status in set(statuses)
+    assert events.pending_events == []
+    assert set(apply_threads) == {f"test-venue:{venue.id}"}
 
 
 def test_pending_properties_return_copies(

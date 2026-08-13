@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
 from typing import Any
@@ -9,9 +10,9 @@ from typing import Any
 import httpx
 import pytest
 
-from agent.rep_agent import RepresentativeAgent
+from agent.rep_agent import AgentStoppedError, RepresentativeAgent
 from config.models import AppConfig, ProviderConfig
-from llm import ChatMessage, LLM
+from llm import ChatMessage, LLM, LLMCancelledError
 from scenario.scenario import Scenario
 
 TEMPLATE = Path(__file__).resolve().parent.parent / "scenario-template"
@@ -150,3 +151,38 @@ def test_run_is_noop_for_simulator(scenario: Scenario) -> None:
     agent.run()
     assert len(agent.messages) == 1
     assert agent.messages[0].role == "system"
+
+
+@pytest.mark.asyncio
+async def test_stop_cancels_step_and_step_has_single_owner(
+    scenario: Scenario,
+) -> None:
+    class BlockingLLM:
+        def __init__(self) -> None:
+            self.started = asyncio.Event()
+            self.stopped = False
+
+        def stop(self) -> None:
+            self.stopped = True
+
+        async def stream(self, messages, **kwargs):
+            self.started.set()
+            while not self.stopped:
+                await asyncio.sleep(0.01)
+            raise LLMCancelledError("测试取消")
+            yield  # pragma: no cover
+
+    llm = BlockingLLM()
+    agent = RepresentativeAgent(
+        scenario.reps["winston_churchill"],
+        llm=llm,  # type: ignore[arg-type]
+    )
+    first = asyncio.create_task(agent.step("第一轮"))
+    await asyncio.wait_for(llm.started.wait(), timeout=1.0)
+
+    with pytest.raises(RuntimeError, match="只能执行一个 step"):
+        await agent.step("并发第二轮")
+
+    agent.stop()
+    with pytest.raises(AgentStoppedError, match="随模拟停止"):
+        await first

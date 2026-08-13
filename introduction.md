@@ -36,7 +36,7 @@ scenario-template/
 
 角色卡分为 `public` 与 `private`.引擎必须在构建代表上下文前完成可见性过滤,不能把所有秘密交给 Agent 后再要求它"假装不知道".
 
-运行时 `simulation/` 中的工作文件与提交副本同样受程序可见性约束:`reps/` 由 `scope`/`owner` 控制;`submissions/` 不对代表直接开放列表,代表只能通过所属会场的 `EventList` 里对其可见,并绑定了对应 `File` 的事件间接获知 submission.`Scenario` 维护全会场统一的剧情时钟;每个 `Venue` 拥有独立的线程安全提交队列和 `EventList`,由对应 `VenueEngine` 顺序盖戳并入表.
+运行时 `simulation/` 中的工作文件与提交副本同样受程序可见性约束:`reps/` 由 `scope`/`owner` 控制;`submissions/` 不对代表直接开放列表,代表只能通过所属会场的 `EventList` 里对其可见,并绑定了对应 `File` 的事件间接获知 submission.场景级 `FileSystem` 使用统一可重入锁串行处理文件索引,内容,权限,提交版本和 manifest 变更,落盘文件通过临时文件原子替换.`Scenario` 维护全会场统一的剧情时钟;每个 `Venue` 拥有独立的线程安全命令队列和 `EventList`,由对应 `VenueEngine` 顺序处理事件提交,事件字段编辑,状态裁定与议题变更.同一 VenueEngine 的 listener 不能同步等待本会场命令;命令超时或 VenueEngine 异常退出时,Venue 会停止接受新命令并让当前及排队命令失败.`Simulator` 使用场景级停止信号取消其他 Agent 的 LLM 流并协作结束全部线程.
 
 两个区块内都使用局部字段名 `target`,即 `public.target` 与 `private.target`.可见性已经由父级区块表达,不再使用 `public_target`,`private_target` 或 `priorities` 等重复命名.
 

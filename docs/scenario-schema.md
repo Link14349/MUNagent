@@ -49,11 +49,16 @@
 
 - `reps/<rep_id>/`:工作文件,通过 `scope`/`owner` 控制读/写;`list_visible` / `list_writable` 只枚举该目录.查看某文件的 `owners`/`scope` 须通过 `Representative.get_file_access`(或 Agent 工具 `get_file_access`),且**仅 owner 可查**;仅在 scope 内的非 owner 不得获知权限名单.
 - `submissions/<venue_id>/`:仅存放经 `File.submit()` 复制的提交副本,命名为 `<primary_owner>+<原文件名>+v<版本号>`(`primary_owner` 为该文件 owner 集合中最先加入者);与同系列最新版内容 hash 相同则拒绝,否则递增版本.副本 `owner`/`scope` 为空,**不能**通过文件系统列表或直接路径被代表发现或改写.`Representative.submit_instruction` / `submit_resolution`(及对应 Agent 工具)在绑定 `reps/` 工作文件时会自动执行提交;Agent 不再单独暴露 `submit_file` 工具.
+- 同一场景中的 Agent 线程共享一个 `FileSystem`.`FileSystem` 使用统一的可重入锁保护 `_files`,文件内容,权限集合,提交版本分配与 manifest;创建,写入,权限变更和提交各自在完整临界区中执行.普通文件和 `_manifest.yaml` 均先写同目录临时文件,再原子替换目标,避免其他线程读到半份内容.`File.scope` 对外返回副本,调用方不能绕过权限接口直接修改内部集合.
 - 代表若要得知某份 submission 的存在并读取其内容,只能经由其所属 `Venue.event_list.get_events(rep_id)` 返回的,对该代表可见的事件(例如绑定了 `File` 的 `InstructionEvent` / `ResolutionEvent`)索引到该文件;引擎组装 Agent 上下文时不得把未被子事件引用的 submission 注入可见文件列表.
-- 运行时 `Event` 对象构造时不携带剧情时间(`time` 为 `None`).代表通过 `Venue.submit_event` 提交事件时,提交会先进入该会场的线程安全队列,由对应 `VenueEngine` 作为唯一消费者顺序处理.`Scenario` 使用提交瞬间的统一剧情时间盖戳,再由该 `Venue` 的独立 `EventList` 赋予会场内唯一的 `id` 并入表.提交线程同步等待处理结果;入表异常会原样回传.`EventList.submit_event` 同样委托给所属 `Venue` 的队列,不允许绕过 `VenueEngine` 直接写入.
-- `EventList` 只负责事件编号与存储,pending 队列,可见性查询与 listener,不推进时间.listener 在所属 `VenueEngine` 线程中同步执行,不得阻塞等待同一会场队列或调用 LLM.
+- 运行时 `Event` 对象构造时不携带剧情时间(`time` 为 `None`).代表通过 `Venue.submit_event` 提交事件时,提交会先进入该会场的线程安全命令队列,由对应 `VenueEngine` 作为唯一消费者顺序处理.`Scenario` 使用提交瞬间的统一剧情时间盖戳,再由该 `Venue` 的独立 `EventList` 赋予会场内唯一的 `id` 并入表.提交线程同步等待处理结果;入表异常会原样回传.`EventList.submit_event` 同样委托给所属 `Venue` 的队列,不允许绕过 `VenueEngine` 直接写入.
+- `Venue` 登记所有尚未完成的命令 Future,并为同步等待设置统一期限(当前默认 30 秒).VenueEngine 在取队列,分发或收尾阶段异常退出时,立即停止接受新命令,并给当前及排队 Future 写入带原始根因的 `VenueEngineStoppedError`;命令超过期限时,发起者收到 `VenueCommandTimeoutError`,Venue 随即封闭,其他等待者按引擎停止处理.故障后的新提交立即失败.代表工具层不把这些引擎级异常转换为普通工具错误,而是向 Agent 主循环继续抛出且不自动重试.
+- `EventList` 只负责事件编号与存储,pending 队列,可见性查询与 listener,不推进时间.listener 在所属 `VenueEngine` 线程中同步执行,不得阻塞或调用 LLM;若 listener/命令处理器同步提交同一会场的事件,字段编辑,状态或议题命令,引擎立即抛出 `VenueEngineReentryError`,避免唯一消费者等待自身形成死锁.
+- 已入表事件经 `Event.status` 请求状态变更时,`Scenario` 按 `event.venue` 将命令路由到对应 `VenueEngine`;引擎在 `EventList` 的同一临界区内修改状态并将终态事件移出 pending.并发裁定按命令入队顺序执行,仅首个合法的终态转换成功.尚未入表的构造期事件仍可直接设置初始状态.
+- Event 一旦在 Venue 入队临界区声明提交,`content`,`scope` 及各子类 PENDING 可编辑字段也必须经所属 `VenueEngine` 串行修改,并在 `EventList` 临界区内复核事件归属与当前状态.因此字段编辑和终态裁定共享同一命令顺序,不会在终态写入后继续修改内容;构造期尚未提交的事件仍可在对象锁内直接编辑.
+- 主席的当前议题切换和议题新增同样进入所属会场的命令队列,由 `VenueEngine` 顺序修改 `AgendaManager` 并提交 `SetAgendaEvent` / `AddAgendaEvent`;`AgendaManager` 的读取和短事务另由可重入锁保护.
 - 全场景剧情时钟由 `Scenario.update_time`(绝对时刻)或 `Scenario.time_pass`(相对时长)推进.时间条件外部事件到期后,`Scenario` 使用同一剧情时刻为每个会场分别生成并提交一份 `SystemEvent`.
-- 仍为 `PENDING` 的事件进入所属会场的 pending 队列;经 `Event.status` 离开 `PENDING` 时回调 `Scenario`,由 `Scenario` 按 `event.venue` 路由到对应的 `Venue.event_list` 出队.
+- `Simulator` 为全部 Agent 共享一个 `threading.Event` 停止信号.任一 Agent/VenueEngine 未捕获异常,Venue 命令超时,显式 `Simulator.stop()` 或 join 到期都会触发协作停止:Agent 停止继续 `step`,取消当前 LLM 流,VenuEngine 拒绝新命令并排空已接受命令.清理另有有限宽限期;运行线程使用 daemon 作为底层库永久阻塞且无法由 Python 安全中止时的最后进程退出保障.
 
 ## 3. 通用约定
 

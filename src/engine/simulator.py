@@ -4,7 +4,7 @@ import threading
 import time
 from typing import TYPE_CHECKING
 
-from agent.rep_agent import RepresentativeAgent
+from agent.rep_agent import AgentStoppedError, RepresentativeAgent
 from engine.venue_engine import VenueEngine
 from scenario.scenario import Scenario
 
@@ -24,6 +24,8 @@ class Simulator:
     __agent_threads: dict[str, threading.Thread]
     __agent_errors: dict[str, Exception]
     __started: bool
+    __stop_event: threading.Event
+    __state_lock: threading.RLock
 
     def __init__(self, scenario: Scenario) -> None:
         self.scenario = scenario
@@ -34,36 +36,49 @@ class Simulator:
         self.__agent_threads = {}
         self.__agent_errors = {}
         self.__started = False
+        self.__stop_event = threading.Event()
+        self.__state_lock = threading.RLock()
+        self.shutdown_grace_s = 5.0
 
     @property
     def venue_engines(self) -> dict[str, VenueEngine]:
         """会场引擎句柄(副本;键为 venue id)."""
-        return dict(self.__venue_engines)
+        with self.__state_lock:
+            return dict(self.__venue_engines)
 
     @property
     def venue_threads(self) -> dict[str, threading.Thread]:
         """会场线程句柄(副本;键为 venue id)."""
-        return dict(self.__venue_threads)
+        with self.__state_lock:
+            return dict(self.__venue_threads)
 
     @property
     def venue_errors(self) -> dict[str, Exception]:
         """会场线程捕获到的异常(副本;键为 venue id)."""
-        return dict(self.__venue_errors)
+        with self.__state_lock:
+            return dict(self.__venue_errors)
 
     @property
     def agents(self) -> dict[str, RepresentativeAgent]:
         """代表 Agent 句柄(副本;键为 rep id)."""
-        return dict(self.__agents)
+        with self.__state_lock:
+            return dict(self.__agents)
 
     @property
     def agent_threads(self) -> dict[str, threading.Thread]:
         """代表 Agent 线程句柄(副本;键为 rep id)."""
-        return dict(self.__agent_threads)
+        with self.__state_lock:
+            return dict(self.__agent_threads)
 
     @property
     def agent_errors(self) -> dict[str, Exception]:
         """代表 Agent 线程捕获到的异常(副本;键为 rep id)."""
-        return dict(self.__agent_errors)
+        with self.__state_lock:
+            return dict(self.__agent_errors)
+
+    @property
+    def stop_requested(self) -> bool:
+        return self.__stop_event.is_set()
 
     def run(self) -> None:
         """初始化场景,启动会场与代表线程,并阻塞至全部结束."""
@@ -80,13 +95,26 @@ class Simulator:
             raise RuntimeError("场景无代表,无法启动 Agent")
 
         self.scenario.initialize()
-        self.__venue_errors = {}
-        self.__agent_errors = {}
-        for venue in self.scenario.venues:
-            self._start_venue_thread(venue)
-        for rep in self.scenario.representatives:
-            self._start_agent_thread(rep)
+        with self.__state_lock:
+            self.__venue_errors = {}
+            self.__agent_errors = {}
+        self.__stop_event.clear()
         self.__started = True
+        try:
+            for venue in self.scenario.venues:
+                self._start_venue_thread(venue)
+            for rep in self.scenario.representatives:
+                self._start_agent_thread(rep)
+        except BaseException:
+            self._request_stop()
+            self._join_started_threads(time.monotonic() + self.shutdown_grace_s)
+            raise
+
+    def stop(self) -> None:
+        """请求所有 Agent 与 VenueEngine 协作停止；可从其他线程调用."""
+        if not self.__started:
+            raise RuntimeError("Simulator 尚未 start/run,没有可停止的线程")
+        self._request_stop()
 
     def join(self, timeout: float | None = None) -> None:
         """等待全部会场与代表线程结束;任一线程超时或曾抛错则失败."""
@@ -94,39 +122,48 @@ class Simulator:
             raise RuntimeError("Simulator 尚未 start/run,没有可 join 的线程")
 
         deadline = None if timeout is None else time.monotonic() + timeout
-        self._join_threads(self.__agent_threads, kind="rep", deadline=deadline)
-        for engine in self.__venue_engines.values():
-            engine.stop()
-        self._join_threads(self.__venue_threads, kind="venue", deadline=deadline)
+        shutdown_deadline: float | None = None
+        timed_out = False
 
-        if self.__venue_errors:
-            venue_id, exc = next(iter(self.__venue_errors.items()))
-            raise RuntimeError(
-                f"会场 {venue_id!r} 的 VenueEngine 线程异常退出"
-            ) from exc
-        if self.__agent_errors:
-            rep_id, exc = next(iter(self.__agent_errors.items()))
-            raise RuntimeError(
-                f"代表 {rep_id!r} 的 Agent 线程异常退出"
-            ) from exc
+        while self._alive_threads():
+            self._collect_venue_failures()
+            if self._has_worker_errors():
+                self._request_stop()
+            elif not any(thread.is_alive() for thread in self.agent_threads.values()):
+                self._request_stop()
 
-    def _join_threads(
-        self,
-        threads: dict[str, threading.Thread],
-        *,
-        kind: str,
-        deadline: float | None,
-    ) -> None:
-        for key, thread in threads.items():
-            remaining = None
-            if deadline is not None:
-                remaining = max(0.0, deadline - time.monotonic())
-            thread.join(timeout=remaining)
-            if thread.is_alive():
-                raise TimeoutError(
-                    f"{kind} thread {key!r}(name={thread.name!r}) "
-                    f"did not finish before deadline"
-                )
+            now = time.monotonic()
+            if deadline is not None and now >= deadline and not timed_out:
+                timed_out = True
+                self._request_stop()
+            if self.stop_requested and shutdown_deadline is None:
+                shutdown_deadline = now + self.shutdown_grace_s
+            if shutdown_deadline is not None and now >= shutdown_deadline:
+                break
+
+            for thread in self._alive_threads():
+                thread.join(timeout=0.01)
+
+        self._collect_venue_failures()
+        alive = self._alive_threads()
+        venue_errors = self.venue_errors
+        agent_errors = self.agent_errors
+
+        if venue_errors:
+            venue_id, exc = next(iter(venue_errors.items()))
+            suffix = self._alive_thread_suffix(alive)
+            raise RuntimeError(
+                f"会场 {venue_id!r} 的 VenueEngine 线程异常退出{suffix}"
+            ) from exc
+        if agent_errors:
+            rep_id, exc = next(iter(agent_errors.items()))
+            suffix = self._alive_thread_suffix(alive)
+            raise RuntimeError(
+                f"代表 {rep_id!r} 的 Agent 线程异常退出{suffix}"
+            ) from exc
+        if timed_out or alive:
+            names = ", ".join(thread.name for thread in alive) or "(已协作退出)"
+            raise TimeoutError(f"Simulator 未在期限内结束；仍存活线程: {names}")
 
     def _start_venue_thread(self, venue: Venue) -> None:
         if venue.id in self.__venue_threads:
@@ -136,15 +173,16 @@ class Simulator:
             target=self._run_venue,
             args=(engine,),
             name=f"venue:{venue.id}",
-            daemon=False,
+            daemon=True,
         )
-        self.__venue_engines[venue.id] = engine
-        self.__venue_threads[venue.id] = thread
+        with self.__state_lock:
+            self.__venue_engines[venue.id] = engine
+            self.__venue_threads[venue.id] = thread
         thread.start()
         deadline = time.monotonic() + 5.0
         while not engine.wait_until_started(timeout=0.01):
             if not thread.is_alive():
-                exc = self.__venue_errors.get(venue.id)
+                exc = self.venue_errors.get(venue.id)
                 if exc is not None:
                     raise RuntimeError(
                         f"会场 {venue.id!r} 的 VenueEngine 线程异常退出"
@@ -160,25 +198,100 @@ class Simulator:
     def _start_agent_thread(self, rep: Representative) -> None:
         if rep.id in self.__agent_threads:
             raise RuntimeError(f"代表 {rep.id!r} 的 Agent 线程已存在,不能重复启动")
-        agent = RepresentativeAgent(rep)
+        agent = RepresentativeAgent(rep, stop_event=self.__stop_event)
         thread = threading.Thread(
             target=self._run_agent,
             args=(agent,),
             name=f"agent:{rep.id}",
-            daemon=False,
+            daemon=True,
         )
-        self.__agents[rep.id] = agent
-        self.__agent_threads[rep.id] = thread
+        with self.__state_lock:
+            self.__agents[rep.id] = agent
+            self.__agent_threads[rep.id] = thread
         thread.start()
 
     def _run_venue(self, engine: VenueEngine) -> None:
         try:
             engine.run()
-        except Exception as exc:
-            self.__venue_errors[engine.venue.id] = exc
+        except BaseException as exc:
+            failure = engine.venue.event_failure or exc
+            error = self._normalize_failure(
+                failure,
+                f"会场 {engine.venue.id!r} 的 VenueEngine 收到致命异常",
+            )
+            with self.__state_lock:
+                self.__venue_errors[engine.venue.id] = error
+            self._request_stop()
 
     def _run_agent(self, agent: RepresentativeAgent) -> None:
         try:
             agent.run()
-        except Exception as exc:
-            self.__agent_errors[agent.rep.id] = exc
+        except AgentStoppedError as exc:
+            if self.stop_requested:
+                return
+            with self.__state_lock:
+                self.__agent_errors[agent.rep.id] = exc
+            self._request_stop()
+        except BaseException as exc:
+            error = self._normalize_failure(
+                exc,
+                f"代表 {agent.rep.id!r} 的 Agent 收到致命异常",
+            )
+            with self.__state_lock:
+                self.__agent_errors[agent.rep.id] = error
+            self._request_stop()
+
+    def _request_stop(self) -> None:
+        self.__stop_event.set()
+        with self.__state_lock:
+            agents = list(self.__agents.values())
+            engines = list(self.__venue_engines.values())
+        for agent in agents:
+            agent.stop()
+        for engine in engines:
+            engine.stop()
+
+    def _collect_venue_failures(self) -> None:
+        with self.__state_lock:
+            engines = list(self.__venue_engines.values())
+        for engine in engines:
+            failure = engine.venue.event_failure
+            if failure is None:
+                continue
+            error = self._normalize_failure(
+                failure,
+                f"会场 {engine.venue.id!r} 的 VenueEngine 收到致命异常",
+            )
+            with self.__state_lock:
+                self.__venue_errors.setdefault(engine.venue.id, error)
+
+    def _has_worker_errors(self) -> bool:
+        with self.__state_lock:
+            return bool(self.__venue_errors or self.__agent_errors)
+
+    def _alive_threads(self) -> list[threading.Thread]:
+        with self.__state_lock:
+            threads = [
+                *self.__venue_threads.values(),
+                *self.__agent_threads.values(),
+            ]
+        return [thread for thread in threads if thread.is_alive()]
+
+    def _join_started_threads(self, deadline: float) -> None:
+        for thread in self._alive_threads():
+            thread.join(timeout=max(0.0, deadline - time.monotonic()))
+
+    @staticmethod
+    def _normalize_failure(exc: BaseException, message: str) -> Exception:
+        if isinstance(exc, Exception):
+            return exc
+        error = RuntimeError(message)
+        error.__cause__ = exc
+        return error
+
+    @staticmethod
+    def _alive_thread_suffix(threads: list[threading.Thread]) -> str:
+        if not threads:
+            return ""
+        names = ", ".join(thread.name for thread in threads)
+        return f"；协作停止期限后仍存活: {names}"

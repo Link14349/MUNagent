@@ -2,20 +2,23 @@
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+import threading
 
 import pytest
 
 from event.event import (
     EventStatus,
     EventType,
+    MessageEvent,
     MotionSwitchEvent,
     VoteEvent,
     VotePassMode,
 )
 from scenario.scenario import Scenario
-from scenario.venue import SessionPhase
+from scenario.venue import EventEdit, EventStatusUpdate, SessionPhase
 
 TEMPLATE = Path(__file__).resolve().parent.parent / "scenario-template"
 
@@ -148,3 +151,95 @@ def test_event_list_time_pass(scenario: Scenario) -> None:
         scenario.time_pass(timedelta(seconds=-1))
     with pytest.raises(TypeError, match="timedelta"):
         scenario.time_pass(30)  # type: ignore[arg-type]
+
+
+def test_submitted_event_edit_runs_in_venue_engine(
+    scenario: Scenario,
+    venue_id: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    venue = scenario.venues[0]
+    event = MotionSwitchEvent(
+        "原始动议",
+        SessionPhase.FREE_DISCUSSION,
+        venue_id,
+        {rep.id for rep in scenario.representatives},
+        scenario,
+    )
+    venue.submit_event(event)
+    edit_threads: list[str] = []
+    original = venue._commit_event_edit
+
+    def record(edit: EventEdit) -> None:
+        edit_threads.append(threading.current_thread().name)
+        original(edit)
+
+    monkeypatch.setattr(venue, "_commit_event_edit", record)
+    event.content = "队列更新后的动议"
+
+    assert event.content == "队列更新后的动议"
+    assert edit_threads == [f"test-venue:{venue.id}"]
+
+
+def test_status_and_field_edit_follow_same_queue_order(
+    scenario: Scenario,
+    venue_id: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    venue = scenario.venues[0]
+    assert venue.event_list is not None
+    event = MotionSwitchEvent(
+        "保持不变",
+        SessionPhase.FREE_DISCUSSION,
+        venue_id,
+        {rep.id for rep in scenario.representatives},
+        scenario,
+    )
+    venue.submit_event(event)
+
+    entered = threading.Event()
+    release = threading.Event()
+    status_queued = threading.Event()
+    edit_queued = threading.Event()
+
+    def block(blocking_event) -> None:
+        if blocking_event.content == "占用 VenueEngine":
+            entered.set()
+            release.wait(timeout=2.0)
+
+    venue.event_list.add_listener(EventType.MESSAGE, block)
+    original_submit = venue._submit_command
+
+    def record_submit(command) -> None:
+        original_submit(command)
+        if isinstance(command, EventStatusUpdate):
+            status_queued.set()
+        elif isinstance(command, EventEdit):
+            edit_queued.set()
+
+    monkeypatch.setattr(venue, "_submit_command", record_submit)
+
+    with ThreadPoolExecutor(max_workers=3) as executor:
+        blocker = executor.submit(
+            venue.submit_event,
+            MessageEvent("占用 VenueEngine", "winston_churchill", venue.id, scenario),
+        )
+        assert entered.wait(timeout=2.0)
+        status_result = executor.submit(
+            setattr,
+            event,
+            "status",
+            EventStatus.COMPLETED,
+        )
+        assert status_queued.wait(timeout=2.0)
+        edit_result = executor.submit(setattr, event, "content", "不应写入")
+        assert edit_queued.wait(timeout=2.0)
+        release.set()
+
+        blocker.result(timeout=2.0)
+        status_result.result(timeout=2.0)
+        with pytest.raises(PermissionError, match="不能修改 content"):
+            edit_result.result(timeout=2.0)
+
+    assert event.status == EventStatus.COMPLETED
+    assert event.content == "保持不变"

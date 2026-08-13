@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import sys
+import threading
 import time
 from collections.abc import AsyncIterator, Callable
 from pathlib import Path
@@ -54,7 +55,7 @@ class LLM:
         self._stream_read_timeout_s = stream_read_timeout_s
         self._max_retries = max_retries
         self._transport = transport
-        self._stop_event = asyncio.Event()
+        self._stop_event = threading.Event()
 
     @staticmethod
     def _normalize_base_url(base_url: str) -> str:

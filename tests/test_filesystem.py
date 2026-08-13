@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+import threading
 
 import pytest
 
@@ -255,6 +257,107 @@ def test_manifest_roundtrip(fs: FileSystem, scenario: Scenario, venue_id: str) -
     reloaded_draft = reloaded.get(f"reps/{CHURCHILL}/draft.md", CHURCHILL)
     with pytest.raises(ValueError, match="内容相对最新提交未变化"):
         reloaded_draft.submit(CHURCHILL)
+
+
+def test_concurrent_creates_are_all_persisted(
+    fs: FileSystem,
+    scenario: Scenario,
+) -> None:
+    def create(index: int):
+        return fs.create_rep_file(CHURCHILL, f"并发-{index}.md", str(index))
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        created = list(executor.map(create, range(40)))
+
+    assert len({file.path for file in created}) == 40
+    reloaded = FileSystem(fs.path, scenario)
+    assert len(reloaded.list_all()) == 40
+    for index in range(40):
+        assert reloaded.read(
+            f"reps/{CHURCHILL}/并发-{index}.md",
+            CHURCHILL,
+        ) == str(index)
+
+
+def test_concurrent_create_same_path_has_one_winner(
+    fs: FileSystem,
+    scenario: Scenario,
+) -> None:
+    workers = 8
+    barrier = threading.Barrier(workers)
+
+    def create(index: int) -> bool:
+        barrier.wait()
+        try:
+            fs.create_rep_file(CHURCHILL, "同名.md", str(index))
+        except FileExistsError:
+            return False
+        return True
+
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        results = list(executor.map(create, range(workers)))
+
+    assert sum(results) == 1
+    reloaded = FileSystem(fs.path, scenario)
+    assert len(reloaded.list_all()) == 1
+    assert reloaded.read(f"reps/{CHURCHILL}/同名.md", CHURCHILL) in {
+        str(index) for index in range(workers)
+    }
+
+
+def test_concurrent_unchanged_submissions_create_one_version(
+    fs: FileSystem,
+    scenario: Scenario,
+) -> None:
+    draft = fs.create_rep_file(CHURCHILL, "并发提交.md", "同一版本")
+    workers = 8
+    barrier = threading.Barrier(workers)
+
+    def submit(_: int):
+        barrier.wait()
+        try:
+            return draft.submit(CHURCHILL)
+        except ValueError:
+            return None
+
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        submitted = list(executor.map(submit, range(workers)))
+
+    winners = [file for file in submitted if file is not None]
+    assert len(winners) == 1
+    assert winners[0].path.name == f"{CHURCHILL}+并发提交.md+v1"
+    reloaded = FileSystem(fs.path, scenario)
+    assert len(reloaded.list_all()) == 2
+
+
+def test_concurrent_writes_keep_memory_and_disk_consistent(
+    fs: FileSystem,
+    scenario: Scenario,
+) -> None:
+    relative = f"reps/{CHURCHILL}/共享写入.md"
+    file = fs.create_rep_file(CHURCHILL, "共享写入.md", "初始")
+    workers = 8
+    barrier = threading.Barrier(workers)
+
+    def write(index: int) -> None:
+        barrier.wait()
+        fs.write(relative, CHURCHILL, f"版本-{index}")
+
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        list(executor.map(write, range(workers)))
+
+    final = fs.read(relative, CHURCHILL)
+    assert final == file.path.read_text(encoding="utf-8")
+    assert FileSystem(fs.path, scenario).read(relative, CHURCHILL) == final
+
+
+def test_file_scope_property_returns_copy(fs: FileSystem) -> None:
+    file = fs.create_rep_file(CHURCHILL, "scope.md", "私有")
+    scope = file.scope
+    scope.add(STALIN)
+
+    assert file.scope == {CHURCHILL}
+    assert not file.visible_to(STALIN)
 
 
 def test_scenario_initialize_binds_filesystem(scenario: Scenario, tmp_path: Path) -> None:

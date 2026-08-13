@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+import threading
 
 import pytest
 
@@ -165,3 +167,43 @@ def test_representative_agenda_api(scenario: Scenario) -> None:
     churchill.add_agenda(fresh)
     assert churchill.get_agenda("rep_extra") is fresh
     assert fresh in churchill.todo_agenda
+
+
+def test_concurrent_agenda_switches_run_in_venue_engine_order(
+    scenario: Scenario,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    venue = scenario.venues[0]
+    venue.chair = CHURCHILL
+    initial = venue.current_agenda
+    targets = venue.todo_agenda[:6]
+    barrier = threading.Barrier(len(targets))
+    commit_threads: list[str] = []
+    original_commit = venue._commit_agenda_switch
+
+    def record_commit(command) -> None:
+        commit_threads.append(threading.current_thread().name)
+        original_commit(command)
+
+    monkeypatch.setattr(venue, "_commit_agenda_switch", record_commit)
+
+    def switch(agenda: Agenda) -> None:
+        barrier.wait()
+        venue.set_current_agenda(CHURCHILL, agenda)
+
+    with ThreadPoolExecutor(max_workers=len(targets)) as executor:
+        list(executor.map(switch, targets))
+
+    assert venue.event_list is not None
+    events = [
+        event
+        for event in venue.event_list.get_events("__GOD__")
+        if isinstance(event, SetAgendaEvent)
+    ]
+    assert len(events) == len(targets)
+    previous = initial
+    for event in events:
+        assert event.previous is previous
+        previous = event.agenda
+    assert venue.current_agenda is previous
+    assert set(commit_threads) == {f"test-venue:{venue.id}"}

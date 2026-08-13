@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -26,6 +27,7 @@ class AgendaManager:
     """
 
     venue: Venue
+    __lock: threading.RLock
 
     def __init__(
         self,
@@ -66,27 +68,32 @@ class AgendaManager:
             item for item in ordered if item.id != initial_agenda_id
         ]
         self.__finished_agenda: list[Agenda] = []
+        self.__lock = threading.RLock()
 
     @property
     def current_agenda(self) -> Agenda | None:
-        return self.__current_agenda
+        with self.__lock:
+            return self.__current_agenda
 
     @property
     def todo_agenda(self) -> list[Agenda]:
-        return list(self.__todo_agenda)
+        with self.__lock:
+            return list(self.__todo_agenda)
 
     @property
     def finished_agenda(self) -> list[Agenda]:
-        return list(self.__finished_agenda)
+        with self.__lock:
+            return list(self.__finished_agenda)
 
     def get(self, agenda_id: str) -> Agenda:
         """按 ID 取得议题对象."""
-        try:
-            return self.__by_id[agenda_id]
-        except KeyError as exc:
-            raise ValueError(
-                f"会场 {self.venue.id or '<unset>'} 未知议题 ID: {agenda_id}"
-            ) from exc
+        with self.__lock:
+            try:
+                return self.__by_id[agenda_id]
+            except KeyError as exc:
+                raise ValueError(
+                    f"会场 {self.venue.id or '<unset>'} 未知议题 ID: {agenda_id}"
+                ) from exc
 
     def set_current_agenda(self, agenda: Agenda, finished: bool = False) -> None:
         """将 ``agenda`` 设为当前议题.
@@ -95,28 +102,30 @@ class AgendaManager:
         原 ``current_agenda``:``finished=True`` 时进入 ``finished_agenda``,
         否则退回 ``todo_agenda`` 末尾.
         """
-        if agenda is self.__current_agenda:
-            return
+        with self.__lock:
+            if agenda is self.__current_agenda:
+                return
 
-        if agenda not in self.__todo_agenda:
-            raise ValueError(
-                f"议题 {agenda.id} 不在会场 {self.venue.id or '<unset>'} 的 todo_agenda 中"
-            )
+            if agenda not in self.__todo_agenda:
+                raise ValueError(
+                    f"议题 {agenda.id} 不在会场 {self.venue.id or '<unset>'} 的 todo_agenda 中"
+                )
 
-        if self.__current_agenda is not None:
-            if finished:
-                self.__finished_agenda.append(self.__current_agenda)
-            else:
-                self.__todo_agenda.append(self.__current_agenda)
+            if self.__current_agenda is not None:
+                if finished:
+                    self.__finished_agenda.append(self.__current_agenda)
+                else:
+                    self.__todo_agenda.append(self.__current_agenda)
 
-        self.__todo_agenda.remove(agenda)
-        self.__current_agenda = agenda
+            self.__todo_agenda.remove(agenda)
+            self.__current_agenda = agenda
 
     def add_todo(self, agenda: Agenda) -> None:
         """向 ``todo_agenda`` 追加新议题(ID 全局唯一)."""
-        if agenda.id in self.__by_id:
-            raise ValueError(
-                f"会场 {self.venue.id or '<unset>'} 已存在议题 ID: {agenda.id}"
-            )
-        self.__by_id[agenda.id] = agenda
-        self.__todo_agenda.append(agenda)
+        with self.__lock:
+            if agenda.id in self.__by_id:
+                raise ValueError(
+                    f"会场 {self.venue.id or '<unset>'} 已存在议题 ID: {agenda.id}"
+                )
+            self.__by_id[agenda.id] = agenda
+            self.__todo_agenda.append(agenda)

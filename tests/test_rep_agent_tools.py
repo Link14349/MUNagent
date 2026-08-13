@@ -10,7 +10,7 @@ import pytest
 from agent.rep_agent_tools import REP_TOOL_SPECS, RepresentativeToolExecutor
 from llm.types import ToolCall
 from scenario.scenario import Scenario
-from scenario.venue import CHAIR_POWER, SessionPhase
+from scenario.venue import CHAIR_POWER, SessionPhase, VenueEngineStoppedError
 
 TEMPLATE = Path(__file__).resolve().parent.parent / "scenario-template"
 
@@ -188,3 +188,22 @@ def test_executor_unknown_tool(scenario: Scenario) -> None:
     result = json.loads(executor.execute(_call("not_a_tool")))
     assert result["ok"] is False
     assert "未知工具" in result["error"]
+
+
+def test_executor_propagates_venue_engine_stop(
+    scenario: Scenario,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    churchill = _rep(scenario, CHURCHILL)
+    venue = scenario.venues[0]
+    stopped = VenueEngineStoppedError(venue.id, RuntimeError("测试引擎故障"))
+
+    def fail_send_message(content: str) -> None:
+        raise stopped
+
+    monkeypatch.setattr(churchill, "send_message", fail_send_message)
+    executor = RepresentativeToolExecutor(churchill)
+
+    with pytest.raises(VenueEngineStoppedError) as caught:
+        executor.execute(_call("send_message", content="不会被吞掉"))
+    assert caught.value is stopped

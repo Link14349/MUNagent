@@ -8,7 +8,7 @@ from typing import Any, Callable
 from agenda.agenda import Agenda
 from llm.types import ToolCall, ToolSpec
 from scenario.representative import Representative
-from scenario.venue import SessionPhase
+from scenario.venue import SessionPhase, VenueEngineStoppedError
 
 _PHASE_VALUES = [p.value for p in SessionPhase]
 
@@ -540,7 +540,7 @@ REP_TOOL_SPECS: list[ToolSpec] = [
 
 
 class RepresentativeToolExecutor:
-    """把 LLM ToolCall 分发到 ``Representative`` 方法,返回 JSON 字符串供 role=tool 回喂."""
+    """分发代表工具并返回 JSON；VenueEngine 停止异常直接交给 Agent 结束线程."""
 
     def __init__(self, rep: Representative) -> None:
         self.rep = rep
@@ -561,6 +561,8 @@ class RepresentativeToolExecutor:
             if not isinstance(args, dict):
                 raise ValueError("工具参数必须是 JSON 对象")
             payload = handler(self.rep, args)
+        except VenueEngineStoppedError:
+            raise
         except Exception as exc:
             payload = _err(exc)
         return json.dumps(payload, ensure_ascii=False)
