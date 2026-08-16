@@ -52,10 +52,9 @@ class ChairAgent(EventDrivenSystemAgent):
         return "representative" if self.venue.chair is not None else "neutral"
 
     def initial_prompt(self) -> str | None:
-        self.tools.begin_turn()
-        return self._state_prompt(
-            "会议调度线程刚启动。检查当前阶段与议程；只有确有程序需要时才使用工具。"
-        )
+        # 开场由 Simulator 提交可审计的 MeetingStartEvent；避免主席在事件表
+        # 仍为空时选择沉默，导致所有代表都等待首条观察。
+        return None
 
     def before_step(self, observations: list[Observation]) -> None:
         self.tools.begin_turn()

@@ -8,11 +8,12 @@ import threading
 import pytest
 
 from agent.rep_agent import RepresentativeAgent
+from agent.chair_agent import ChairAgent
 from agent.inbox import ObservationKind, ObservationPriority
 from engine.simulator import Simulator
 from engine.venue_engine import VenueEngine
 from scenario.scenario import Scenario
-from scenario.venue import Venue, VenueEngineStoppedError
+from scenario.venue import SessionPhase, Venue, VenueEngineStoppedError
 
 TEMPLATE = Path(__file__).resolve().parent.parent / "scenario-template"
 
@@ -83,9 +84,12 @@ def test_simulator_agents_submit_through_running_venue_engine(
     event_list = scenario.venues[0].event_list
     assert event_list is not None
     events = event_list.get_events("__GOD__")
-    assert len(events) == len(scenario.representatives)
+    messages = [event for event in events if event.type.value == "message"]
+    startup = [event for event in events if event.type.value == "meeting_start"]
+    assert len(messages) == len(scenario.representatives)
+    assert len(startup) == 1
     assert sorted(event.id for event in events if event.id is not None) == list(
-        range(len(scenario.representatives))
+        range(len(scenario.representatives) + 1)
     )
 
 
@@ -113,7 +117,10 @@ def test_venue_engine_publishes_observations_without_self_activation(
     sim.join(timeout=2.0)
 
     created = [
-        item for item in received if item[1].kind == ObservationKind.EVENT_CREATED
+        item
+        for item in received
+        if item[1].kind == ObservationKind.EVENT_CREATED
+        and item[1].event.id == event.id
     ]
     status_updates = [
         item
@@ -145,6 +152,82 @@ def test_venue_engine_publishes_observations_without_self_activation(
         observation.priority == ObservationPriority.URGENT
         for _, observation in status_updates
     )
+
+
+def test_unchaired_startup_event_activates_all_representatives_only(
+    scenario: Scenario,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    rep_received = []
+    chair_received = []
+
+    monkeypatch.setattr(
+        RepresentativeAgent,
+        "notify",
+        lambda self, observation: rep_received.append((self.rep.id, observation))
+        or True,
+    )
+    monkeypatch.setattr(
+        ChairAgent,
+        "notify",
+        lambda self, observation: chair_received.append(observation) or True,
+    )
+    simulator = Simulator(scenario)
+
+    simulator.start()
+    simulator.join(timeout=2.0)
+
+    startup = [
+        (rep_id, observation)
+        for rep_id, observation in rep_received
+        if observation.event.event_type == "meeting_start"
+    ]
+    assert {rep_id for rep_id, _ in startup} == set(scenario.venues[0].seats)
+    assert all(observation.activates_agent for _, observation in startup)
+    assert all(
+        observation.event.event_type != "meeting_start"
+        for observation in chair_received
+    )
+
+
+def test_chaired_startup_event_activates_chair_not_representatives(
+    scenario: Scenario,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    scenario.venues[0].switch_phase(SessionPhase.CHAIRED_CORE)
+    rep_received = []
+    chair_received = []
+
+    monkeypatch.setattr(
+        RepresentativeAgent,
+        "notify",
+        lambda self, observation: rep_received.append((self.rep.id, observation))
+        or True,
+    )
+    monkeypatch.setattr(
+        ChairAgent,
+        "notify",
+        lambda self, observation: chair_received.append(observation) or True,
+    )
+    simulator = Simulator(scenario)
+
+    simulator.start()
+    simulator.join(timeout=2.0)
+
+    startup_reps = [
+        observation
+        for _, observation in rep_received
+        if observation.event.event_type == "meeting_start"
+    ]
+    startup_chair = [
+        observation
+        for observation in chair_received
+        if observation.event.event_type == "meeting_start"
+    ]
+    assert len(startup_reps) == len(scenario.venues[0].seats)
+    assert all(not observation.activates_agent for observation in startup_reps)
+    assert len(startup_chair) == 1
+    assert startup_chair[0].activates_agent is True
 
 
 def test_simulator_rejects_double_start(scenario: Scenario) -> None:

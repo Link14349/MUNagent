@@ -3,6 +3,7 @@ from __future__ import annotations
 import threading
 import time
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from agent.inbox import (
@@ -15,9 +16,22 @@ from agent.dm_agent import DMAgent
 from agent.rep_agent import AgentStoppedError, RepresentativeAgent
 from agent.system_agent import SystemAgentStoppedError
 from agent.rep_context import snapshot_event
+from engine.end_conditions import (
+    TextEndConditionEvaluator,
+    build_end_condition_evidence,
+)
 from engine.venue_engine import VenueEngine
-from event.event import EventStatus, EventType, InstructionEvent, ResolutionEvent
+from event.event import (
+    EventStatus,
+    EventType,
+    InstructionEvent,
+    MeetingStartEvent,
+    PhaseSwitchEvent,
+    ResolutionEvent,
+)
+from llm import LLMCancelledError
 from scenario.scenario import Scenario
+from scenario.venue import SessionPhase
 
 if TYPE_CHECKING:
     from event.event import Event
@@ -28,6 +42,18 @@ if TYPE_CHECKING:
 
 LLMFactory = Callable[["Representative"], "LLM | None"]
 VenueLLMFactory = Callable[["Venue"], "LLM | None"]
+
+
+@dataclass(frozen=True)
+class EndConditionMatch:
+    """一次触发自动终局的可审计结果。"""
+
+    condition_index: int
+    condition_type: str
+    content: str
+    story_time: str
+    reason: str
+    evidence_event_ids: tuple[int, ...] = ()
 
 
 class Simulator:
@@ -46,6 +72,12 @@ class Simulator:
     __dm_agents: dict[str, DMAgent]
     __dm_threads: dict[str, threading.Thread]
     __dm_errors: dict[str, Exception]
+    __end_condition_thread: threading.Thread | None
+    __end_condition_match: EndConditionMatch | None
+    __end_condition_error: Exception | None
+    __end_condition_fatal_error: Exception | None
+    __end_condition_version: int
+    __end_condition_wakeup: threading.Event
     __started: bool
     __stop_event: threading.Event
     __state_lock: threading.RLock
@@ -53,6 +85,7 @@ class Simulator:
     __chair_llm_factory: VenueLLMFactory | None
     __dm_llm_factory: VenueLLMFactory | None
     __dm_random_seed: str
+    __text_end_condition_evaluator: TextEndConditionEvaluator | None
     __observation_sequences: dict[str, int]
 
     def __init__(
@@ -63,6 +96,7 @@ class Simulator:
         chair_llm_factory: VenueLLMFactory | None = None,
         dm_llm_factory: VenueLLMFactory | None = None,
         dm_random_seed: str | int = "0",
+        text_end_condition_evaluator: TextEndConditionEvaluator | None = None,
     ) -> None:
         self.scenario = scenario
         self.__venue_engines = {}
@@ -77,6 +111,12 @@ class Simulator:
         self.__dm_agents = {}
         self.__dm_threads = {}
         self.__dm_errors = {}
+        self.__end_condition_thread = None
+        self.__end_condition_match = None
+        self.__end_condition_error = None
+        self.__end_condition_fatal_error = None
+        self.__end_condition_version = 0
+        self.__end_condition_wakeup = threading.Event()
         self.__started = False
         self.__stop_event = threading.Event()
         self.__state_lock = threading.RLock()
@@ -84,6 +124,7 @@ class Simulator:
         self.__chair_llm_factory = chair_llm_factory
         self.__dm_llm_factory = dm_llm_factory
         self.__dm_random_seed = str(dm_random_seed)
+        self.__text_end_condition_evaluator = text_end_condition_evaluator
         self.__observation_sequences = {}
         self.shutdown_grace_s = 5.0
 
@@ -156,6 +197,32 @@ class Simulator:
             return dict(self.__dm_errors)
 
     @property
+    def dm_random_seed(self) -> str:
+        """本次运行用于 DM 指令投点的原始种子。"""
+        return self.__dm_random_seed
+
+    @property
+    def end_condition_match(self) -> EndConditionMatch | None:
+        with self.__state_lock:
+            return self.__end_condition_match
+
+    @property
+    def end_condition_error(self) -> Exception | None:
+        """最近一次文本终局裁判错误；后续检查成功后会清空。"""
+        with self.__state_lock:
+            return self.__end_condition_error
+
+    @property
+    def end_condition_fatal_error(self) -> Exception | None:
+        with self.__state_lock:
+            return self.__end_condition_fatal_error
+
+    @property
+    def started(self) -> bool:
+        with self.__state_lock:
+            return self.__started
+
+    @property
     def stop_requested(self) -> bool:
         return self.__stop_event.is_set()
 
@@ -179,7 +246,12 @@ class Simulator:
             self.__agent_errors = {}
             self.__chair_errors = {}
             self.__dm_errors = {}
+            self.__end_condition_match = None
+            self.__end_condition_error = None
+            self.__end_condition_fatal_error = None
+            self.__end_condition_version = 0
             self.__observation_sequences = {}
+        self.__end_condition_wakeup.clear()
         self.__stop_event.clear()
         self.__started = True
         try:
@@ -190,6 +262,9 @@ class Simulator:
             for venue in self.scenario.venues:
                 self._start_dm_thread(venue)
                 self._start_chair_thread(venue)
+            if not self.stop_requested:
+                self._submit_startup_events()
+                self._start_end_condition_thread()
         except BaseException:
             self._request_stop()
             self._join_started_threads(time.monotonic() + self.shutdown_grace_s)
@@ -235,6 +310,7 @@ class Simulator:
         agent_errors = self.agent_errors
         chair_errors = self.chair_errors
         dm_errors = self.dm_errors
+        end_condition_fatal_error = self.end_condition_fatal_error
 
         if venue_errors:
             venue_id, exc = next(iter(venue_errors.items()))
@@ -260,6 +336,11 @@ class Simulator:
             raise RuntimeError(
                 f"会场 {venue_id!r} 的 DMAgent 线程异常退出{suffix}"
             ) from exc
+        if end_condition_fatal_error is not None:
+            suffix = self._alive_thread_suffix(alive)
+            raise RuntimeError(f"终局条件监视线程异常退出{suffix}") from (
+                end_condition_fatal_error
+            )
         if timed_out or alive:
             names = ", ".join(thread.name for thread in alive) or "(已协作退出)"
             raise TimeoutError(f"Simulator 未在期限内结束；仍存活线程: {names}")
@@ -376,6 +457,52 @@ class Simulator:
             self.__dm_threads[venue.id] = thread
         thread.start()
 
+    def _start_end_condition_thread(self) -> None:
+        thread = threading.Thread(
+            target=self._run_end_condition_monitor,
+            name="end-conditions",
+            daemon=True,
+        )
+        with self.__state_lock:
+            self.__end_condition_thread = thread
+        thread.start()
+
+    def _submit_startup_events(self) -> None:
+        """提交首条权威事件，打破所有角色都等待首个观察的启动互锁。"""
+        for venue in self.scenario.venues:
+            phase = venue.session_phase
+            if phase == SessionPhase.MEETING_ENDED:
+                continue
+            if phase in {
+                SessionPhase.UNCHAIRED_CORE,
+                SessionPhase.FREE_DISCUSSION,
+            }:
+                target_reps = set(venue.seats)
+                activates_chair = False
+                instruction = "请各代表根据当前议题开始磋商。"
+            else:
+                target_reps = set()
+                activates_chair = True
+                instruction = (
+                    "请主席立即处理开场程序；有主持阶段应点名首位发言者，"
+                    "休会阶段应决定是否继续休会或恢复会议。"
+                )
+            agenda = venue.current_agenda
+            agenda_text = (
+                f"当前议题为“{agenda.title}”（{agenda.id}）。"
+                if agenda is not None
+                else "当前没有议题。"
+            )
+            venue.submit_event(
+                MeetingStartEvent(
+                    f"会议开始。{agenda_text}{instruction}",
+                    target_reps,
+                    activates_chair,
+                    venue.id,
+                    self.scenario,
+                )
+            )
+
     def _publish_event_observation(
         self,
         event: Event,
@@ -391,6 +518,7 @@ class Simulator:
         with self.__state_lock:
             sequence = self.__observation_sequences.get(event.venue, 0) + 1
             self.__observation_sequences[event.venue] = sequence
+            self.__end_condition_version += 1
             targets = {
                 rep_id: self.__agents[rep_id]
                 for rep_id in target_ids
@@ -398,9 +526,12 @@ class Simulator:
             }
             chair = self.__chair_agents.get(event.venue)
             dm = self.__dm_agents.get(event.venue)
+        self.__end_condition_wakeup.set()
 
         for rep_id, agent in targets.items():
-            if event.type == EventType.CHAIR:
+            if isinstance(event, MeetingStartEvent):
+                activates_agent = rep_id in event.target_reps
+            elif event.type == EventType.CHAIR:
                 activates_agent = rep_id in snapshot.target_reps
             else:
                 activates_agent = not (
@@ -421,6 +552,10 @@ class Simulator:
         if (
             chair is not None
             and actor_id != chair.venue.chair_actor_id()
+            and (
+                not isinstance(event, MeetingStartEvent)
+                or event.activates_chair
+            )
             and self._chair_can_observe(chair, event)
         ):
             chair.notify(
@@ -482,6 +617,7 @@ class Simulator:
         if kind == ObservationKind.EVENT_STATUS_CHANGED:
             return ObservationPriority.URGENT
         if event_type in {
+            EventType.MEETING_START,
             EventType.SYSTEM,
             EventType.CHAIR,
             EventType.PHASE_SWITCH,
@@ -558,8 +694,108 @@ class Simulator:
                 self.__dm_errors[agent.venue.id] = error
             self._request_stop()
 
+    def _run_end_conditions(self) -> None:
+        """时间条件直接判断；文本条件只在权威事件版本变化后批量判断。"""
+        evaluated_version = -1
+        text_conditions = [
+            (index, str(condition.content))
+            for index, condition in enumerate(self.scenario.end_conditions)
+            if condition.type == "text"
+        ]
+
+        while not self.stop_requested:
+            for index, condition in enumerate(self.scenario.end_conditions):
+                if condition.type != "time" or not condition.check():
+                    continue
+                self._finish_for_end_condition(
+                    EndConditionMatch(
+                        condition_index=index,
+                        condition_type="time",
+                        content=str(condition.content),
+                        story_time=self.scenario.time.isoformat(),
+                        reason="剧情时间已达到终局条件设定的截止时刻",
+                    )
+                )
+                return
+
+            with self.__state_lock:
+                version = self.__end_condition_version
+            evaluator = self.__text_end_condition_evaluator
+            if evaluator is not None and text_conditions and version != evaluated_version:
+                try:
+                    evidence = build_end_condition_evidence(self.scenario)
+                    matches = evaluator.evaluate(text_conditions, evidence)
+                except LLMCancelledError:
+                    if self.stop_requested:
+                        return
+                    raise
+                except Exception as exc:
+                    with self.__state_lock:
+                        self.__end_condition_error = exc
+                    # 同一版本在短暂退避后重试；不中止仍可继续运行的会议。
+                    self.__end_condition_wakeup.wait(timeout=2.0)
+                    self.__end_condition_wakeup.clear()
+                    continue
+                with self.__state_lock:
+                    self.__end_condition_error = None
+                evaluated_version = version
+                if matches:
+                    match = min(matches, key=lambda item: item.condition_index)
+                    condition = self.scenario.end_conditions[match.condition_index]
+                    self._finish_for_end_condition(
+                        EndConditionMatch(
+                            condition_index=match.condition_index,
+                            condition_type="text",
+                            content=str(condition.content),
+                            story_time=self.scenario.time.isoformat(),
+                            reason=match.reason,
+                            evidence_event_ids=match.evidence_event_ids,
+                        )
+                    )
+                    return
+
+            self.__end_condition_wakeup.wait(timeout=0.5)
+            self.__end_condition_wakeup.clear()
+
+    def _run_end_condition_monitor(self) -> None:
+        try:
+            self._run_end_conditions()
+        except BaseException as exc:
+            error = self._normalize_failure(
+                exc,
+                "终局条件监视线程收到致命异常",
+            )
+            with self.__state_lock:
+                self.__end_condition_fatal_error = error
+            self._request_stop()
+
+    def _finish_for_end_condition(self, match: EndConditionMatch) -> None:
+        """记录终局，向各会场发布结束阶段事件，再协作停止全部线程。"""
+        with self.__state_lock:
+            if self.__end_condition_match is not None or self.stop_requested:
+                return
+            self.__end_condition_match = match
+
+        for venue in self.scenario.venues:
+            if venue.session_phase == SessionPhase.MEETING_ENDED:
+                continue
+            event = PhaseSwitchEvent(
+                f"会议自动结束：终局条件 #{match.condition_index} 已成立。{match.reason}",
+                SessionPhase.MEETING_ENDED,
+                venue.id,
+                set(venue.seats),
+                self.scenario,
+            )
+            try:
+                venue.submit_event(event)
+            except Exception:
+                if not self.stop_requested:
+                    raise
+        self._request_stop()
+
     def _request_stop(self) -> None:
         self.__stop_event.set()
+        self.__end_condition_wakeup.set()
         with self.__state_lock:
             agents = list(self.__agents.values())
             chair_agents = list(self.__chair_agents.values())
@@ -573,6 +809,9 @@ class Simulator:
             agent.stop()
         for engine in engines:
             engine.stop()
+        evaluator = self.__text_end_condition_evaluator
+        if evaluator is not None:
+            evaluator.stop()
 
     def _collect_venue_failures(self) -> None:
         with self.__state_lock:
@@ -595,6 +834,7 @@ class Simulator:
                 or self.__agent_errors
                 or self.__chair_errors
                 or self.__dm_errors
+                or self.__end_condition_fatal_error
             )
 
     def _alive_threads(self) -> list[threading.Thread]:
@@ -605,6 +845,8 @@ class Simulator:
                 *self.__chair_threads.values(),
                 *self.__dm_threads.values(),
             ]
+            if self.__end_condition_thread is not None:
+                threads.append(self.__end_condition_thread)
         return [thread for thread in threads if thread.is_alive()]
 
     def _agent_role_threads(self) -> list[threading.Thread]:

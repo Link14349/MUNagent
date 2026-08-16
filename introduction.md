@@ -13,7 +13,7 @@ MUNagent 是一个使用 Python 开发的历史委员会模拟推演项目.系�
 - 先打通角色发言,完整提案,主席调度,DM 危机推演,外部事件和结束条件;
 - 多会场,跨会场通信和跨会场危机联动留到单会场闭环稳定后再设计.
 
-目前仓库中的 `src/main.py` 仍是引擎入口骨架;`scenario-template/` 已先做成一份完整的单会场场景包,用它反推最小加载和运行接口.
+`src/main.py` 已提供单会场本地服务和命令行客户端;`scenario-template/` 是一份可直接加载的完整单会场场景包.
 
 ## 场景包结构
 
@@ -47,6 +47,16 @@ DM Agent 直接接收 pending 指令,先按六档成功率判断可行性,再用
 决议.DM 还可推进剧情时间并按显式 scope 发布带来源事件 ID 的危机更新.三类 Agent
 使用独立线程与局部上下文,由同一 Simulator 监督和协作停止.
 
+角色线程就绪后，引擎会首先写入 `MeetingStartEvent`：无主持/自由讨论阶段唤醒全部
+代表，有主持/休会阶段只唤醒主席。会议不再依赖主席模型“自愿”产生第一条工具事件，
+因此空事件表不会造成所有线程互相等待。
+
+运行入口会为每局生成或接收显式随机种子，并将种子、运行状态、终局理由和完整事件
+审计保存到场景包的 `simulation/<run_id>/`。时间终局条件由程序直接判断；文本终局
+条件只在权威事件发生变化后由独立裁判批量判断。任一条件成立时，会场进入
+`meeting_ended` 并协作停止全部线程。服务的启动、观察和存档格式见
+[`docs/runtime-service.md`](docs/runtime-service.md)。
+
 两个区块内都使用局部字段名 `target`,即 `public.target` 与 `private.target`.可见性已经由父级区块表达,不再使用 `public_target`,`private_target` 或 `priorities` 等重复命名.
 
 代表 ID 直接由角色文件名派生,例如 `reps/winston_churchill.yaml` 对应 `winston_churchill`;加载器直接扫描 `reps/`,不再通过 index 重复索引代表.venue 同理由加载器扫描 `venues/` 发现.
@@ -68,7 +78,20 @@ DM Agent 直接接收 pending 指令,先按六档成功率判断可行性,再用
 
 两位首脑共同签署可以形成政治谅解;只有两位外长也副署同一版本,才形成满足完整结束条件的可执行草案.这样四个 Agent 都拥有改变结局的实际权力.
 
-## 建议的最小运行闭环
+## 运行
+
+```bash
+python src/main.py serve scenario-template
+python src/main.py status
+python src/main.py watch
+```
+
+`serve` 终端本身会按事件 ID 逐条输出各会场 `EventList`，事件编辑或裁定也会输出
+更新；不需要另开 `watch` 才能观察会议。关闭服务使用 `python src/main.py shutdown`。
+默认服务只监听 `127.0.0.1:8765`；完整
+参数、HTTP API 和运行存档说明见 [`docs/runtime-service.md`](docs/runtime-service.md)。
+
+## 单会场运行闭环
 
 1. 按固定文件名加载 `index.yaml`,`background.md`,`storyline.yaml`,并扫描 `venues/*.yaml` 与 `reps/*.yaml`;
 2. 由通用引擎建立会议时钟,草案,签署和事件记录等运行时状态;

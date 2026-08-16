@@ -6,6 +6,7 @@ from dataclasses import dataclass
 import threading
 from typing import TYPE_CHECKING
 
+from agent.dm_prompt import build_dm_system_prompt
 from agent.dm_tools import DMToolExecutor, InstructionAdjudication
 from agent.inbox import Observation
 from agent.system_agent import EventDrivenSystemAgent
@@ -62,7 +63,7 @@ class DMAgent(EventDrivenSystemAgent):
         tools = DMToolExecutor(venue, random_seed=random_seed)
         super().__init__(
             identity=f"dm:{venue.id}",
-            system_prompt=_build_dm_system_prompt(venue),
+            system_prompt=build_dm_system_prompt(venue),
             tools=tools,
             llm=llm,
             stop_event=stop_event,
@@ -135,6 +136,7 @@ class DMAgent(EventDrivenSystemAgent):
 
 # 当前权威状态
 
+- 会场：{venue.name}（{venue.id}）
 - 剧情时间：{venue.scenario.time.isoformat()}
 - 会场阶段：{phase}
 - 当前议题：{agenda_text}
@@ -257,33 +259,3 @@ class DMAgent(EventDrivenSystemAgent):
 
 {preview}{truncation}
 """
-
-
-def _build_dm_system_prompt(venue: Venue) -> str:
-    targets = "\n".join(f"- {item}" for item in venue.scenario.targets) or "- 无"
-    return f"""你是 MUNagent 会场 {venue.name}（{venue.id}）的 DMAgent，负责危机推演。
-你不是主席或代表，不参与会议辩论。决议是否通过由主席/表决决定；指令则不经过主席
-接受或拒绝，而是在 pending 状态直接交给你作六档可行性判断和随机成败判定。
-
-# 场景背景
-
-{venue.scenario.background}
-
-# 推演目标
-
-{targets}
-
-# 工作规则
-
-1. pending 指令必须先选择六档之一：极有可能成功 95%、成功 80%、可能成功 60%、
-   可能失败 40%、失败 20%、极大概率失败 5%。分档依据必须写入 rationale。
-2. `adjudicate_instruction` 返回的 roll 是唯一有效骰点；roll < probability 才成功。
-   成功把指令状态记为 completed，失败记为 failed，不使用 accepted/rejected。
-3. accepted/rejected 只用于决议。accepted 决议允许推演，rejected 决议不得执行。
-4. 推演须考虑权限、资源、时距、组织摩擦、对手反应和已有危机状态。
-5. 每条危机更新必须通过工具发布，并绑定 `source_event_id`；普通文本不对代表可见。
-6. scope 是硬可见性边界。可以让秘密行动造成公开可观察后果，但不得在扩大后的 scope
-   中泄露原提交的秘密正文、行动者身份或只有提交范围内才知道的细节。
-7. 如结果对不同代表可见程度不同，应发布多条不同 scope、不同内容的更新。
-8. 不生成新的代表指令或决议，不修改提交文件，不替主席裁定决议。
-9. 相同指令只能分档和抽取一次；更新须客观描述结果并保留不确定性。"""

@@ -307,16 +307,23 @@ class FileSystem:
 
     @classmethod
     def create_for_scenario(cls, scenario: Scenario) -> FileSystem:
-        """在场景包 ``simulation/`` 下新建"日期+时间"目录并绑定."""
+        """在场景包 ``simulation/`` 下新建唯一运行目录并绑定."""
         root = scenario.root_path
         if root is None:
             raise ValueError("Scenario.root_path 未设置,无法创建 FileSystem;请先 load 场景包")
 
-        run_dir = root / "simulation" / _format_run_dirname(datetime.now())
-        if run_dir.exists():
-            raise FileExistsError(f"推演目录已存在: {run_dir}")
-        run_dir.mkdir(parents=True, exist_ok=False)
-        return cls(run_dir, scenario)
+        simulation_dir = root / "simulation"
+        simulation_dir.mkdir(parents=True, exist_ok=True)
+        stem = _format_run_dirname(datetime.now())
+        for suffix in range(10_000):
+            name = stem if suffix == 0 else f"{stem}-{suffix}"
+            run_dir = simulation_dir / name
+            try:
+                run_dir.mkdir(exist_ok=False)
+            except FileExistsError:
+                continue
+            return cls(run_dir, scenario)
+        raise FileExistsError(f"同一分钟内推演目录编号已耗尽: {simulation_dir / stem}")
 
     def _known_rep_ids(self) -> set[str]:
         return {rep.id for rep in self.scenario.representatives}

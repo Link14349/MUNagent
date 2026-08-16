@@ -170,6 +170,7 @@ DM 可执行两类动作：
 `Simulator` 通过可选 `llm_factory` 为每名代表创建独立 LLM：
 
 ```python
+from engine.end_conditions import LLMTextEndConditionEvaluator
 from engine.simulator import Simulator
 from llm import LLM
 
@@ -179,6 +180,9 @@ simulator = Simulator(
     chair_llm_factory=lambda venue: LLM(thinking=True),
     dm_llm_factory=lambda venue: LLM(thinking=True),
     dm_random_seed="run-001",
+    text_end_condition_evaluator=LLMTextEndConditionEvaluator(
+        LLM(thinking=False)
+    ),
 )
 simulator.start()
 ```
@@ -190,6 +194,27 @@ simulator.start()
 三个 factory 相互独立；未传某个 factory 时，对应角色线程立即退出且不会访问真实
 API。`dm_random_seed` 默认是字符串 `"0"`；正式运行应为每局显式保存一个种子。
 测试应使用 mock LLM，不消费真实模型请求。
+
+所有角色线程建立完成后，`Simulator` 必定向每个会场提交一条 completed 的
+`MeetingStartEvent`，避免代表与主席都等待第一条观察形成启动互锁：
+
+- `unchaired_core` / `free_discussion`：事件激活全体代表，不激活主席；
+- `chaired_core` / `recess`：事件只激活主席，代表只记录事件但不开始抢答；
+- `meeting_ended`：不再提交启动事件。
+
+主席不再执行不可审计的隐式开场轮次，而是像其他角色一样由这条权威事件激活。
+因此正常启动后的 `EventList` 至少包含 `meeting_start#0`；终端事件流也会立即显示它。
+
+正式命令行入口已经将这些 factory、随机种子、自动终局和运行存档统一装配：
+
+```bash
+python src/main.py serve scenario-template --seed run-001
+python src/main.py watch
+```
+
+时间终局条件由程序直接判断；所有文本终局条件在权威事件版本变化后合并为一次只读
+裁判请求。触发后会场提交 `meeting_ended` 阶段事件并协作停止。种子、终局理由和事件
+审计写入本次 `simulation/<run_id>/`，详见 [`runtime-service.md`](runtime-service.md)。
 
 ## 9. 当前边界
 

@@ -36,7 +36,9 @@
 ├── storyline.yaml            # 外部事件和结束条件
 ├── mechanism.py              # 0 字节预留文件,当前不参与场景加载
 └── simulation/               # 推演运行时输出;不参与场景内容加载
-    └── <YY-M-D-HH:MM>/       # 每次 initialize 新建;由 FileSystem 管理
+    └── <YY-M-D-HH:MM>[-N]/   # 每次 initialize 新建;同一分钟重复运行时追加序号
+        ├── run.json           # 种子、运行状态、终局与错误
+        ├── events.jsonl       # 系统管理员级全量事件审计
         ├── reps/<rep_id>/
         └── submissions/<venue_id>/   # 仅含代表提交副本:<primary_owner>+<原文件名>+v<版本号>
 ```
@@ -44,6 +46,10 @@
 `background.md` 和 `storyline.yaml` 使用固定文件名.venue 和代表文件分别通过扫描 `venues/*.yaml`,`reps/*.yaml` 发现,因此 `index.yaml` 不需要 `files`,`venues` 或 `representatives` 字段.
 
 `simulation/` 由通用引擎在 `Scenario.initialize()` 时创建并绑定一个 `FileSystem`;场景包作者不在此目录写入声明式内容.`initialize` 同时初始化场景统一剧情时钟,为每个 `Venue` 新建独立的 `EventList`,并将 `storyline.yaml` 载入的 `event_pool` 中所有 `type: time` 的外部事件经 `Scenario.pull_up_event` 挂入场景级待触发队列;`text` 条件事件暂不自动挂载.
+
+由 `MeetingRun` 启动时，服务另会原子刷新 `run.json` 与 `events.jsonl`。前者保存本局
+DM 随机种子、模型选择、当前/最终状态、终局理由和线程错误；后者保存全部权威事件。
+`events.jsonl` 可能含角色秘密，只用于系统审计，不属于公开会场接口。
 
 运行时文件可见性由程序强制执行:
 
@@ -59,9 +65,17 @@
 - 主席的当前议题切换和议题新增同样进入所属会场的命令队列,由 `VenueEngine` 顺序修改 `AgendaManager` 并提交 `SetAgendaEvent` / `AddAgendaEvent`;`AgendaManager` 的读取和短事务另由可重入锁保护.
 - 全场景剧情时钟由 `Scenario.update_time`(绝对时刻)或 `Scenario.time_pass`(相对时长)推进.时间条件外部事件到期后,`Scenario` 使用同一剧情时刻为每个会场分别生成并提交一份 `SystemEvent`.
 - `Simulator` 为全部 Agent 共享一个 `threading.Event` 停止信号.任一 Agent/VenueEngine 未捕获异常,Venue 命令超时,显式 `Simulator.stop()` 或 join 到期都会触发协作停止:Agent 停止继续 `step`,取消当前 LLM 流,VenuEngine 拒绝新命令并排空已接受命令.清理另有有限宽限期;运行线程使用 daemon 作为底层库永久阻塞且无法由 Python 安全中止时的最后进程退出保障.
+- 全部角色线程就绪后，`Simulator` 为每个非 `meeting_ended` 会场提交一条
+  `MeetingStartEvent`。它是运行时引擎事件，不由场景包作者预写：无主持/自由讨论阶段
+  激活全体代表；有主持/休会阶段只激活主席。该事件保证空 `EventList` 不会让所有角色
+  同时等待首个观察。
 - `VenueEngine` 在事件新建、字段编辑、状态裁定和议题操作成功后,按事件 scope 向各代表的 `AgentInbox` 投递不可变观察快照.普通观察以固定 300ms 窗口合并;结构性/直接/裁定观察可以中断当前 LLM 轮次.代表自己新建的事件不再次激活自己,但后续编辑或裁定仍会激活.完整说明见 [`agent-loop.md`](agent-loop.md).
 - 每名代表的 `AgentMemory` 与 `EventHistory` 都只接收该代表可见的信息.记忆以类别、重要度、来源事件和 active/resolved/superseded 状态保存;旧事件按确定性词项相关性检索并分段摘要.这些内容只影响 LLM 上下文,不参与权威状态裁定.无主持阶段通过 1 秒行动冷却、每轮 1 次公开发言/3 次会场行动以及每个公共波次一次回应的硬限制阻止自动回声循环.
 - 每个会场可由独立 `ChairAgent` 和 `DMAgent` 参与运行.主席只执行程序动作和决议裁定;点名通过 `ChairEvent.target_reps` 激活指定代表.代表主席与其 RepresentativeAgent 分离且主席工具单写,不会因主席身份获得超出该代表原事件 scope 的决议信息;纸条,私聊和指令始终不进入主席线程.指令以 pending 状态直接交给 DM,由 DM 在六档成功率中选择一档并用显式运行种子生成可复盘骰点,最终写为 completed/failed;accepted/rejected 只表示决议通过/拒绝.危机更新以显式 scope 的 `SystemEvent` 发布并记录来源事件 ID.
+- `Simulator` 的终局监视线程直接判断 `time` 结束条件；权威事件版本变化后，将所有
+  `text` 结束条件与必要会议记录合并交给只读 LLM 裁判。任一条件成立时，引擎先提交
+  `meeting_ended` 阶段事件，再协作停止全部线程。文本裁判失败不会伪造终局，会议继续
+  运行并退避重试。完整运行方式见 [`runtime-service.md`](runtime-service.md)。
 
 ## 3. 通用约定
 
@@ -370,7 +384,10 @@ end_conditions:
     content: "1944-10-10T10:00:00+03:00"
 ```
 
-任一结束条件成立时,引擎结束推演.场景包只描述"什么时候结束",不在这里编码终局类型,结果代码或状态转换.
+任一结束条件成立时,引擎提交 `meeting_ended` 阶段事件并结束推演.时间条件由程序直接
+判断；文本条件在权威事件发生新建、编辑或裁定后批量交给只读 LLM 裁判，裁判只报告
+真假、理由和证据事件 ID，不能直接修改会议。场景包只描述"什么时候结束",不在这里
+编码终局类型,结果代码或状态转换.
 
 ## 9. 跨文件不变量
 

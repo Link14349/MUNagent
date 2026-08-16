@@ -21,10 +21,12 @@ dev = [
 ]
 
 [project.scripts]
+munagent = "main:main"
 munagent-llm = "llm.llm:_main_entry"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
+py-modules = ["main"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

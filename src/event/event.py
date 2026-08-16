@@ -15,6 +15,7 @@ if TYPE_CHECKING:
 
 
 class EventType(StrEnum):
+    MEETING_START = "meeting_start"
     SYSTEM = "system"
     CHAIR = "chair"
     MOTION_SWITCH = "motion_switch"
@@ -283,6 +284,43 @@ class SystemEvent(Event):
     @action.setter
     def action(self, value: list[str]) -> None:
         self._edit("action", list(value))
+
+
+class MeetingStartEvent(Event):
+    """由 Simulator 在角色线程就绪后提交的确定性开场事件。
+
+    ``target_reps`` 决定哪些代表 Agent 被激活；``activates_chair`` 决定是否
+    唤醒主席 Agent。事件本身始终对会场全体席位可见并直接为 completed。
+    """
+
+    def __init__(
+        self,
+        content: str,
+        target_reps: set[str],
+        activates_chair: bool,
+        venue: str,
+        scenario: Scenario,
+    ) -> None:
+        seats = set(_venue_seats(scenario, venue))
+        targets = set(target_reps)
+        unknown = targets - seats
+        if unknown:
+            raise ValueError(
+                f"会议启动事件包含不属于会场 {venue!r} 的代表: {sorted(unknown)}"
+            )
+        super().__init__(content, venue, seats, scenario)
+        self._set_type(EventType.MEETING_START)
+        self.__target_reps = targets
+        self.__activates_chair = bool(activates_chair)
+        self._init_status(EventStatus.COMPLETED)
+
+    @property
+    def target_reps(self) -> set[str]:
+        return set(self.__target_reps)
+
+    @property
+    def activates_chair(self) -> bool:
+        return self.__activates_chair
 
 
 class ChairEvent(Event):
