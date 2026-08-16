@@ -101,6 +101,7 @@ class VenueEngine:
             self._publish_event(
                 update.event,
                 ObservationKind.EVENT_STATUS_CHANGED,
+                actor_id=update.actor_id,
             )
             self._set_result(update.result, status)
 

@@ -16,6 +16,7 @@ if TYPE_CHECKING:
 
 class EventType(StrEnum):
     SYSTEM = "system"
+    CHAIR = "chair"
     MOTION_SWITCH = "motion_switch"
     PHASE_SWITCH = "phase_switch"
     ADD_AGENDA = "add_agenda"
@@ -34,6 +35,15 @@ class EventStatus(StrEnum):
     FAILED = "failed"
     REJECTED = "rejected"
     ACCEPTED = "accepted"
+
+
+class ChairAction(StrEnum):
+    """主席向全场发出的程序性动作。"""
+
+    PROCEDURAL_NOTICE = "procedural_notice"
+    CALL_SPEAKER = "call_speaker"
+    REQUEST_VOTE = "request_vote"
+    DECIDE_RESOLUTION = "decide_resolution"
 
 
 class VotePassMode(StrEnum):
@@ -171,7 +181,11 @@ class Event:
         """仅供所属 EventList 在 VenueEngine 线程中落实状态命令."""
         with self.__lock:
             self._require_editable("status")
+            self._validate_status(status)
             self.__status = status
+
+    def _validate_status(self, status: EventStatus) -> None:
+        """子类可限制从 PENDING 离开时允许使用的终态。"""
 
     @property
     def time(self) -> datetime | None:
@@ -269,6 +283,57 @@ class SystemEvent(Event):
     @action.setter
     def action(self, value: list[str]) -> None:
         self._edit("action", list(value))
+
+
+class ChairEvent(Event):
+    """主席程序事件。
+
+    普通主持动作默认对全体席位可见；涉及私密指令的裁定可显式传入
+    ``scope``，避免扩大原提交的可见范围。``target_reps`` 只表示本次动作
+    需要哪些代表响应，由 Simulator 用它决定激活对象。
+    """
+
+    def __init__(
+        self,
+        content: str,
+        action: ChairAction | str,
+        target_reps: set[str],
+        venue: str,
+        scenario: Scenario,
+        *,
+        scope: set[str] | None = None,
+    ) -> None:
+        seats = set(_venue_seats(scenario, venue))
+        normalized_targets = {item.strip() for item in target_reps}
+        if "" in normalized_targets:
+            raise ValueError("target_reps 不能包含空代表 ID")
+        unknown = normalized_targets - seats
+        if unknown:
+            raise ValueError(
+                f"主席动作包含不属于会场 {venue!r} 的代表: {sorted(unknown)}"
+            )
+        event_scope = seats if scope is None else set(scope)
+        unknown_scope = event_scope - seats
+        if unknown_scope:
+            raise ValueError(
+                f"主席事件 scope 包含不属于会场 {venue!r} 的代表: "
+                f"{sorted(unknown_scope)}"
+            )
+        if not normalized_targets <= event_scope:
+            raise ValueError("ChairEvent.target_reps 必须位于事件 scope 内")
+        super().__init__(content, venue, event_scope, scenario)
+        self._set_type(EventType.CHAIR)
+        self.__action = ChairAction(action)
+        self.__target_reps = normalized_targets
+        self._init_status(EventStatus.COMPLETED)
+
+    @property
+    def action(self) -> ChairAction:
+        return self.__action
+
+    @property
+    def target_reps(self) -> set[str]:
+        return set(self.__target_reps)
 
 
 class MotionSwitchEvent(Event):
@@ -429,6 +494,17 @@ class InstructionEvent(Event):
         self.__instruction = instruction
         self.__from = set(fr)
 
+    def _validate_status(self, status: EventStatus) -> None:
+        if status not in {
+            EventStatus.PENDING,
+            EventStatus.COMPLETED,
+            EventStatus.FAILED,
+        }:
+            raise ValueError(
+                "InstructionEvent 状态只能由 DM 从 pending 更新为 "
+                "completed/failed，不能使用 accepted/rejected"
+            )
+
     @property
     def instruction(self) -> File:
         return self.__instruction
@@ -469,6 +545,16 @@ class ResolutionEvent(Event):
         self._set_type(EventType.RESOLUTION)
         self.__resolution = resolution
         self.__from = set(fr)
+
+    def _validate_status(self, status: EventStatus) -> None:
+        if status not in {
+            EventStatus.PENDING,
+            EventStatus.ACCEPTED,
+            EventStatus.REJECTED,
+        }:
+            raise ValueError(
+                "ResolutionEvent 状态只能从 pending 更新为 accepted/rejected"
+            )
 
     @property
     def resolution(self) -> File:

@@ -35,6 +35,9 @@ class CHAIR_POWER(StrEnum):
     DECIDE_SWITCH_PHASE = "decide_switch_phase"
 
 
+SYSTEM_CHAIR_ACTOR = "__chair__"
+
+
 @dataclass(frozen=True)
 class EventSubmission:
     event: Event
@@ -48,6 +51,7 @@ class EventStatusUpdate:
     event: Event
     status: EventStatus
     result: Future[EventStatus]
+    actor_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -159,6 +163,7 @@ class Venue:
     __event_failure: BaseException | None
     __event_thread_id: int | None
     command_timeout_s: float
+    chair_agent_managed: bool
 
     def __init__(self, scenario: Scenario):
         self.id = ""
@@ -182,6 +187,7 @@ class Venue:
         self.__event_failure = None
         self.__event_thread_id = None
         self.command_timeout_s = 30.0
+        self.chair_agent_managed = False
 
     def _find_rep(self, rep_id: str) -> Representative | None:
         return self.reps.get(rep_id) or self.scenario.reps.get(rep_id)
@@ -204,6 +210,14 @@ class Venue:
     def _require_chair_actor(
         self, rep_id: str, *, action: str = "发起议题操作"
     ) -> None:
+        if rep_id == SYSTEM_CHAIR_ACTOR:
+            return
+        if self.chair_agent_managed:
+            owner = self.__chair or "系统中立主席"
+            raise PermissionError(
+                f"会场 {self.id or '<unset>'} 的主席工具由 ChairAgent 单独持有"
+                f"(chair={owner!r})，代表线程不能{action}"
+            )
         if self.__chair is None:
             raise PermissionError(
                 f"会场 {self.id or '<unset>'} 当前为系统主席，代表不能{action}"
@@ -213,6 +227,10 @@ class Venue:
                 f"代表 {rep_id} 不是会场 {self.id or '<unset>'} 的主席"
                 f"(chair={self.__chair!r})，不能{action}"
             )
+
+    def chair_actor_id(self) -> str:
+        """主席事件对外显示的身份；中立主席使用系统标识。"""
+        return self.__chair or SYSTEM_CHAIR_ACTOR
 
     def _require_chair_power(
         self, rep_id: str, power: CHAIR_POWER, *, action: str
@@ -382,7 +400,13 @@ class Venue:
         with self.__event_submission_lock:
             return self.__event_failure
 
-    def _update_event_status(self, event: Event, status: EventStatus) -> EventStatus:
+    def _update_event_status(
+        self,
+        event: Event,
+        status: EventStatus,
+        *,
+        actor_id: str | None = None,
+    ) -> EventStatus:
         """将已入表事件的状态变更交给本会场 VenueEngine 顺序执行."""
         if event.venue != self.id:
             raise ValueError(
@@ -390,7 +414,7 @@ class Venue:
             )
         self._require_event_list()
         result: Future[EventStatus] = Future()
-        self._submit_command(EventStatusUpdate(event, status, result))
+        self._submit_command(EventStatusUpdate(event, status, result, actor_id))
         return self._wait_command_result(result, "event_status_update")
 
     def _edit_event(
@@ -515,10 +539,15 @@ class Venue:
         if command.agenda is previous:
             return None
         manager.set_current_agenda(command.agenda, finished=command.finished)
+        public_actor = (
+            self.chair_actor_id()
+            if command.rep_id == SYSTEM_CHAIR_ACTOR
+            else command.rep_id
+        )
         event = SetAgendaEvent(
-            f"主席 {command.rep_id} 将当前议题切换为 {command.agenda.id}",
+            f"主席 {public_actor} 将当前议题切换为 {command.agenda.id}",
             command.agenda,
-            command.rep_id,
+            public_actor,
             self.id,
             self._agenda_event_scope(),
             self.scenario,
@@ -548,10 +577,15 @@ class Venue:
 
         self._require_chair_actor(command.rep_id)
         self._require_agenda_manager().add_todo(command.agenda)
+        public_actor = (
+            self.chair_actor_id()
+            if command.rep_id == SYSTEM_CHAIR_ACTOR
+            else command.rep_id
+        )
         event = AddAgendaEvent(
-            f"主席 {command.rep_id} 追加议题 {command.agenda.id}",
+            f"主席 {public_actor} 追加议题 {command.agenda.id}",
             command.agenda,
-            command.rep_id,
+            public_actor,
             self.id,
             self._agenda_event_scope(),
             self.scenario,
@@ -594,7 +628,12 @@ class Venue:
             set(self.seats),
             self.scenario,
         )
-        event._set_submission_actor(rep_id)
+        public_actor = (
+            self.chair_actor_id()
+            if rep_id == SYSTEM_CHAIR_ACTOR
+            else rep_id
+        )
+        event._set_submission_actor(public_actor)
         self.submit_event(event)
         return event
 

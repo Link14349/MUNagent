@@ -36,6 +36,7 @@ class EventSnapshot:
     time: str
     scope: tuple[str, ...]
     attached_file: str | None = None
+    target_reps: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -103,6 +104,32 @@ class AgentInbox:
         """不等待，取走当前已积累的全部观察。"""
         with self.__condition:
             return self.__drain_locked()
+
+    def merge_during(
+        self,
+        initial: list[Observation],
+        *,
+        wait_s: float,
+    ) -> list[Observation] | None:
+        """在行动冷却期间保留原 batch，并合并新观察。
+
+        新到达的紧急观察会提前结束等待；返回 ``None`` 表示收件箱关闭。
+        """
+        if wait_s < 0:
+            raise ValueError(f"wait_s 须为非负数，实际为 {wait_s!r}")
+        if wait_s == 0:
+            return [*initial, *self.take_ready()]
+
+        with self.__condition:
+            deadline = time.monotonic() + wait_s
+            while not self.__contains_urgent_locked():
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                self.__condition.wait(timeout=remaining)
+                if self.__closed:
+                    return None
+            return [*initial, *self.__drain_locked()]
 
     def __contains_urgent_locked(self) -> bool:
         return any(

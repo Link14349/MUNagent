@@ -5,12 +5,30 @@ from __future__ import annotations
 import json
 from typing import Any, Callable
 
+from agent.memory import AgentMemory, MemoryCategory, MemoryStatus
 from agenda.agenda import Agenda
 from llm.types import ToolCall, ToolSpec
 from scenario.representative import Representative
 from scenario.venue import SessionPhase, VenueEngineStoppedError
 
 _PHASE_VALUES = [p.value for p in SessionPhase]
+_MEMORY_CATEGORY_VALUES = [category.value for category in MemoryCategory]
+_MEMORY_STATUS_VALUES = [status.value for status in MemoryStatus]
+_EVENT_ACTION_TOOL_NAMES = {
+    "send_message",
+    "pass_note",
+    "submit_motion_switch",
+    "submit_phase_switch",
+    "submit_instruction",
+    "submit_resolution",
+    "set_current_agenda",
+    "add_agenda",
+}
+_CHAIR_ONLY_TOOL_NAMES = {
+    "submit_phase_switch",
+    "set_current_agenda",
+    "add_agenda",
+}
 
 Handler = Callable[[Representative, dict[str, Any]], Any]
 
@@ -57,6 +75,14 @@ def _as_str_list(value: Any, *, field: str) -> list[str]:
     if isinstance(value, list) and all(isinstance(item, str) for item in value):
         return list(value)
     raise ValueError(f"{field} 须为字符串或字符串列表")
+
+
+def _as_int_list(value: Any, *, field: str) -> list[int]:
+    if not isinstance(value, list) or not all(
+        isinstance(item, int) and not isinstance(item, bool) for item in value
+    ):
+        raise ValueError(f"{field} 须为整数列表")
+    return list(value)
 
 
 def _resolve_file(rep: Representative, path: str):
@@ -539,30 +565,232 @@ REP_TOOL_SPECS: list[ToolSpec] = [
 ]
 
 
+MEMORY_TOOL_SPECS: list[ToolSpec] = [
+    _tool(
+        "remember",
+        "保存一条私有长期记忆；只记录策略、承诺、判断、问题、关系或重要事实",
+        {
+            "category": {
+                "type": "string",
+                "enum": _MEMORY_CATEGORY_VALUES,
+                "description": "记忆类别",
+            },
+            "content": {
+                "type": "string",
+                "maxLength": 500,
+                "description": "独立、明确、可在后续决策中复用的内容",
+            },
+            "importance": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 5,
+                "description": "重要度，5 最高",
+            },
+            "source_event_ids": {
+                "type": "array",
+                "items": {"type": "integer", "minimum": 0},
+                "description": "支持该记忆且对本代表可见的事件 ID",
+            },
+        },
+        ["category", "content", "importance", "source_event_ids"],
+    ),
+    _tool(
+        "revise_memory",
+        "修订、解决或标记已被取代的私有长期记忆",
+        {
+            "memory_id": {"type": "string", "description": "例如 m1"},
+            "content": {"type": "string", "maxLength": 500},
+            "importance": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 5,
+            },
+            "source_event_ids": {
+                "type": "array",
+                "items": {"type": "integer", "minimum": 0},
+            },
+            "status": {
+                "type": "string",
+                "enum": _MEMORY_STATUS_VALUES,
+            },
+        },
+        ["memory_id"],
+    ),
+    _tool(
+        "list_memories",
+        "列出本代表的私有长期记忆；默认返回全部状态",
+        {
+            "category": {
+                "type": "string",
+                "enum": _MEMORY_CATEGORY_VALUES,
+            },
+            "status": {
+                "type": "string",
+                "enum": _MEMORY_STATUS_VALUES,
+            },
+        },
+    ),
+]
+
+
 class RepresentativeToolExecutor:
     """分发代表工具并返回 JSON；VenueEngine 停止异常直接交给 Agent 结束线程."""
 
-    def __init__(self, rep: Representative) -> None:
+    def __init__(
+        self,
+        rep: Representative,
+        *,
+        memory: AgentMemory | None = None,
+    ) -> None:
         self.rep = rep
+        self.memory = memory
+        self.__successful_tools: list[str] = []
+        self.__public_message_limit: int | None = None
+        self.__event_action_limit: int | None = None
+        self.__public_message_count = 0
+        self.__event_action_count = 0
 
     @property
     def tool_specs(self) -> list[ToolSpec]:
-        return list(REP_TOOL_SPECS)
+        chair_managed = self.rep._require_venue().chair_agent_managed
+        specs = [
+            spec
+            for spec in REP_TOOL_SPECS
+            if not chair_managed or spec.name not in _CHAIR_ONLY_TOOL_NAMES
+        ]
+        if self.memory is not None:
+            specs.extend(MEMORY_TOOL_SPECS)
+        return specs
+
+    @property
+    def successful_tools(self) -> list[str]:
+        """当前 step 内成功执行的工具名，按执行顺序返回副本。"""
+        return list(self.__successful_tools)
+
+    def begin_turn(
+        self,
+        *,
+        public_message_limit: int | None = None,
+        event_action_limit: int | None = None,
+    ) -> None:
+        """重置本轮工具轨迹与硬行动预算。"""
+        if public_message_limit is not None and public_message_limit < 0:
+            raise ValueError("public_message_limit 不能为负数")
+        if event_action_limit is not None and event_action_limit < 0:
+            raise ValueError("event_action_limit 不能为负数")
+        self.__successful_tools = []
+        self.__public_message_limit = public_message_limit
+        self.__event_action_limit = event_action_limit
+        self.__public_message_count = 0
+        self.__event_action_count = 0
 
     def execute(self, call: ToolCall) -> str:
-        handler = _HANDLERS.get(call.name)
-        if handler is None:
-            return json.dumps(
-                _err(ValueError(f"未知工具: {call.name!r}")),
-                ensure_ascii=False,
-            )
         try:
             args = json.loads(call.arguments or "{}")
             if not isinstance(args, dict):
                 raise ValueError("工具参数必须是 JSON 对象")
-            payload = handler(self.rep, args)
+            self._require_action_budget(call.name)
+            if call.name in {"remember", "revise_memory", "list_memories"}:
+                payload = self._execute_memory_tool(call.name, args)
+            else:
+                handler = _HANDLERS.get(call.name)
+                if handler is None:
+                    raise ValueError(f"未知工具: {call.name!r}")
+                payload = handler(self.rep, args)
         except VenueEngineStoppedError:
             raise
         except Exception as exc:
             payload = _err(exc)
+        if payload.get("ok") is True:
+            self.__successful_tools.append(call.name)
+            if call.name == "send_message":
+                self.__public_message_count += 1
+            if call.name in _EVENT_ACTION_TOOL_NAMES:
+                self.__event_action_count += 1
         return json.dumps(payload, ensure_ascii=False)
+
+    def _require_action_budget(self, tool_name: str) -> None:
+        if (
+            tool_name == "send_message"
+            and self.__public_message_limit is not None
+            and self.__public_message_count >= self.__public_message_limit
+        ):
+            raise PermissionError(
+                "本轮公开发言额度已用尽；请等待新的实质性事件后再发言"
+            )
+        if (
+            tool_name in _EVENT_ACTION_TOOL_NAMES
+            and self.__event_action_limit is not None
+            and self.__event_action_count >= self.__event_action_limit
+        ):
+            raise PermissionError(
+                "本轮会场行动额度已用尽；请结束当前轮次并等待新事件"
+            )
+
+    def _execute_memory_tool(
+        self,
+        tool_name: str,
+        args: dict[str, Any],
+    ) -> dict[str, Any]:
+        memory = self.memory
+        if memory is None:
+            raise RuntimeError("当前 Agent 未绑定长期记忆")
+        if tool_name == "list_memories":
+            entries = memory.list_entries(
+                category=args.get("category"),
+                status=args.get("status"),
+            )
+            return _ok([entry.to_dict() for entry in entries])
+
+        source_ids = None
+        if "source_event_ids" in args:
+            source_ids = _as_int_list(
+                args["source_event_ids"],
+                field="source_event_ids",
+            )
+            self._require_visible_event_ids(source_ids)
+
+        if tool_name == "remember":
+            entry = memory.remember(
+                str(args["category"]),
+                str(args["content"]),
+                importance=int(args["importance"]),
+                source_event_ids=source_ids or [],
+            )
+            return _ok(entry.to_dict())
+
+        if tool_name == "revise_memory":
+            if not any(
+                field in args
+                for field in (
+                    "content",
+                    "importance",
+                    "source_event_ids",
+                    "status",
+                )
+            ):
+                raise ValueError("revise_memory 至少须提供一个要修改的字段")
+            entry = memory.revise(
+                str(args["memory_id"]),
+                content=str(args["content"]) if "content" in args else None,
+                importance=(
+                    int(args["importance"]) if "importance" in args else None
+                ),
+                source_event_ids=source_ids,
+                status=str(args["status"]) if "status" in args else None,
+            )
+            return _ok(entry.to_dict())
+        raise ValueError(f"未知记忆工具: {tool_name!r}")
+
+    def _require_visible_event_ids(self, event_ids: list[int]) -> None:
+        visible_ids = {
+            event.id
+            for event in self.rep._require_event_list().get_events(self.rep.id)
+            if event.id is not None
+        }
+        unknown = set(event_ids) - visible_ids
+        if unknown:
+            raise PermissionError(
+                f"source_event_ids 包含对代表 {self.rep.id} 不可见的事件: "
+                f"{sorted(unknown)}"
+            )

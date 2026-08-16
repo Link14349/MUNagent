@@ -6,12 +6,15 @@ import asyncio
 import threading
 from typing import TYPE_CHECKING
 
+from agent.activity import UnchairedActivityController
 from agent.inbox import AgentInbox, Observation, ObservationPriority
-from agent.rep_context import build_activation_prompt
+from agent.memory import AgentMemory, EventHistory
+from agent.rep_context import build_activation_prompt, snapshot_event
 from agent.rep_agent_tools import RepresentativeToolExecutor
 from agent.rep_prompt import build_representative_system_prompt
 from llm import ChatMessage, LLMCancelledError, TextDelta, ToolCallsDelta
 from scenario.representative import Representative
+from scenario.venue import SessionPhase
 
 if TYPE_CHECKING:
     from llm import LLM
@@ -40,6 +43,9 @@ class RepresentativeAgent:
     llm: LLM | None
     messages: list[ChatMessage]
     inbox: AgentInbox
+    memory: AgentMemory
+    history: EventHistory
+    activity: UnchairedActivityController
 
     def __init__(
         self,
@@ -49,7 +55,10 @@ class RepresentativeAgent:
         stop_event: threading.Event | None = None,
     ) -> None:
         self.rep = rep
-        self.tools = RepresentativeToolExecutor(rep)
+        self.memory = AgentMemory()
+        self.history = EventHistory()
+        self.tools = RepresentativeToolExecutor(rep, memory=self.memory)
+        self.activity = UnchairedActivityController()
         self.llm = llm
         self.__stop_event = stop_event or threading.Event()
         self.__step_lock = threading.Lock()
@@ -63,6 +72,8 @@ class RepresentativeAgent:
             content=build_representative_system_prompt(rep),
         )
         self.messages = [self.__system_message]
+        for event in rep._require_event_list().get_events(rep.id):
+            self.history.record_snapshot(snapshot_event(event))
 
     def run(self) -> None:
         """等待新观察；普通观察固定窗口合并,紧急观察立即开始新轮次."""
@@ -75,16 +86,42 @@ class RepresentativeAgent:
                 return
 
             while batch and not self.stop_requested:
-                if any(item.activates_agent for item in batch):
-                    prompt = build_activation_prompt(self.rep, batch)
+                self.memory.note_sequence(max(item.sequence for item in batch))
+                venue = self.rep._require_venue()
+                decision = self.activity.evaluate(venue.session_phase, batch)
+                if decision.should_activate and decision.delay_s > 0:
+                    merged = self.inbox.merge_during(
+                        batch,
+                        wait_s=decision.delay_s,
+                    )
+                    if merged is None:
+                        return
+                    batch = merged
+                    self.memory.note_sequence(max(item.sequence for item in batch))
+                    decision = self.activity.evaluate(venue.session_phase, batch)
+
+                if decision.should_activate:
+                    prompt = build_activation_prompt(
+                        self.rep,
+                        batch,
+                        memory=self.memory,
+                        history=self.history,
+                        activity_guidance=decision.guidance,
+                    )
                     try:
                         asyncio.run(self.step(prompt))
                     except AgentTurnInterrupted:
                         pass
+                    finally:
+                        self.activity.record_tools(
+                            venue.session_phase,
+                            self.tools.successful_tools,
+                        )
                 batch = self.inbox.take_ready()
 
     def notify(self, observation: Observation) -> bool:
         """投递观察；紧急且可激活的观察会取消正在进行的 LLM 轮次."""
+        self.history.record(observation)
         accepted = self.inbox.put(observation)
         if not accepted:
             return False
@@ -154,6 +191,14 @@ class RepresentativeAgent:
             self.__turn_active = True
 
         try:
+            unchaired = (
+                self.rep._require_venue().session_phase
+                == SessionPhase.UNCHAIRED_CORE
+            )
+            self.tools.begin_turn(
+                public_message_limit=1 if unchaired else None,
+                event_action_limit=3 if unchaired else None,
+            )
             self.messages = [
                 self.__system_message,
                 ChatMessage(role="user", content=content),

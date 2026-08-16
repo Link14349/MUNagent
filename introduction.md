@@ -10,8 +10,8 @@ MUNagent 是一个使用 Python 开发的历史委员会模拟推演项目.系�
 
 - 一个场景只有一个正式谈判会场;
 - 一名历史代表对应一个独立 Agent;
-- 先打通角色发言,完整提案,签署,外部事件和结束条件;
-- 多会场,跨会场通信和危机联动留到单会场闭环稳定后再设计.
+- 先打通角色发言,完整提案,主席调度,DM 危机推演,外部事件和结束条件;
+- 多会场,跨会场通信和跨会场危机联动留到单会场闭环稳定后再设计.
 
 目前仓库中的 `src/main.py` 仍是引擎入口骨架;`scenario-template/` 已先做成一份完整的单会场场景包,用它反推最小加载和运行接口.
 
@@ -38,7 +38,14 @@ scenario-template/
 
 运行时 `simulation/` 中的工作文件与提交副本同样受程序可见性约束:`reps/` 由 `scope`/`owner` 控制;`submissions/` 不对代表直接开放列表,代表只能通过所属会场的 `EventList` 里对其可见,并绑定了对应 `File` 的事件间接获知 submission.场景级 `FileSystem` 使用统一可重入锁串行处理文件索引,内容,权限,提交版本和 manifest 变更,落盘文件通过临时文件原子替换.`Scenario` 维护全会场统一的剧情时钟;每个 `Venue` 拥有独立的线程安全命令队列和 `EventList`,由对应 `VenueEngine` 顺序处理事件提交,事件字段编辑,状态裁定与议题变更.同一 VenueEngine 的 listener 不能同步等待本会场命令;命令超时或 VenueEngine 异常退出时,Venue 会停止接受新命令并让当前及排队命令失败.`Simulator` 使用场景级停止信号取消其他 Agent 的 LLM 流并协作结束全部线程.
 
-代表主循环采用事件驱动的线程安全 Inbox:普通观察在固定 300ms 窗口内批量合并,阶段/议题切换、系统事件、直接纸条和状态裁定会中断当前 LLM 轮次.完整事件仍由 `EventList` 永久保存;每次激活只构造当前状态、新观察、未决事项、最近事件和本轮工具记录组成的局部上下文,不再无限追加历次 assistant/tool 消息.具体设计见 [`docs/agent-loop.md`](docs/agent-loop.md).
+代表主循环采用事件驱动的线程安全 Inbox:普通观察在固定 300ms 窗口内批量合并,阶段/议题切换、系统事件、直接纸条和状态裁定会中断当前 LLM 轮次.完整事件仍由 `EventList` 永久保存;每次激活动态装配当前状态、新观察、结构化私有记忆、未决事项、相关旧事件、历史摘要和本轮工具记录,不再无限追加历次 assistant/tool 消息.无主持阶段另有行动冷却、单轮硬预算和公共讨论波次额度,程序上阻止 Agent 互相无限回应.具体设计见 [`docs/agent-loop.md`](docs/agent-loop.md).
+
+每个会场另有主席 Agent 与 DM Agent.主席 Agent 分为中立主席和代表主席两种模式,
+只持有程序、点名、议程、表决与裁定工具;代表主席不因此扩大原代表的信息可见范围.
+DM Agent 直接接收 pending 指令,先按六档成功率判断可行性,再用显式运行种子产生
+可复盘骰点并将结果写为 completed/failed;accepted/rejected 只用于主席或表决裁定的
+决议.DM 还可推进剧情时间并按显式 scope 发布带来源事件 ID 的危机更新.三类 Agent
+使用独立线程与局部上下文,由同一 Simulator 监督和协作停止.
 
 两个区块内都使用局部字段名 `target`,即 `public.target` 与 `private.target`.可见性已经由父级区块表达,不再使用 `public_target`,`private_target` 或 `priorities` 等重复命名.
 

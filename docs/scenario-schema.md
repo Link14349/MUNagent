@@ -60,6 +60,8 @@
 - 全场景剧情时钟由 `Scenario.update_time`(绝对时刻)或 `Scenario.time_pass`(相对时长)推进.时间条件外部事件到期后,`Scenario` 使用同一剧情时刻为每个会场分别生成并提交一份 `SystemEvent`.
 - `Simulator` 为全部 Agent 共享一个 `threading.Event` 停止信号.任一 Agent/VenueEngine 未捕获异常,Venue 命令超时,显式 `Simulator.stop()` 或 join 到期都会触发协作停止:Agent 停止继续 `step`,取消当前 LLM 流,VenuEngine 拒绝新命令并排空已接受命令.清理另有有限宽限期;运行线程使用 daemon 作为底层库永久阻塞且无法由 Python 安全中止时的最后进程退出保障.
 - `VenueEngine` 在事件新建、字段编辑、状态裁定和议题操作成功后,按事件 scope 向各代表的 `AgentInbox` 投递不可变观察快照.普通观察以固定 300ms 窗口合并;结构性/直接/裁定观察可以中断当前 LLM 轮次.代表自己新建的事件不再次激活自己,但后续编辑或裁定仍会激活.完整说明见 [`agent-loop.md`](agent-loop.md).
+- 每名代表的 `AgentMemory` 与 `EventHistory` 都只接收该代表可见的信息.记忆以类别、重要度、来源事件和 active/resolved/superseded 状态保存;旧事件按确定性词项相关性检索并分段摘要.这些内容只影响 LLM 上下文,不参与权威状态裁定.无主持阶段通过 1 秒行动冷却、每轮 1 次公开发言/3 次会场行动以及每个公共波次一次回应的硬限制阻止自动回声循环.
+- 每个会场可由独立 `ChairAgent` 和 `DMAgent` 参与运行.主席只执行程序动作和决议裁定;点名通过 `ChairEvent.target_reps` 激活指定代表.代表主席与其 RepresentativeAgent 分离且主席工具单写,不会因主席身份获得超出该代表原事件 scope 的决议信息;纸条,私聊和指令始终不进入主席线程.指令以 pending 状态直接交给 DM,由 DM 在六档成功率中选择一档并用显式运行种子生成可复盘骰点,最终写为 completed/failed;accepted/rejected 只表示决议通过/拒绝.危机更新以显式 scope 的 `SystemEvent` 发布并记录来源事件 ID.
 
 ## 3. 通用约定
 
@@ -168,6 +170,11 @@ venue 的 seats 和角色关系中使用的 `winston_churchill` 都指向该文�
 - `none`:使用系统提供的中立主席;
 - 代表 ID:由该代表担任会场主席,该 ID 必须同时出现在 `seats`.
 
+运行时两种配置都会创建独立 ChairAgent.代表主席仍保留 RepresentativeAgent 处理
+政治行动;ChairAgent 继承该代表自身角色约束与长期记忆,但只拥有主席工具,且只能
+读取该代表本来就在 scope 内的正式决议.指令始终交给 DMAgent,不由主席读取或裁定.
+若希望代表主席裁定一份私密决议,提交范围必须包含该主席代表 ID.
+
 `powers` 必须声明下列全部键(不得缺省,不得出现未知键):
 
 | 键 | 说明 |
@@ -232,7 +239,7 @@ venue 不包含 `kind`,`procedure`,`decision_document` 或 `information_policy`.
 | `delegation` | `str` | 是 | 代表团 ID |
 | `role` | `str` | 是 | 会场功能 |
 | `public` | `object` | 是 | 全会场可知的角色信息 |
-| `private` | `object` | 是 | 仅本角色及主席组件可知的信息 |
+| `private` | `object` | 是 | 仅本角色可知;该角色担任主席时,其 ChairAgent 同属该人物并可使用 |
 | `persona` | `object` | 是 | 扮演风格,不直接授予权力 |
 | `agent_directive` | `str` | 是 | 该 Agent 的行动边界和重点提醒 |
 
