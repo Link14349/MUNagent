@@ -214,6 +214,7 @@ class Representative:
 
         venue = self._require_venue()
         event = MessageEvent(content, self.id, venue.id, venue.scenario)
+        event._set_submission_actor(self.id)
         venue.submit_event(event)
         return event
 
@@ -224,6 +225,7 @@ class Representative:
         venue = self._require_venue()
         recipients = self._resolve_seat_ids(to, field="传纸条收件人")
         event = NoteEvent(content, self.id, recipients, venue.id, venue.scenario)
+        event._set_submission_actor(self.id)
         venue.submit_event(event)
         return event
 
@@ -241,6 +243,7 @@ class Representative:
             set(venue.seats),
             venue.scenario,
         )
+        event._set_submission_actor(self.id)
         venue.submit_event(event)
         return event
 
@@ -272,6 +275,7 @@ class Representative:
         event = InstructionEvent(
             content, from_reps, submitted, venue.id, venue.scenario
         )
+        event._set_submission_actor(self.id)
         venue.submit_event(event)
         return event
 
@@ -291,5 +295,6 @@ class Representative:
         event = ResolutionEvent(
             content, from_reps, submitted, venue.id, venue.scenario
         )
+        event._set_submission_actor(self.id)
         venue.submit_event(event)
         return event

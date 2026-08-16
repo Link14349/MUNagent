@@ -59,6 +59,7 @@
 - 主席的当前议题切换和议题新增同样进入所属会场的命令队列,由 `VenueEngine` 顺序修改 `AgendaManager` 并提交 `SetAgendaEvent` / `AddAgendaEvent`;`AgendaManager` 的读取和短事务另由可重入锁保护.
 - 全场景剧情时钟由 `Scenario.update_time`(绝对时刻)或 `Scenario.time_pass`(相对时长)推进.时间条件外部事件到期后,`Scenario` 使用同一剧情时刻为每个会场分别生成并提交一份 `SystemEvent`.
 - `Simulator` 为全部 Agent 共享一个 `threading.Event` 停止信号.任一 Agent/VenueEngine 未捕获异常,Venue 命令超时,显式 `Simulator.stop()` 或 join 到期都会触发协作停止:Agent 停止继续 `step`,取消当前 LLM 流,VenuEngine 拒绝新命令并排空已接受命令.清理另有有限宽限期;运行线程使用 daemon 作为底层库永久阻塞且无法由 Python 安全中止时的最后进程退出保障.
+- `VenueEngine` 在事件新建、字段编辑、状态裁定和议题操作成功后,按事件 scope 向各代表的 `AgentInbox` 投递不可变观察快照.普通观察以固定 300ms 窗口合并;结构性/直接/裁定观察可以中断当前 LLM 轮次.代表自己新建的事件不再次激活自己,但后续编辑或裁定仍会激活.完整说明见 [`agent-loop.md`](agent-loop.md).
 
 ## 3. 通用约定
 

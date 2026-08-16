@@ -2,15 +2,28 @@ from __future__ import annotations
 
 import threading
 import time
+from collections.abc import Callable
 from typing import TYPE_CHECKING
 
+from agent.inbox import (
+    Observation,
+    ObservationKind,
+    ObservationPriority,
+)
 from agent.rep_agent import AgentStoppedError, RepresentativeAgent
+from agent.rep_context import snapshot_event
 from engine.venue_engine import VenueEngine
+from event.event import EventType
 from scenario.scenario import Scenario
 
 if TYPE_CHECKING:
+    from event.event import Event
+    from llm import LLM
     from scenario.representative import Representative
     from scenario.venue import Venue
+
+
+LLMFactory = Callable[["Representative"], "LLM | None"]
 
 
 class Simulator:
@@ -26,8 +39,15 @@ class Simulator:
     __started: bool
     __stop_event: threading.Event
     __state_lock: threading.RLock
+    __llm_factory: LLMFactory | None
+    __observation_sequences: dict[str, int]
 
-    def __init__(self, scenario: Scenario) -> None:
+    def __init__(
+        self,
+        scenario: Scenario,
+        *,
+        llm_factory: LLMFactory | None = None,
+    ) -> None:
         self.scenario = scenario
         self.__venue_engines = {}
         self.__venue_threads = {}
@@ -38,6 +58,8 @@ class Simulator:
         self.__started = False
         self.__stop_event = threading.Event()
         self.__state_lock = threading.RLock()
+        self.__llm_factory = llm_factory
+        self.__observation_sequences = {}
         self.shutdown_grace_s = 5.0
 
     @property
@@ -98,6 +120,7 @@ class Simulator:
         with self.__state_lock:
             self.__venue_errors = {}
             self.__agent_errors = {}
+            self.__observation_sequences = {}
         self.__stop_event.clear()
         self.__started = True
         try:
@@ -198,7 +221,12 @@ class Simulator:
     def _start_agent_thread(self, rep: Representative) -> None:
         if rep.id in self.__agent_threads:
             raise RuntimeError(f"代表 {rep.id!r} 的 Agent 线程已存在,不能重复启动")
-        agent = RepresentativeAgent(rep, stop_event=self.__stop_event)
+        llm = self.__llm_factory(rep) if self.__llm_factory is not None else None
+        agent = RepresentativeAgent(
+            rep,
+            llm=llm,
+            stop_event=self.__stop_event,
+        )
         thread = threading.Thread(
             target=self._run_agent,
             args=(agent,),
@@ -209,6 +237,59 @@ class Simulator:
             self.__agents[rep.id] = agent
             self.__agent_threads[rep.id] = thread
         thread.start()
+
+    def _publish_event_observation(
+        self,
+        event: Event,
+        kind: ObservationKind,
+        *,
+        actor_id: str | None = None,
+        recipients: set[str] | None = None,
+        changed_field: str | None = None,
+    ) -> None:
+        """将一次已提交的权威状态变化投递给当时可见的代表。"""
+        snapshot = snapshot_event(event)
+        target_ids = set(event.scope) if recipients is None else set(recipients)
+        with self.__state_lock:
+            sequence = self.__observation_sequences.get(event.venue, 0) + 1
+            self.__observation_sequences[event.venue] = sequence
+            targets = {
+                rep_id: self.__agents[rep_id]
+                for rep_id in target_ids
+                if rep_id in self.__agents
+            }
+
+        for rep_id, agent in targets.items():
+            activates_agent = not (
+                kind == ObservationKind.EVENT_CREATED and actor_id == rep_id
+            )
+            agent.notify(
+                Observation(
+                    sequence=sequence,
+                    kind=kind,
+                    priority=self._observation_priority(event.type, kind),
+                    activates_agent=activates_agent,
+                    event=snapshot,
+                    actor_id=actor_id,
+                    changed_field=changed_field,
+                )
+            )
+
+    @staticmethod
+    def _observation_priority(
+        event_type: EventType,
+        kind: ObservationKind,
+    ) -> ObservationPriority:
+        if kind == ObservationKind.EVENT_STATUS_CHANGED:
+            return ObservationPriority.URGENT
+        if event_type in {
+            EventType.SYSTEM,
+            EventType.PHASE_SWITCH,
+            EventType.SET_AGENDA,
+            EventType.NOTE,
+        }:
+            return ObservationPriority.URGENT
+        return ObservationPriority.NORMAL
 
     def _run_venue(self, engine: VenueEngine) -> None:
         try:

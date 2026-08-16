@@ -79,6 +79,7 @@ class Event:
         self.__status = EventStatus.PENDING
         self.__type: EventType | None = None
         self.__submission_claimed = False
+        self.__submission_actor_id: str | None = None
         self.__lock = threading.RLock()
 
     def _require_editable(self, field: str) -> None:
@@ -125,6 +126,29 @@ class Event:
             if self.__submission_claimed:
                 raise PermissionError("同一事件不能重复提交")
             self.__submission_claimed = True
+
+    def _set_submission_actor(self, actor_id: str) -> None:
+        """记录代表行动来源；仅供提交前的 Representative/Venue 调度使用。"""
+        normalized = actor_id.strip()
+        if not normalized:
+            raise ValueError("事件提交 actor_id 须为非空代表 ID")
+        with self.__lock:
+            if self.__submission_claimed:
+                raise PermissionError("事件进入提交队列后不能修改 actor_id")
+            if (
+                self.__submission_actor_id is not None
+                and self.__submission_actor_id != normalized
+            ):
+                raise PermissionError(
+                    f"事件 actor_id 已设为 {self.__submission_actor_id!r},"
+                    f"不能改为 {normalized!r}"
+                )
+            self.__submission_actor_id = normalized
+
+    @property
+    def _submission_actor(self) -> str | None:
+        with self.__lock:
+            return self.__submission_actor_id
 
     def _release_submission_claim(self) -> None:
         """仅在命令尚未入队时回滚提交声明."""

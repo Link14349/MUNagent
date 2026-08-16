@@ -112,7 +112,7 @@ await llm.complete(messages, on_delta=on_delta)
 
 ## 停止输出
 
-任意时刻调用 `llm.stop()` 可中断当前流式请求.停止后,`stream()` / `complete()` 抛出 `LLMCancelledError`.
+任意时刻调用 `llm.stop()` 可中断当前流式请求.停止后,`stream()` / `complete()` 抛出 `LLMCancelledError`.若流运行在另一 Agent 线程中,`stop()` 会通过对应 asyncio 事件循环线程安全地取消活跃任务,不必等待服务端发送下一条 SSE 数据;同一个 `LLM` 实例不允许并发运行多个 `stream()`.
 
 ```python
 import asyncio

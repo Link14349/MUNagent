@@ -4,6 +4,7 @@ from concurrent.futures import Future, InvalidStateError
 import threading
 from typing import TYPE_CHECKING
 
+from agent.inbox import ObservationKind
 from scenario.venue import (
     AgendaAddition,
     AgendaSwitch,
@@ -16,6 +17,7 @@ from scenario.venue import (
 
 if TYPE_CHECKING:
     from engine.simulator import Simulator
+    from event.event import Event
     from scenario.venue import Venue
 
 
@@ -81,6 +83,11 @@ class VenueEngine:
         except Exception as exc:
             self._set_exception(submission.result, exc)
         else:
+            self._publish_event(
+                submission.event,
+                ObservationKind.EVENT_CREATED,
+                actor_id=submission.actor_id,
+            )
             self._set_result(submission.result, submission.event)
 
     def _process_event_status(self, update: EventStatusUpdate) -> None:
@@ -91,37 +98,79 @@ class VenueEngine:
         except Exception as exc:
             self._set_exception(update.result, exc)
         else:
+            self._publish_event(
+                update.event,
+                ObservationKind.EVENT_STATUS_CHANGED,
+            )
             self._set_result(update.result, status)
 
     def _process_event_edit(self, edit: EventEdit) -> None:
         if not self._start_result(edit.result):
             return
+        previous_scope = edit.event.scope
         try:
             self.venue._commit_event_edit(edit)
         except Exception as exc:
             self._set_exception(edit.result, exc)
         else:
+            self._publish_event(
+                edit.event,
+                ObservationKind.EVENT_EDITED,
+                recipients=previous_scope | edit.event.scope,
+                changed_field=edit.field,
+            )
             self._set_result(edit.result, None)
 
     def _process_agenda_switch(self, command: AgendaSwitch) -> None:
         if not self._start_result(command.result):
             return
         try:
-            self.venue._commit_agenda_switch(command)
+            event = self.venue._commit_agenda_switch(command)
         except Exception as exc:
             self._set_exception(command.result, exc)
         else:
+            if event is not None:
+                self._publish_event(
+                    event,
+                    ObservationKind.EVENT_CREATED,
+                    actor_id=command.rep_id,
+                )
             self._set_result(command.result, None)
 
     def _process_agenda_addition(self, command: AgendaAddition) -> None:
         if not self._start_result(command.result):
             return
         try:
-            self.venue._commit_agenda_addition(command)
+            event = self.venue._commit_agenda_addition(command)
         except Exception as exc:
             self._set_exception(command.result, exc)
         else:
+            self._publish_event(
+                event,
+                ObservationKind.EVENT_CREATED,
+                actor_id=command.rep_id,
+            )
             self._set_result(command.result, None)
+
+    def _publish_event(
+        self,
+        event: Event,
+        kind: ObservationKind,
+        *,
+        actor_id: str | None = None,
+        recipients: set[str] | None = None,
+        changed_field: str | None = None,
+    ) -> None:
+        """通知 Simulator；独立 VenueEngine 单元测试可不绑定 Simulator。"""
+        if self.simulator is None:
+            return
+        self.simulator._publish_event_observation(
+            event,
+            kind,
+            actor_id=actor_id,
+            recipients=recipients,
+            changed_field=changed_field,
+        )
 
     @staticmethod
     def _start_result(result: Future[object]) -> bool:

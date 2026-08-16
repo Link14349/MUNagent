@@ -56,6 +56,9 @@ class LLM:
         self._max_retries = max_retries
         self._transport = transport
         self._stop_event = threading.Event()
+        self._active_stream_lock = threading.Lock()
+        self._active_stream_loop: asyncio.AbstractEventLoop | None = None
+        self._active_stream_task: asyncio.Task[Any] | None = None
 
     @staticmethod
     def _normalize_base_url(base_url: str) -> str:
@@ -109,6 +112,15 @@ class LLM:
     def stop(self) -> None:
         """停止当前流式请求; 可在另一线程/协程中调用."""
         self._stop_event.set()
+        with self._active_stream_lock:
+            loop = self._active_stream_loop
+            task = self._active_stream_task
+        if loop is not None and task is not None:
+            try:
+                loop.call_soon_threadsafe(task.cancel)
+            except RuntimeError:
+                # 事件循环恰在流收尾时关闭；stop_event 仍会作为兜底被检查。
+                pass
 
     async def stream(
         self,
@@ -137,49 +149,80 @@ class LLM:
             pool=10.0,
         )
 
-        self._stop_event.clear()
-        last_exc: Exception | None = None
+        loop = asyncio.get_running_loop()
+        task = asyncio.current_task()
+        if task is None:
+            raise RuntimeError("LLM.stream 必须在 asyncio Task 中运行")
+        with self._active_stream_lock:
+            if self._active_stream_task is not None:
+                raise RuntimeError("同一个 LLM 实例不能并发执行多个 stream")
+            self._stop_event.clear()
+            self._active_stream_loop = loop
+            self._active_stream_task = task
 
-        for attempt in range(self._max_retries):
-            parser = ChunkParser()
-            yielded = False
-            try:
-                async with httpx.AsyncClient(timeout=timeout, transport=self._transport) as client:
-                    async with client.stream("POST", url, json=payload, headers=headers) as resp:
-                        resp.raise_for_status()
-                        async for line in resp.aiter_lines():
-                            if self._stop_event.is_set():
-                                raise LLMCancelledError("流式输出已停止")
-                            if not line.startswith("data:"):
-                                continue
-                            data = line[len("data:") :].strip()
-                            if data == "[DONE]":
-                                break
-                            for delta in parser.feed(json.loads(data)):
-                                yielded = True
-                                if on_delta is not None:
-                                    on_delta(delta)
-                                yield delta
-                for delta in parser.finish():
-                    yielded = True
-                    if on_delta is not None:
-                        on_delta(delta)
-                    yield delta
-                if self._stop_event.is_set():
-                    raise LLMCancelledError("流式输出已停止")
-                return
-            except LLMCancelledError:
-                raise
-            except (httpx.HTTPStatusError, httpx.TimeoutException, httpx.TransportError) as exc:
-                if yielded:
-                    raise RuntimeError(_format_http_error(exc)) from exc
-                last_exc = exc
-                if attempt + 1 >= self._max_retries:
-                    break
-                await asyncio.sleep(2**attempt)
+        try:
+            last_exc: Exception | None = None
+            for attempt in range(self._max_retries):
+                parser = ChunkParser()
+                yielded = False
+                try:
+                    async with httpx.AsyncClient(
+                        timeout=timeout,
+                        transport=self._transport,
+                    ) as client:
+                        async with client.stream(
+                            "POST",
+                            url,
+                            json=payload,
+                            headers=headers,
+                        ) as resp:
+                            resp.raise_for_status()
+                            async for line in resp.aiter_lines():
+                                if self._stop_event.is_set():
+                                    raise LLMCancelledError("流式输出已停止")
+                                if not line.startswith("data:"):
+                                    continue
+                                data = line[len("data:") :].strip()
+                                if data == "[DONE]":
+                                    break
+                                for delta in parser.feed(json.loads(data)):
+                                    yielded = True
+                                    if on_delta is not None:
+                                        on_delta(delta)
+                                    yield delta
+                    for delta in parser.finish():
+                        yielded = True
+                        if on_delta is not None:
+                            on_delta(delta)
+                        yield delta
+                    if self._stop_event.is_set():
+                        raise LLMCancelledError("流式输出已停止")
+                    return
+                except LLMCancelledError:
+                    raise
+                except (
+                    httpx.HTTPStatusError,
+                    httpx.TimeoutException,
+                    httpx.TransportError,
+                ) as exc:
+                    if yielded:
+                        raise RuntimeError(_format_http_error(exc)) from exc
+                    last_exc = exc
+                    if attempt + 1 >= self._max_retries:
+                        break
+                    await asyncio.sleep(2**attempt)
 
-        assert last_exc is not None
-        raise RuntimeError(_format_http_error(last_exc)) from last_exc
+            assert last_exc is not None
+            raise RuntimeError(_format_http_error(last_exc)) from last_exc
+        except asyncio.CancelledError as exc:
+            if self._stop_event.is_set():
+                raise LLMCancelledError("流式输出已停止") from exc
+            raise
+        finally:
+            with self._active_stream_lock:
+                if self._active_stream_task is task:
+                    self._active_stream_loop = None
+                    self._active_stream_task = None
 
     async def complete(
         self,

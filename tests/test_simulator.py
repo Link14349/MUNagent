@@ -8,6 +8,7 @@ import threading
 import pytest
 
 from agent.rep_agent import RepresentativeAgent
+from agent.inbox import ObservationKind, ObservationPriority
 from engine.simulator import Simulator
 from engine.venue_engine import VenueEngine
 from scenario.scenario import Scenario
@@ -85,6 +86,64 @@ def test_simulator_agents_submit_through_running_venue_engine(
     assert len(events) == len(scenario.representatives)
     assert sorted(event.id for event in events if event.id is not None) == list(
         range(len(scenario.representatives))
+    )
+
+
+def test_venue_engine_publishes_observations_without_self_activation(
+    scenario: Scenario,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    received = []
+
+    def record(self: RepresentativeAgent, observation) -> bool:
+        received.append((self.rep.id, observation))
+        return True
+
+    monkeypatch.setattr(RepresentativeAgent, "notify", record)
+    sim = Simulator(scenario)
+    sim.start()
+
+    event = scenario.reps["winston_churchill"].submit_motion_switch(
+        "提议进入无主持核心磋商",
+        "unchaired_core",
+    )
+    event.content = "修订：提议立即进入无主持核心磋商"
+    event.status = "accepted"
+    sim.stop()
+    sim.join(timeout=2.0)
+
+    created = [
+        item for item in received if item[1].kind == ObservationKind.EVENT_CREATED
+    ]
+    status_updates = [
+        item
+        for item in received
+        if item[1].kind == ObservationKind.EVENT_STATUS_CHANGED
+    ]
+    edits = [
+        item for item in received if item[1].kind == ObservationKind.EVENT_EDITED
+    ]
+    assert {rep_id for rep_id, _ in created} == set(scenario.venues[0].seats)
+    assert len({observation.sequence for _, observation in created}) == 1
+    own = next(
+        observation
+        for rep_id, observation in created
+        if rep_id == "winston_churchill"
+    )
+    assert own.actor_id == "winston_churchill"
+    assert own.activates_agent is False
+    assert all(
+        observation.activates_agent
+        for rep_id, observation in created
+        if rep_id != "winston_churchill"
+    )
+    assert len(edits) == len(scenario.venues[0].seats)
+    assert all(observation.changed_field == "content" for _, observation in edits)
+    assert all("修订" in observation.event.content for _, observation in edits)
+    assert len(status_updates) == len(scenario.venues[0].seats)
+    assert all(
+        observation.priority == ObservationPriority.URGENT
+        for _, observation in status_updates
     )
 
 

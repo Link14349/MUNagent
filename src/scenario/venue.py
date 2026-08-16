@@ -40,6 +40,7 @@ class EventSubmission:
     event: Event
     time: datetime
     result: Future[Event]
+    actor_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -299,7 +300,13 @@ class Venue:
         event_time = self.scenario._event_submission_time(event)
         return self._submit_event(event, event_time)
 
-    def _submit_event(self, event: Event, event_time: datetime) -> Event:
+    def _submit_event(
+        self,
+        event: Event,
+        event_time: datetime,
+        *,
+        actor_id: str | None = None,
+    ) -> Event:
         """按指定剧情时间入队；仅供 Scenario 广播定时事件时使用."""
         if event.venue != self.id:
             raise ValueError(
@@ -308,7 +315,12 @@ class Venue:
         self._require_event_list()
         self._require_event_queue()
         result: Future[Event] = Future()
-        submission = EventSubmission(event, event_time, result)
+        submission = EventSubmission(
+            event,
+            event_time,
+            result,
+            actor_id if actor_id is not None else event._submission_actor,
+        )
         self._submit_command(submission)
         return self._wait_command_result(result, "event_submission")
 
@@ -493,7 +505,7 @@ class Venue:
         )
         self._wait_command_result(result, "agenda_switch")
 
-    def _commit_agenda_switch(self, command: AgendaSwitch) -> None:
+    def _commit_agenda_switch(self, command: AgendaSwitch) -> Event | None:
         """由 VenueEngine 修改议题状态并提交对应 SetAgendaEvent."""
         from event.event import SetAgendaEvent
 
@@ -501,7 +513,7 @@ class Venue:
         manager = self._require_agenda_manager()
         previous = manager.current_agenda
         if command.agenda is previous:
-            return
+            return None
         manager.set_current_agenda(command.agenda, finished=command.finished)
         event = SetAgendaEvent(
             f"主席 {command.rep_id} 将当前议题切换为 {command.agenda.id}",
@@ -515,6 +527,7 @@ class Venue:
         )
         self.scenario._stamp_event(event, command.time)
         self._require_event_list()._commit_event(event)
+        return event
 
     def add_agenda(self, rep_id: str, agenda: Agenda) -> None:
         """将主席的议题新增命令交给 VenueEngine 顺序执行并记录事件."""
@@ -529,7 +542,7 @@ class Venue:
         )
         self._wait_command_result(result, "agenda_addition")
 
-    def _commit_agenda_addition(self, command: AgendaAddition) -> None:
+    def _commit_agenda_addition(self, command: AgendaAddition) -> Event:
         """由 VenueEngine 修改议题状态并提交对应 AddAgendaEvent."""
         from event.event import AddAgendaEvent
 
@@ -545,6 +558,7 @@ class Venue:
         )
         self.scenario._stamp_event(event, command.time)
         self._require_event_list()._commit_event(event)
+        return event
 
     @property
     def session_phase(self) -> SessionPhase | None:
@@ -580,6 +594,7 @@ class Venue:
             set(self.seats),
             self.scenario,
         )
+        event._set_submission_actor(rep_id)
         self.submit_event(event)
         return event
 
